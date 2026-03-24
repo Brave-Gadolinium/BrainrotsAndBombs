@@ -1,0 +1,37 @@
+local Constants = {
+	INCOME_SCALING = 1.125,
+	RECYCLE_MIN_TIME = 30,
+	RECYCLE_MAX_TIME = 90,
+	RESPAWN_TIME = 30,
+	DROPPED_LIFETIME = 30,
+	MAX_ITEMS_PER_MINE = 15,
+	MIN_ITEM_SPACING = 4.5,
+	
+	SPAWNER_TIERS = {
+		["1"] = { Common = 75, Uncommon = 25 },
+		["2"] = { Uncommon = 60, Rare = 30, Epic = 10 },
+		["3"] = { Rare = 40, Epic = 40, Legendary = 20 },
+		["4"] = { Epic = 30, Legendary = 50, Mythical = 20 },
+		["5"] = { Epic = 10, Legendary = 40, Mythical = 50 },
+	},
+	
+	DEFAULT_CHANCE = { Common = 100 },
+
+	MUTATIONS = {
+		{Name = "Neon", Chance = 100},
+		{Name = "Ruby", Chance = 50},
+		{Name = "Diamond", Chance = 25},
+		{Name = "Golden", Chance = 10},
+	},
+
+	MUTATION_MULTIPLIERS = {
+		["Normal"] = 1,
+		["Golden"] = 2,
+		["Diamond"] = 3,
+		["Ruby"] = 4,
+		["Neon"] = 5,
+	},
+
+}
+
+return Constants

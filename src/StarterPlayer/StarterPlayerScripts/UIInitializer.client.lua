@@ -1,0 +1,152 @@
+--!strict
+-- LOCATION: StarterPlayerScripts/UIInitializer
+
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local StarterGui = game:GetService("StarterGui")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
+
+-- Modules
+local FrameManager = require(ReplicatedStorage.Modules.FrameManager)
+
+local UIInitializer = {}
+
+-- [ CONFIGURATION ]
+local DEBOUNCE_TIME = 0.5
+local CLOSE_DISTANCE = 15 -- Studs for Touch Zones
+
+-- Animation Config
+local HOVER_SCALE = 1.1
+local CLICK_SCALE = 0.95
+local TWEEN_INFO = TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+
+-- [ REFERENCES ]
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+local mainGui = playerGui:WaitForChild("GUI") 
+local framesContainer = mainGui:WaitForChild("Frames")
+local hudGui = mainGui:WaitForChild("HUD") 
+
+local lastInteraction = 0
+
+-- [ HELPER: BUTTON ANIMATIONS ]
+local function setupButtonAnimation(button: GuiButton)
+	local uiScale = button:FindFirstChildOfClass("UIScale")
+	if not uiScale then
+		uiScale = Instance.new("UIScale")
+		uiScale.Name = "AnimationScale"
+		uiScale.Parent = button
+	end
+
+	button.MouseEnter:Connect(function() TweenService:Create(uiScale, TWEEN_INFO, {Scale = HOVER_SCALE}):Play() end)
+	button.MouseLeave:Connect(function() TweenService:Create(uiScale, TWEEN_INFO, {Scale = 1}):Play() end)
+	button.MouseButton1Down:Connect(function() TweenService:Create(uiScale, TWEEN_INFO, {Scale = CLICK_SCALE}):Play() end)
+	button.MouseButton1Up:Connect(function() TweenService:Create(uiScale, TWEEN_INFO, {Scale = HOVER_SCALE}):Play() end)
+end
+
+-- [ SETUP: CLOSE BUTTONS ]
+local function setupCloseButton(frame: GuiObject)
+	local closeBtn = frame:FindFirstChild("Close", true) 
+	if closeBtn and (closeBtn:IsA("TextButton") or closeBtn:IsA("ImageButton")) then
+		FrameManager.connect(closeBtn, frame.Name, "Close")
+		setupButtonAnimation(closeBtn)
+	end
+end
+
+-- [ LOGIC: HUD BUTTONS ]
+local function setupHudButtons()
+	for _, descendant in ipairs(hudGui:GetDescendants()) do
+		if descendant:IsA("GuiButton") then
+			local frameName = descendant.Name:gsub("Button", "") -- "ShopButton" -> "Shop"
+
+			-- ## SAFETY: Ignore Notifications ##
+			if frameName == "Notifications" then continue end
+
+			local targetFrame = framesContainer:FindFirstChild(frameName)
+			if targetFrame then
+				FrameManager.connect(descendant, frameName, "Toggle")
+				setupButtonAnimation(descendant)
+			end
+		end
+	end
+end
+
+-- [ LOGIC: WORKSPACE TOUCH ]
+local function setupTouchTrigger(modelName: string, frameName: string)
+	local model = Workspace:WaitForChild(modelName, 5)
+	if not model then return end
+	local touchPart = model:WaitForChild("Touch", 5) :: BasePart
+	if not touchPart then return end
+	local targetFrame = framesContainer:FindFirstChild(frameName) :: GuiObject
+	if not targetFrame then return end
+
+	local openedByTouch = false
+
+	-- Reset the touch flag if the frame gets closed by ANY means (Distance, HUD button, or X button)
+	targetFrame:GetPropertyChangedSignal("Visible"):Connect(function()
+		if not targetFrame.Visible then
+			openedByTouch = false
+		end
+	end)
+
+	touchPart.Touched:Connect(function(hit)
+		local now = tick()
+		if now - lastInteraction < DEBOUNCE_TIME then return end
+		local char = hit.Parent
+		if char == player.Character then
+			local hum = char:FindFirstChild("Humanoid")
+			if hum and hum.Health > 0 then
+				lastInteraction = now
+				openedByTouch = true -- Flag that we specifically used the physical part
+				FrameManager.open(frameName)
+			end
+		end
+	end)
+
+	task.spawn(function()
+		while true do
+			task.wait(0.5)
+			-- ONLY check distance if the menu was opened by walking onto the part
+			if openedByTouch and targetFrame.Visible and player.Character and player.Character.PrimaryPart then
+				local dist = (player.Character.PrimaryPart.Position - touchPart.Position).Magnitude
+				if dist > CLOSE_DISTANCE then
+					FrameManager.close(frameName)
+				end
+			end
+		end
+	end)
+end
+
+-- [ INIT ]
+function UIInitializer:Init()
+	print("[UIInitializer] Starting...")
+	pcall(function() StarterGui:SetCore("ResetButtonCallback", false) end)
+
+	-- 2. Initialize Frames (Use IsA("GuiObject") to catch ScrollingFrames too!)
+	for _, child in ipairs(framesContainer:GetChildren()) do
+		if child:IsA("GuiObject") then
+
+			if child.Name ~= "Notifications" then
+				child.Visible = false
+				setupCloseButton(child)
+			else
+				-- Force Notifications container to be visible!
+				child.Visible = true 
+			end
+
+		end
+	end
+
+	setupHudButtons()
+	setupTouchTrigger("Upgrades", "Upgrades")
+	setupTouchTrigger("Robux", "Shop")
+	setupTouchTrigger("Pickaxes", "Pickaxes") 
+
+	print("[UIInitializer] Ready.")
+end
+
+UIInitializer:Init()
+
+return UIInitializer
