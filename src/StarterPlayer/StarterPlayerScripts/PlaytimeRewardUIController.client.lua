@@ -3,9 +3,11 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local MarketplaceService = game:GetService("MarketplaceService")
 
 local NotificationManager = require(ReplicatedStorage.Modules.NotificationManager)
 local NumberFormatter = require(ReplicatedStorage.Modules.NumberFormatter)
+local ProductConfigurations = require(ReplicatedStorage.Modules.ProductConfigurations)
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -19,8 +21,10 @@ local alertLabel = alert:WaitForChild("TimerLabel") :: TextLabel
 local timerLabel = openButton:WaitForChild("Timer") :: TextLabel
 
 local playtimeRewardsFrame = frames:WaitForChild("PlaytimeRewards") :: Frame
-local rewardsGrid = playtimeRewardsFrame:WaitForChild("MainFrame"):WaitForChild("RewardsGrid") :: ScrollingFrame
+local mainFrame = playtimeRewardsFrame:WaitForChild("MainFrame") :: Frame
+local rewardsGrid = mainFrame:WaitForChild("RewardsGrid") :: ScrollingFrame
 local template = rewardsGrid:WaitForChild("Template") :: ImageButton
+local openAllButton = mainFrame:WaitForChild("OpenAll") :: ImageButton
 
 local playtimeRewardsRemotes = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("PlaytimeRewards")
 local getStatusRemote = playtimeRewardsRemotes:WaitForChild("GetStatus") :: RemoteFunction
@@ -107,7 +111,7 @@ local function updateHeader(status)
 	end
 
 	alert.Visible = false
-		alertLabel.Text = ""
+	alertLabel.Text = ""
 
 	if status.NextRewardId then
 		timerLabel.Text = formatTime(status.SecondsUntilNextReward or 0)
@@ -208,6 +212,16 @@ local function requestInitialStatus()
 		updateHeader(nil)
 	end
 end
+
+openAllButton.MouseButton1Click:Connect(function()
+	local productId = ProductConfigurations.Products["PlaytimeRewardsSkipAll"]
+	if type(productId) ~= "number" or productId <= 0 then
+		NotificationManager.show("Playtime Skip All product ID is not configured yet.", "Error")
+		return
+	end
+
+	MarketplaceService:PromptProductPurchase(player, productId)
+end)
 
 template.Visible = false
 updateHeader(nil)

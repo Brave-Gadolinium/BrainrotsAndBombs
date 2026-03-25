@@ -15,6 +15,7 @@ local ItemConfigurations = require(ReplicatedStorage.Modules.ItemConfigurations)
 local ProductConfigurations = require(ReplicatedStorage.Modules.ProductConfigurations)
 local NumberFormatter = require(ReplicatedStorage.Modules.NumberFormatter)
 local UpgradesConfiguration = require(ReplicatedStorage.Modules.UpgradesConfigurations)
+local Constants = require(ReplicatedStorage.Modules.Constants)
 local ItemManager 
 local SlotManager 
 
@@ -22,7 +23,7 @@ local SlotManager
 local DATA_VERSION = "ProjectData_v90" 
 
 local MAX_OFFLINE_TIME = 8 * 60 * 60
-local INCOME_SCALING = 1.125 
+local INCOME_SCALING = Constants.INCOME_SCALING
 local VIP_TAG = "V.I.P"
 
 local GROUP_ID = 0 

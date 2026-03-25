@@ -13,6 +13,7 @@ local NumberFormatter = require(ReplicatedStorage:WaitForChild("Modules"):WaitFo
 local ItemConfigurations = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("ItemConfigurations"))
 local ProductConfigurations = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("ProductConfigurations"))
 local NotificationManager = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("NotificationManager")) 
+local Constants = require(ReplicatedStorage.Modules.Constants)
 
 local player = Players.LocalPlayer
 
@@ -22,14 +23,8 @@ local CLICK_SCALE = 0.95
 local TWEEN_INFO = TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 
 -- Income Calculation Constants
-local INCOME_SCALING = 1.125
-local MUTATION_MULTIPLIERS = {
-	["Normal"] = 1,
-	["Golden"] = 2,
-	["Diamond"] = 3,
-	["Ruby"] = 4,
-	["Neon"] = 5,
-}
+local INCOME_SCALING = Constants.INCOME_SCALING
+local MUTATION_MULTIPLIERS = Constants.MUTATION_MULTIPLIERS
 
 print("[HUDController] Loaded (Only Money in Leaderstats, Active Offline Income Calc)")
 

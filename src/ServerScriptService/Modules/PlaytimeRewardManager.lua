@@ -37,6 +37,16 @@ local function cloneClaimedRewards(source)
 	return result
 end
 
+local function getMaxRequiredSeconds(): number
+	local maxRequiredSeconds = 0
+	for _, reward in ipairs(Config.Rewards) do
+		if reward.RequiredSeconds > maxRequiredSeconds then
+			maxRequiredSeconds = reward.RequiredSeconds
+		end
+	end
+	return maxRequiredSeconds
+end
+
 function PlaytimeRewardManager.EnsureData(profileData, now: number?): PlaytimeRewardData
 	local currentDayKey = getCurrentDayKey(now)
 	profileData.PlaytimeRewards = profileData.PlaytimeRewards or {
@@ -99,6 +109,12 @@ end
 function PlaytimeRewardManager.Tick(profileData, deltaSeconds: number?, now: number?)
 	local data = PlaytimeRewardManager.EnsureData(profileData, now)
 	data.PlaytimeSeconds += math.max(1, deltaSeconds or 1)
+	return PlaytimeRewardManager.GetStatus(profileData, now)
+end
+
+function PlaytimeRewardManager.SkipAll(profileData, now: number?)
+	local data = PlaytimeRewardManager.EnsureData(profileData, now)
+	data.PlaytimeSeconds = math.max(data.PlaytimeSeconds, getMaxRequiredSeconds())
 	return PlaytimeRewardManager.GetStatus(profileData, now)
 end
 

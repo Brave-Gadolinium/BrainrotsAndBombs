@@ -48,6 +48,13 @@ local function showNotification(player: Player, message: string, messageType: st
 	end
 end
 
+local function pushStatus(player: Player, status)
+	setPlayerAttributes(player, status)
+	if statusUpdatedRemote then
+		statusUpdatedRemote:FireClient(player, status)
+	end
+end
+
 local function applyCompensation(player: Player, reward)
 	if reward.CompensationType == "Money" and type(reward.CompensationAmount) == "number" then
 		PlayerController:AddMoney(player, reward.CompensationAmount)
@@ -146,6 +153,64 @@ function DailyRewardController:ApplyReward(player: Player, reward)
 	return false, "UnsupportedRewardType"
 end
 
+function DailyRewardController:HandleSkip1(player: Player)
+	local profile = getProfile(player)
+	if not profile then
+		return false, "ProfileNotLoaded", nil
+	end
+
+	local unopenedDays = DailyRewardManager.GetUnopenedRewardDays(profile.Data)
+	local day = unopenedDays[1]
+	if not day then
+		local status = DailyRewardManager.GetStatus(profile.Data)
+		pushStatus(player, status)
+		return false, "NoRewardsToSkip", status
+	end
+
+	local reward = DailyRewardConfiguration.GetRewardForDay(day)
+	local applied, applyError = self:ApplyReward(player, reward)
+	if not applied then
+		local status = DailyRewardManager.GetStatus(profile.Data)
+		pushStatus(player, status)
+		return false, applyError, status
+	end
+
+	local status = DailyRewardManager.MarkClaimedThroughDay(profile.Data, day)
+	pushStatus(player, status)
+	showNotification(player, "Day " .. tostring(day) .. " daily reward opened!", "Success")
+	return true, nil, status
+end
+
+function DailyRewardController:HandleSkipAll(player: Player)
+	local profile = getProfile(player)
+	if not profile then
+		return false, "ProfileNotLoaded", nil
+	end
+
+	local unopenedDays = DailyRewardManager.GetUnopenedRewardDays(profile.Data)
+	if #unopenedDays == 0 then
+		local status = DailyRewardManager.GetStatus(profile.Data)
+		pushStatus(player, status)
+		return false, "NoRewardsToSkip", status
+	end
+
+	local latestStatus = DailyRewardManager.GetStatus(profile.Data)
+	for _, day in ipairs(unopenedDays) do
+		local reward = DailyRewardConfiguration.GetRewardForDay(day)
+		local applied, applyError = self:ApplyReward(player, reward)
+		if not applied then
+			pushStatus(player, latestStatus)
+			return false, applyError, latestStatus
+		end
+
+		latestStatus = DailyRewardManager.MarkClaimedThroughDay(profile.Data, day)
+	end
+
+	pushStatus(player, latestStatus)
+	showNotification(player, "All remaining daily rewards for this cycle are now opened!", "Success")
+	return true, nil, latestStatus
+end
+
 function DailyRewardController:HandleClaim(player: Player)
 	local profile = getProfile(player)
 	if not profile then
@@ -174,10 +239,7 @@ function DailyRewardController:HandleClaim(player: Player)
 		}
 	end
 
-	setPlayerAttributes(player, status)
-	if statusUpdatedRemote then
-		statusUpdatedRemote:FireClient(player, status)
-	end
+	pushStatus(player, status)
 
 	return {
 		Success = true,

@@ -5,28 +5,26 @@ local MarketplaceService = game:GetService("MarketplaceService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 local ServerScriptService = game:GetService("ServerScriptService")
-local Debris = game:GetService("Debris") 
+local Debris = game:GetService("Debris")
 
 local MonetizationController = {}
 
--- [ MODULES ]
 local ProductConfigurations = require(ReplicatedStorage.Modules.ProductConfigurations)
 local UpgradesConfiguration = require(ReplicatedStorage.Modules.UpgradesConfigurations)
 local ItemConfigurations = require(ReplicatedStorage.Modules.ItemConfigurations)
-local RebirthSystem 
-local ItemManager 
-local PlayerController 
+local RebirthSystem
+local ItemManager
+local PlayerController
+local PlaytimeRewardController
+local DailyRewardController
 
--- [[ HELPER: PLAY EFFECTS ]] --
 local function playPurchaseEffects(player: Player)
-	-- 1. Screen Effect
 	local Events = ReplicatedStorage:FindFirstChild("Events")
 	local effectEvent = Events and Events:FindFirstChild("TriggerUIEffect")
 	if effectEvent then
 		effectEvent:FireClient(player, "HighlightLight")
 	end
 
-	-- 2. Confetti Effect
 	local character = player.Character
 	local root = character and character:FindFirstChild("HumanoidRootPart")
 	local Templates = ReplicatedStorage:FindFirstChild("Templates")
@@ -53,8 +51,6 @@ function MonetizationController.ProcessReceipt(receiptInfo)
 	local Events = ReplicatedStorage:FindFirstChild("Events")
 	local notif = Events and Events:FindFirstChild("ShowNotification")
 
-	-- 1. DYNAMIC UPGRADES (Robux DevProducts)
-	-- [FIXED]: Loop through the array to find the matching RobuxProductId
 	local targetUpgradeConfig = nil
 	for _, config in ipairs(UpgradesConfiguration.Upgrades) do
 		if config.RobuxProductId == productId then
@@ -68,17 +64,13 @@ function MonetizationController.ProcessReceipt(receiptInfo)
 		local profile = PlayerController:GetProfile(player)
 
 		if profile then
-			-- [FIXED]: Apply the stats using our new StatId and Amount logic
 			local statId = targetUpgradeConfig.StatId
 			local upgradeAmount = targetUpgradeConfig.Amount or 1
 			local currentVal = profile.Data[statId] or 0
 
 			profile.Data[statId] = currentVal + upgradeAmount
-
-			-- Set Attribute instead of leaderstats
 			player:SetAttribute(statId, profile.Data[statId])
 
-			-- Apply Physical Stat changes immediately (e.g., Speed)
 			if statId == "BonusSpeed" then
 				local char = player.Character
 				local hum = char and char:FindFirstChild("Humanoid") :: Humanoid
@@ -95,18 +87,47 @@ function MonetizationController.ProcessReceipt(receiptInfo)
 		return Enum.ProductPurchaseDecision.NotProcessedYet
 	end
 
-	-- Safety check for legacy products
 	if not productName then return Enum.ProductPurchaseDecision.NotProcessedYet end
 
-	-- 2. REBIRTH SKIP
 	if productName == "SkipRebirth" then
 		if not RebirthSystem then RebirthSystem = require(ServerScriptService.Modules.RebirthSystem) end
 		RebirthSystem.ForceRebirth(player)
-		playPurchaseEffects(player) 
+		playPurchaseEffects(player)
 		return Enum.ProductPurchaseDecision.PurchaseGranted
 	end
 
-	-- 3. ITEM PRODUCTS
+	if productName == "PlaytimeRewardsSkipAll" then
+		if not PlaytimeRewardController then
+			PlaytimeRewardController = require(ServerScriptService.Controllers.PlaytimeRewardController)
+		end
+
+		local success = PlaytimeRewardController:HandleSkipAll(player)
+		if success then
+			playPurchaseEffects(player)
+			return Enum.ProductPurchaseDecision.PurchaseGranted
+		end
+		return Enum.ProductPurchaseDecision.NotProcessedYet
+	end
+
+	if productName == "DailyRewardsSkipAll" or productName == "DailyRewardsSkip1" then
+		if not DailyRewardController then
+			DailyRewardController = require(ServerScriptService.Controllers.DailyRewardController)
+		end
+
+		local success
+		if productName == "DailyRewardsSkipAll" then
+			success = DailyRewardController:HandleSkipAll(player)
+		else
+			success = DailyRewardController:HandleSkip1(player)
+		end
+
+		if success then
+			playPurchaseEffects(player)
+			return Enum.ProductPurchaseDecision.PurchaseGranted
+		end
+		return Enum.ProductPurchaseDecision.NotProcessedYet
+	end
+
 	local itemReward = ProductConfigurations.ItemProductRewards[productName]
 	if itemReward then
 		if not ItemManager then ItemManager = require(ServerScriptService.Modules.ItemManager) end
@@ -117,29 +138,27 @@ function MonetizationController.ProcessReceipt(receiptInfo)
 		ItemManager.GiveItemToPlayer(player, itemReward.Name, itemReward.Mutation, rarity, itemReward.Level)
 
 		if notif then notif:FireClient(player, itemReward.Name .. " Purchased!", "Success") end
-		playPurchaseEffects(player) 
+		playPurchaseEffects(player)
 		return Enum.ProductPurchaseDecision.PurchaseGranted
 	end
 
-	-- 4. CASH PRODUCTS
 	local cashAmount = ProductConfigurations.CashProductRewards[productName]
 	if cashAmount then
 		if not PlayerController then PlayerController = require(ServerScriptService.Controllers.PlayerController) end
 		PlayerController:AddMoney(player, cashAmount)
 		local NumberFormatter = require(ReplicatedStorage.Modules.NumberFormatter)
 		if notif then notif:FireClient(player, "$" .. NumberFormatter.Format(cashAmount) .. " Purchased!", "Success") end
-		playPurchaseEffects(player) 
+		playPurchaseEffects(player)
 		return Enum.ProductPurchaseDecision.PurchaseGranted
 	end
 
-	-- 5. RANDOM ITEM PRODUCT
 	if productName == "RandomItem" then
 		if not ItemManager then ItemManager = require(ServerScriptService.Modules.ItemManager) end
 
 		local validItems = {}
 		for itemName, data in pairs(ItemConfigurations.Items) do
 			if data.Rarity ~= "Common" and data.Rarity ~= "Uncommon" then
-				table.insert(validItems, {Name = itemName, Rarity = data.Rarity})
+				table.insert(validItems, { Name = itemName, Rarity = data.Rarity })
 			end
 		end
 
@@ -147,18 +166,16 @@ function MonetizationController.ProcessReceipt(receiptInfo)
 			local chosenItem = validItems[math.random(1, #validItems)]
 			ItemManager.GiveItemToPlayer(player, chosenItem.Name, "Normal", chosenItem.Rarity, 1)
 
-			if notif then 
-				notif:FireClient(player, "You unboxed a " .. chosenItem.Rarity .. " " .. chosenItem.Name .. "!", "Success") 
+			if notif then
+				notif:FireClient(player, "You unboxed a " .. chosenItem.Rarity .. " " .. chosenItem.Name .. "!", "Success")
 			end
-			playPurchaseEffects(player) 
-
+			playPurchaseEffects(player)
 			return Enum.ProductPurchaseDecision.PurchaseGranted
 		else
 			warn("[MonetizationController] No valid items found for RandomItem product!")
 		end
 	end
 
-	-- 6. EXTRA SPINS PRODUCTS
 	if productName == "SpinsX3" or productName == "SpinsX9" then
 		if not PlayerController then PlayerController = require(ServerScriptService.Controllers.PlayerController) end
 		local profile = PlayerController:GetProfile(player)
@@ -168,7 +185,7 @@ function MonetizationController.ProcessReceipt(receiptInfo)
 			player:SetAttribute("SpinNumber", profile.Data.SpinNumber)
 
 			if notif then notif:FireClient(player, "+" .. spinAmount .. " Spins Purchased!", "Success") end
-			playPurchaseEffects(player) 
+			playPurchaseEffects(player)
 			return Enum.ProductPurchaseDecision.PurchaseGranted
 		end
 	end
@@ -177,6 +194,8 @@ function MonetizationController.ProcessReceipt(receiptInfo)
 end
 
 function MonetizationController:Init(controllers)
+	PlaytimeRewardController = controllers.PlaytimeRewardController
+	DailyRewardController = controllers.DailyRewardController
 	print("[MonetizationController] Initialized")
 end
 

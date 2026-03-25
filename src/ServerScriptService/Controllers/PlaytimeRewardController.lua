@@ -65,6 +65,22 @@ function PlaytimeRewardController:PushStatus(player: Player)
 	return status
 end
 
+function PlaytimeRewardController:HandleSkipAll(player: Player)
+	local profile = getProfile(player)
+	if not profile then
+		return false, "ProfileNotLoaded"
+	end
+
+	local status = PlaytimeRewardManager.SkipAll(profile.Data)
+	setPlayerAttributes(player, status)
+	if statusUpdatedRemote then
+		statusUpdatedRemote:FireClient(player, status)
+	end
+
+	showNotification(player, "All playtime rewards for today are now unlocked!", "Success")
+	return true, status
+end
+
 function PlaytimeRewardController:ApplyReward(player: Player, reward)
 	if not reward then
 		return false, "MissingReward"
@@ -123,7 +139,7 @@ function PlaytimeRewardController:HandleClaim(player: Player, rewardId: number)
 			Error = applyError,
 			Status = status,
 		}
-		end
+	end
 
 	setPlayerAttributes(player, status)
 	if statusUpdatedRemote then

@@ -9,9 +9,10 @@ local IncomeController = {}
 
 local ItemConfigurations = require(ReplicatedStorage.Modules.ItemConfigurations)
 local PlayerController -- Lazy load
+local Constants = require(ReplicatedStorage.Modules.Constants)
 
 local CYCLE_RATE = 1.0
-local INCOME_SCALING = 1.125 
+local INCOME_SCALING = Constants.INCOME_SCALING
 local VIP_MULTIPLIER = 1.5 -- VIP gives +50% Income
 
 local MUTATION_MULTIPLIERS = {

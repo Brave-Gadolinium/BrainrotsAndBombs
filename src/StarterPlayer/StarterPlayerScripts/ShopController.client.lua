@@ -12,6 +12,7 @@ local playerGui = player:WaitForChild("PlayerGui")
 local ProductConfigurations = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("ProductConfigurations"))
 local ItemConfigurations = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("ItemConfigurations"))
 local NumberFormatter = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("NumberFormatter"))
+local Constants = require(ReplicatedStorage.Modules.Constants)
 
 -- [ UI REFERENCES ]
 local gui = playerGui:WaitForChild("GUI")
@@ -20,14 +21,8 @@ local shopFrame = frames:WaitForChild("Shop")
 local scrolling = shopFrame:WaitForChild("Scrolling")
 
 -- [ CONFIGURATION ]
-local INCOME_SCALING = 1.125
-local MUTATION_MULTIPLIERS = {
-	["Normal"] = 1,
-	["Golden"] = 2,
-	["Diamond"] = 3,
-	["Ruby"] = 4,
-	["Neon"] = 5,
-}
+local INCOME_SCALING = Constants.INCOME_SCALING
+local MUTATION_MULTIPLIERS = Constants.MUTATION_MULTIPLIERS
 
 -- [ HELPER ]
 local function findTextLabel(parent: Instance): TextLabel?

@@ -3,9 +3,11 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local MarketplaceService = game:GetService("MarketplaceService")
 
 local NumberFormatter = require(ReplicatedStorage.Modules.NumberFormatter)
 local NotificationManager = require(ReplicatedStorage.Modules.NotificationManager)
+local ProductConfigurations = require(ReplicatedStorage.Modules.ProductConfigurations)
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -18,8 +20,12 @@ local alert = openButton:WaitForChild("Alert") :: ImageLabel
 local alertLabel = alert:WaitForChild("TimerLabel") :: TextLabel
 
 local dailyRewardsFrame = frames:WaitForChild("DailyRewards") :: Frame
-local rewardsGrid = dailyRewardsFrame:WaitForChild("MainFrame"):WaitForChild("RewardsGrid") :: ScrollingFrame
+local mainFrame = dailyRewardsFrame:WaitForChild("MainFrame") :: Frame
+local rewardsGrid = mainFrame:WaitForChild("RewardsGrid") :: ScrollingFrame
 local template = rewardsGrid:WaitForChild("Template") :: ImageButton
+local buttonsFrame = mainFrame:WaitForChild("Buttons") :: Frame
+local skipAllButton = buttonsFrame:WaitForChild("SkipAll") :: ImageButton
+local skip1Button = buttonsFrame:WaitForChild("Skip1") :: ImageButton
 
 local dailyRewardsRemotes = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("DailyRewards")
 local getStatusRemote = dailyRewardsRemotes:WaitForChild("GetStatus") :: RemoteFunction
@@ -175,6 +181,24 @@ local function requestInitialStatus()
 		updateAlert(nil)
 	end
 end
+
+local function promptDailyRewardProduct(productKey: string, missingMessage: string)
+	local productId = ProductConfigurations.Products[productKey]
+	if type(productId) ~= "number" or productId <= 0 then
+		NotificationManager.show(missingMessage, "Error")
+		return
+	end
+
+	MarketplaceService:PromptProductPurchase(player, productId)
+end
+
+skipAllButton.MouseButton1Click:Connect(function()
+	promptDailyRewardProduct("DailyRewardsSkipAll", "Daily Rewards Skip All product ID is not configured yet.")
+end)
+
+skip1Button.MouseButton1Click:Connect(function()
+	promptDailyRewardProduct("DailyRewardsSkip1", "Daily Rewards Skip 1 product ID is not configured yet.")
+end)
 
 template.Visible = false
 updateAlert(nil)

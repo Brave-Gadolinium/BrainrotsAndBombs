@@ -25,6 +25,17 @@ local function getCurrentDayNumber(now: number?): number
 	return math.floor((now or os.time()) / 86400)
 end
 
+local function getUnopenedStartDay(data: DailyRewardData, status: DailyRewardStatus, maxDay: number): number?
+	if status.ClaimedToday then
+		if data.CurrentStreak >= maxDay then
+			return nil
+		end
+		return data.CurrentStreak + 1
+	end
+
+	return status.ClaimDay
+end
+
 function DailyRewardManager.EnsureData(profileData): DailyRewardData
 	profileData.DailyRewards = profileData.DailyRewards or {
 		CurrentStreak = 0,
@@ -54,7 +65,7 @@ function DailyRewardManager.GetStatus(profileData, now: number?): DailyRewardSta
 	if claimedToday then
 		claimDay = math.clamp(data.CurrentStreak, 1, maxDay)
 	elseif data.LastClaimDay == currentDay - 1 then
-		claimDay = math.clamp(data.CurrentStreak + 1, 1, maxDay)
+		claimDay = data.CurrentStreak >= maxDay and 1 or math.clamp(data.CurrentStreak + 1, 1, maxDay)
 	else
 		claimDay = 1
 	end
@@ -69,20 +80,44 @@ function DailyRewardManager.GetStatus(profileData, now: number?): DailyRewardSta
 	}
 end
 
-function DailyRewardManager.Claim(profileData, now: number?)
+function DailyRewardManager.GetUnopenedRewardDays(profileData, now: number?): { number }
+	local data = DailyRewardManager.EnsureData(profileData)
+	local status = DailyRewardManager.GetStatus(profileData, now)
+	local maxDay = Config.GetMaxDay()
+	local startDay = getUnopenedStartDay(data, status, maxDay)
+	local days = {}
+
+	if not startDay then
+		return days
+	end
+
+	for day = startDay, maxDay do
+		table.insert(days, day)
+	end
+
+	return days
+end
+
+function DailyRewardManager.MarkClaimedThroughDay(profileData, day: number, now: number?): DailyRewardStatus
 	local data = DailyRewardManager.EnsureData(profileData)
 	local currentDay = getCurrentDayNumber(now)
+	local maxDay = Config.GetMaxDay()
+
+	data.CurrentStreak = math.clamp(day, 1, maxDay)
+	data.LastClaimDay = currentDay
+
+	return DailyRewardManager.GetStatus(profileData, now)
+end
+
+function DailyRewardManager.Claim(profileData, now: number?)
 	local status = DailyRewardManager.GetStatus(profileData, now)
 
 	if not status.CanClaim then
 		return false, "AlreadyClaimed", status, nil
 	end
 
-	data.CurrentStreak = status.ClaimDay
-	data.LastClaimDay = currentDay
-
 	local reward = Config.GetRewardForDay(status.ClaimDay)
-	local updatedStatus = DailyRewardManager.GetStatus(profileData, now)
+	local updatedStatus = DailyRewardManager.MarkClaimedThroughDay(profileData, status.ClaimDay, now)
 
 	return true, nil, updatedStatus, reward
 end

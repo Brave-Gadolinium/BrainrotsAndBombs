@@ -10,11 +10,13 @@ local SellManager = {}
 -- [ MODULES ]
 local ItemConfigurations = require(ReplicatedStorage.Modules.ItemConfigurations)
 local NumberFormatter = require(ReplicatedStorage.Modules.NumberFormatter)
+local Constants = require(ReplicatedStorage.Modules.Constants)
+
 local PlayerController -- Lazy Load
 
 -- [ CONFIG ]
 local HOURS_TO_SECONDS = 300
-local INCOME_SCALING = 1.125 
+local INCOME_SCALING = Constants.INCOME_SCALING
 
 local MUTATION_MULTIPLIERS = {
 	["Normal"] = 1,

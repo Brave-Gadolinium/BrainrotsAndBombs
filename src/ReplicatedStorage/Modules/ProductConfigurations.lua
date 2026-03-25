@@ -15,6 +15,9 @@ ProductConfigurations.Group = {
 ProductConfigurations.Products = {
 	["SkipRebirth"] = 3535477160,
 	["RandomItem"] = 3541134967,
+	["PlaytimeRewardsSkipAll"] = 3555241775,
+	["DailyRewardsSkipAll"] = 0,
+	["DailyRewardsSkip1"] = 0,
 
 	["ItemProduct1"] = 3507422194,
 	["ItemProduct2"] = 3507422461,
@@ -63,7 +66,6 @@ ProductConfigurations.CashProductRewards = {
 	["CashProduct3"] = 1000000,
 }
 
--- Helper to find name by ID (for the Server Handler)
 function ProductConfigurations.GetProductById(id: number)
 	for name, productId in pairs(ProductConfigurations.Products) do
 		if productId == id then return name end
