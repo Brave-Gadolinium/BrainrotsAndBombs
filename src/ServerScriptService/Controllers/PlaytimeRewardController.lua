@@ -44,6 +44,9 @@ local function setPlayerAttributes(player: Player, status)
 	player:SetAttribute("PlaytimeRewardNextId", status.NextRewardId or 0)
 	player:SetAttribute("PlaytimeRewardSecondsUntilNext", status.SecondsUntilNextReward)
 	player:SetAttribute("PlaytimeRewardClaimableCount", #status.ClaimableRewardIds)
+	player:SetAttribute("PlaytimeRewardHasSpeedX2", status.HasSpeedX2)
+	player:SetAttribute("PlaytimeRewardHasSpeedX5", status.HasSpeedX5)
+	player:SetAttribute("PlaytimeRewardSpeedMultiplier", status.SpeedMultiplier)
 end
 
 function PlaytimeRewardController:GetStatusForPlayer(player: Player)
@@ -79,6 +82,26 @@ function PlaytimeRewardController:HandleSkipAll(player: Player)
 
 	showNotification(player, "All playtime rewards for today are now unlocked!", "Success")
 	return true, status
+end
+
+function PlaytimeRewardController:HandleSpeedProduct(player: Player, productName: string)
+	local profile = getProfile(player)
+	if not profile then
+		return false, "ProfileNotLoaded", nil
+	end
+
+	local success, err, status = PlaytimeRewardManager.GrantSpeedProduct(profile.Data, productName)
+	if not success then
+		return false, err, status
+	end
+
+	setPlayerAttributes(player, status)
+	if statusUpdatedRemote then
+		statusUpdatedRemote:FireClient(player, status)
+	end
+
+	showNotification(player, "Playtime speed multiplier activated: x" .. tostring(status.SpeedMultiplier) .. "!", "Success")
+	return true, nil, status
 end
 
 function PlaytimeRewardController:ApplyReward(player: Player, reward)
@@ -197,6 +220,9 @@ function PlaytimeRewardController:Init(controllers)
 		player:SetAttribute("PlaytimeRewardNextId", nil)
 		player:SetAttribute("PlaytimeRewardSecondsUntilNext", nil)
 		player:SetAttribute("PlaytimeRewardClaimableCount", nil)
+		player:SetAttribute("PlaytimeRewardHasSpeedX2", nil)
+		player:SetAttribute("PlaytimeRewardHasSpeedX5", nil)
+		player:SetAttribute("PlaytimeRewardSpeedMultiplier", nil)
 	end)
 
 	for _, player in ipairs(Players:GetPlayers()) do

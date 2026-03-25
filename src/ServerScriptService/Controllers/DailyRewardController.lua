@@ -167,17 +167,14 @@ function DailyRewardController:HandleSkip1(player: Player)
 		return false, "NoRewardsToSkip", status
 	end
 
-	local reward = DailyRewardConfiguration.GetRewardForDay(day)
-	local applied, applyError = self:ApplyReward(player, reward)
-	if not applied then
-		local status = DailyRewardManager.GetStatus(profile.Data)
-		pushStatus(player, status)
-		return false, applyError, status
+	local success, err, status = DailyRewardManager.UnlockDay(profile.Data, day)
+	pushStatus(player, status)
+
+	if not success then
+		return false, err, status
 	end
 
-	local status = DailyRewardManager.MarkClaimedThroughDay(profile.Data, day)
-	pushStatus(player, status)
-	showNotification(player, "Day " .. tostring(day) .. " daily reward opened!", "Success")
+	showNotification(player, "Day " .. tostring(day) .. " daily reward unlocked!", "Success")
 	return true, nil, status
 end
 
@@ -196,22 +193,20 @@ function DailyRewardController:HandleSkipAll(player: Player)
 
 	local latestStatus = DailyRewardManager.GetStatus(profile.Data)
 	for _, day in ipairs(unopenedDays) do
-		local reward = DailyRewardConfiguration.GetRewardForDay(day)
-		local applied, applyError = self:ApplyReward(player, reward)
-		if not applied then
+		local success, err, status = DailyRewardManager.UnlockDay(profile.Data, day)
+		latestStatus = status
+		if not success then
 			pushStatus(player, latestStatus)
-			return false, applyError, latestStatus
+			return false, err, latestStatus
 		end
-
-		latestStatus = DailyRewardManager.MarkClaimedThroughDay(profile.Data, day)
 	end
 
 	pushStatus(player, latestStatus)
-	showNotification(player, "All remaining daily rewards for this cycle are now opened!", "Success")
+	showNotification(player, "All remaining daily rewards for this cycle are now unlocked!", "Success")
 	return true, nil, latestStatus
 end
 
-function DailyRewardController:HandleClaim(player: Player)
+function DailyRewardController:HandleClaim(player: Player, day: number)
 	local profile = getProfile(player)
 	if not profile then
 		return {
@@ -220,7 +215,17 @@ function DailyRewardController:HandleClaim(player: Player)
 		}
 	end
 
-	local success, err, status, reward = DailyRewardManager.Claim(profile.Data)
+	if type(day) ~= "number" then
+		local status = DailyRewardManager.GetStatus(profile.Data)
+		setPlayerAttributes(player, status)
+		return {
+			Success = false,
+			Error = "InvalidDay",
+			Status = status,
+		}
+	end
+
+	local success, err, status, reward = DailyRewardManager.GetClaimableReward(profile.Data, day)
 	if not success then
 		setPlayerAttributes(player, status)
 		return {
@@ -239,11 +244,20 @@ function DailyRewardController:HandleClaim(player: Player)
 		}
 	end
 
-	pushStatus(player, status)
+	local marked, markError, updatedStatus = DailyRewardManager.MarkRewardClaimed(profile.Data, day)
+	if not marked then
+		return {
+			Success = false,
+			Error = markError,
+			Status = updatedStatus,
+		}
+	end
+
+	pushStatus(player, updatedStatus)
 
 	return {
 		Success = true,
-		Status = status,
+		Status = updatedStatus,
 		Reward = reward,
 	}
 end
@@ -267,8 +281,8 @@ function DailyRewardController:Init(controllers)
 		}
 	end
 
-	claimRewardRemote.OnServerInvoke = function(player)
-		return self:HandleClaim(player)
+	claimRewardRemote.OnServerInvoke = function(player, day)
+		return self:HandleClaim(player, day)
 	end
 
 	Players.PlayerAdded:Connect(function(player)

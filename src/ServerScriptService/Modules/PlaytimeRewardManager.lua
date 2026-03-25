@@ -11,6 +11,8 @@ export type PlaytimeRewardData = {
 	DayKey: number,
 	PlaytimeSeconds: number,
 	ClaimedRewards: { [number]: boolean },
+	HasSpeedX2: boolean,
+	HasSpeedX5: boolean,
 }
 
 export type PlaytimeRewardStatus = {
@@ -21,6 +23,9 @@ export type PlaytimeRewardStatus = {
 	NextRewardId: number?,
 	SecondsUntilNextReward: number,
 	Rewards: { [number]: any },
+	HasSpeedX2: boolean,
+	HasSpeedX5: boolean,
+	SpeedMultiplier: number,
 }
 
 local function getCurrentDayKey(now: number?): number
@@ -47,12 +52,25 @@ local function getMaxRequiredSeconds(): number
 	return maxRequiredSeconds
 end
 
+function PlaytimeRewardManager.GetSpeedMultiplier(profileData): number
+	local data = PlaytimeRewardManager.EnsureData(profileData)
+	if data.HasSpeedX5 then
+		return 5
+	end
+	if data.HasSpeedX2 then
+		return 2
+	end
+	return 1
+end
+
 function PlaytimeRewardManager.EnsureData(profileData, now: number?): PlaytimeRewardData
 	local currentDayKey = getCurrentDayKey(now)
 	profileData.PlaytimeRewards = profileData.PlaytimeRewards or {
 		DayKey = currentDayKey,
 		PlaytimeSeconds = 0,
 		ClaimedRewards = {},
+		HasSpeedX2 = false,
+		HasSpeedX5 = false,
 	}
 
 	local data = profileData.PlaytimeRewards
@@ -69,6 +87,14 @@ function PlaytimeRewardManager.EnsureData(profileData, now: number?): PlaytimeRe
 		data.ClaimedRewards = {}
 	end
 
+	if type(data.HasSpeedX2) ~= "boolean" then
+		data.HasSpeedX2 = false
+	end
+
+	if type(data.HasSpeedX5) ~= "boolean" then
+		data.HasSpeedX5 = false
+	end
+
 	if data.DayKey ~= currentDayKey then
 		data.DayKey = currentDayKey
 		data.PlaytimeSeconds = 0
@@ -80,6 +106,7 @@ end
 
 function PlaytimeRewardManager.GetStatus(profileData, now: number?): PlaytimeRewardStatus
 	local data = PlaytimeRewardManager.EnsureData(profileData, now)
+	local speedMultiplier = PlaytimeRewardManager.GetSpeedMultiplier(profileData)
 	local claimableRewardIds = {}
 	local nextRewardId = nil
 	local secondsUntilNextReward = 0
@@ -103,12 +130,16 @@ function PlaytimeRewardManager.GetStatus(profileData, now: number?): PlaytimeRew
 		NextRewardId = nextRewardId,
 		SecondsUntilNextReward = math.max(0, secondsUntilNextReward),
 		Rewards = Config.Rewards,
+		HasSpeedX2 = data.HasSpeedX2,
+		HasSpeedX5 = data.HasSpeedX5,
+		SpeedMultiplier = speedMultiplier,
 	}
 end
 
 function PlaytimeRewardManager.Tick(profileData, deltaSeconds: number?, now: number?)
 	local data = PlaytimeRewardManager.EnsureData(profileData, now)
-	data.PlaytimeSeconds += math.max(1, deltaSeconds or 1)
+	local speedMultiplier = PlaytimeRewardManager.GetSpeedMultiplier(profileData)
+	data.PlaytimeSeconds += math.max(1, deltaSeconds or 1) * speedMultiplier
 	return PlaytimeRewardManager.GetStatus(profileData, now)
 end
 
@@ -135,6 +166,22 @@ function PlaytimeRewardManager.Claim(profileData, rewardId: number, now: number?
 
 	data.ClaimedRewards[rewardId] = true
 	return true, nil, PlaytimeRewardManager.GetStatus(profileData, now), reward
+end
+
+function PlaytimeRewardManager.GrantSpeedProduct(profileData, productName: string, now: number?)
+	local data = PlaytimeRewardManager.EnsureData(profileData, now)
+
+	if productName == "PlaytimeRewardsSpeedX2" then
+		data.HasSpeedX2 = true
+		return true, nil, PlaytimeRewardManager.GetStatus(profileData, now)
+	end
+
+	if productName == "PlaytimeRewardsSpeedX5" then
+		data.HasSpeedX5 = true
+		return true, nil, PlaytimeRewardManager.GetStatus(profileData, now)
+	end
+
+	return false, "UnsupportedSpeedProduct", PlaytimeRewardManager.GetStatus(profileData, now)
 end
 
 return PlaytimeRewardManager
