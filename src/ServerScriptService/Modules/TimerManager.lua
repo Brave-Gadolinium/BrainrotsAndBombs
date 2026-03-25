@@ -1,12 +1,90 @@
 local TimerManager = {}
 
-local FinishTime = game.ReplicatedStorage.Remotes.Timer.FinishTime
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
 
-task.delay(5, function()
-	while true do
-		task.wait(15)
-		FinishTime:Fire()
+local Constants = require(ReplicatedStorage.Modules.Constants)
+
+local function ensureTimerFinishEvent(): BindableEvent
+	local remotesFolder = ReplicatedStorage:FindFirstChild("Remotes")
+	if not remotesFolder then
+		remotesFolder = Instance.new("Folder")
+		remotesFolder.Name = "Remotes"
+		remotesFolder.Parent = ReplicatedStorage
 	end
-end)
+
+	local timerFolder = remotesFolder:FindFirstChild("Timer")
+	if not timerFolder then
+		timerFolder = Instance.new("Folder")
+		timerFolder.Name = "Timer"
+		timerFolder.Parent = remotesFolder
+	end
+
+	local finishTime = timerFolder:FindFirstChild("FinishTime")
+	if not finishTime then
+		finishTime = Instance.new("BindableEvent")
+		finishTime.Name = "FinishTime"
+		finishTime.Parent = timerFolder
+	end
+
+	return finishTime :: BindableEvent
+end
+
+local FinishTime = ensureTimerFinishEvent()
+
+local function teleportPlayerToBase(player: Player)
+	local character = player.Character
+	if not character then
+		return
+	end
+
+	local root = character:FindFirstChild("HumanoidRootPart")
+	if not root then
+		return
+	end
+
+	local plot = Workspace:FindFirstChild("Plot_" .. player.Name)
+	if not plot then
+		return
+	end
+
+	local spawnPart = plot:FindFirstChild("Spawn")
+	if spawnPart and spawnPart:IsA("BasePart") then
+		root.CFrame = spawnPart.CFrame + Vector3.new(0, 3, 0)
+		return
+	end
+
+	if plot.PrimaryPart then
+		root.CFrame = plot.PrimaryPart.CFrame + Vector3.new(0, 3, 0)
+	end
+end
+
+function TimerManager:Start()
+	task.spawn(function()
+		while true do
+			local remaining = Constants.SESSION_DURATION
+			Workspace:SetAttribute("SessionTimeRemaining", remaining)
+			Workspace:SetAttribute("SessionMessage", "")
+			Workspace:SetAttribute("SessionEnded", false)
+
+			while remaining > 0 do
+				task.wait(1)
+				remaining -= 1
+				Workspace:SetAttribute("SessionTimeRemaining", remaining)
+			end
+
+			Workspace:SetAttribute("SessionEnded", true)
+			Workspace:SetAttribute("SessionMessage", "Тайм закончен!")
+
+			for _, player in ipairs(Players:GetPlayers()) do
+				teleportPlayerToBase(player)
+			end
+
+			FinishTime:Fire()
+			task.wait(Constants.SESSION_END_MESSAGE_DURATION)
+		end
+	end)
+end
 
 return TimerManager

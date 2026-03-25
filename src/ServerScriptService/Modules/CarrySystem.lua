@@ -189,6 +189,47 @@ function CarrySystem.DropItemsAtFeet(player: Player)
 	CarrySystem.ClearAllItems(player)
 end
 
+function CarrySystem.HasCarriedItems(player: Player): boolean
+	local items = carryingData[player]
+	return items ~= nil and #items > 0
+end
+
+function CarrySystem.DropOneItemAtFeet(player: Player): boolean
+	local items = carryingData[player]
+	if not items or #items == 0 then
+		return false
+	end
+
+	local char = player.Character
+	local root = char and char:FindFirstChild("HumanoidRootPart") :: BasePart
+	if not root then
+		return false
+	end
+
+	local itemData = table.remove(items, #items)
+	if not itemData then
+		return false
+	end
+
+	if itemData.VisualModel and itemData.VisualModel.Parent then
+		itemData.VisualModel:Destroy()
+	end
+
+	local head = char:FindFirstChild("Head") :: BasePart
+	local originPos = head and head.Position or root.Position
+	local dropPos = root.Position + (root.CFrame.LookVector * 3)
+
+	ItemManager.SpawnDroppedItem(
+		itemData.Name,
+		itemData.Mutation,
+		itemData.Rarity,
+		dropPos,
+		originPos
+	)
+
+	return true
+end
+
 -- [ ZONE LOGIC ]
 local function processZoneExit(player: Player)
 	local items = carryingData[player]

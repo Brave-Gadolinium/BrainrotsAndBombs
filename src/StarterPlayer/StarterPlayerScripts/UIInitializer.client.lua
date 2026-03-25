@@ -63,6 +63,10 @@ local function setupHudButtons()
 
 			-- ## SAFETY: Ignore Notifications ##
 			if frameName == "Notifications" then continue end
+			if frameName == "Upgrades" then
+				descendant.Visible = false
+				continue
+			end
 
 			local targetFrame = framesContainer:FindFirstChild(frameName)
 			if targetFrame then
@@ -140,7 +144,7 @@ function UIInitializer:Init()
 	end
 
 	setupHudButtons()
-	setupTouchTrigger("Upgrades", "Upgrades")
+	-- Можно разблокировать и будут видны улучшения.
 	setupTouchTrigger("Robux", "Shop")
 	setupTouchTrigger("Pickaxes", "Pickaxes") 
 

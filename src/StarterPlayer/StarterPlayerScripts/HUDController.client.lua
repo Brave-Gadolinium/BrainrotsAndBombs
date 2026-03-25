@@ -43,6 +43,32 @@ local function setupHUD()
 	local playerGui = player:WaitForChild("PlayerGui")
 	local gui = playerGui:WaitForChild("GUI")
 	local hud = gui:WaitForChild("HUD")
+	local timeLabel = hud:FindFirstChild("SessionTimer") :: TextLabel
+	if not timeLabel then
+		timeLabel = Instance.new("TextLabel")
+		timeLabel.Name = "SessionTimer"
+		timeLabel.AnchorPoint = Vector2.new(0.5, 0)
+		timeLabel.Position = UDim2.fromScale(0.5, 0.02)
+		timeLabel.Size = UDim2.fromOffset(260, 54)
+		timeLabel.BackgroundTransparency = 0.25
+		timeLabel.BackgroundColor3 = Color3.fromRGB(18, 18, 18)
+		timeLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+		timeLabel.BorderSizePixel = 0
+		timeLabel.Font = Enum.Font.GothamBold
+		timeLabel.TextScaled = true
+		timeLabel.Text = "05:00"
+		timeLabel.Parent = hud
+
+		local corner = Instance.new("UICorner")
+		corner.CornerRadius = UDim.new(0, 12)
+		corner.Parent = timeLabel
+
+		local stroke = Instance.new("UIStroke")
+		stroke.Thickness = 2
+		stroke.Color = Color3.fromRGB(255, 255, 255)
+		stroke.Transparency = 0.65
+		stroke.Parent = timeLabel
+	end
 
 	-- 1. TRACK MONEY AND OFFLINE INCOME
 	local labels = hud:WaitForChild("Labels")
@@ -57,6 +83,41 @@ local function setupHUD()
 	end
 	moneyStat.Changed:Connect(updateMoney)
 	updateMoney()
+
+	local function formatSessionTime(totalSeconds: number): string
+		local minutes = math.floor(totalSeconds / 60)
+		local seconds = totalSeconds % 60
+		return string.format("%02d:%02d", minutes, seconds)
+	end
+
+	local function updateSessionTimer()
+		local isEnded = Workspace:GetAttribute("SessionEnded") == true
+		local message = Workspace:GetAttribute("SessionMessage")
+		local remaining = Workspace:GetAttribute("SessionTimeRemaining")
+		local warningThreshold = Constants.SESSION_WARNING_THRESHOLD
+
+		if isEnded and type(message) == "string" and message ~= "" then
+			timeLabel.Text = message
+			timeLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
+			return
+		end
+
+		if type(remaining) ~= "number" then
+			return
+		end
+
+		timeLabel.Text = formatSessionTime(remaining)
+		if remaining <= warningThreshold then
+			timeLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
+		else
+			timeLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+		end
+	end
+
+	Workspace:GetAttributeChangedSignal("SessionTimeRemaining"):Connect(updateSessionTimer)
+	Workspace:GetAttributeChangedSignal("SessionEnded"):Connect(updateSessionTimer)
+	Workspace:GetAttributeChangedSignal("SessionMessage"):Connect(updateSessionTimer)
+	updateSessionTimer()
 
 	-- Start loop to calculate Offline/Hour dynamically
 	task.spawn(function()
