@@ -7,14 +7,10 @@
     "ZIndex": 1,
     "BorderSizePixel": 0,
     "Size": {
-      "X": { "Scale": 0, "Offset": 200 },
-      "Y": { "Scale": 0, "Offset": 50 },
-      "_type": "UDim2"
+      "UDim2": [[0, 200], [0, 50]]
     },
     "Position": {
-      "X": { "Scale": 0, "Offset": 0 },
-      "Y": { "Scale": 0, "Offset": 0 },
-      "_type": "UDim2"
+      "UDim2": [[0, 0], [0, 0]]
     },
     "BackgroundColor3": [1, 1, 1],
     "BackgroundTransparency": 0,
