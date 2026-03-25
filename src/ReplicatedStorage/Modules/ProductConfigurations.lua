@@ -16,6 +16,10 @@ ProductConfigurations.Products = {
 	["SkipRebirth"] = 3535477160,
 	["RandomItem"] = 3541134967,
 	["PlaytimeRewardsSkipAll"] = 3555241775,
+	-- TODO Добавить актуальные ID продуктов для ускорения получения наград за время игры
+	["PlaytimeRewardsSpeedX2"] = 3563204131,
+	["PlaytimeRewardsSpeedX5"] = 3563204131,
+	-- TODO Добавить актуальные ID продуктов для пропуска наград за время игры
 	["DailyRewardsSkipAll"] = 3555241775,
 	["DailyRewardsSkip1"] = 3555241775,
 

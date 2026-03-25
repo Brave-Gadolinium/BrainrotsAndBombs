@@ -60,15 +60,20 @@ local STATE_TEXT = {
 	Locked = "Locked",
 }
 
+local function hasDay(dayMap, day: number): boolean
+	if type(dayMap) ~= "table" then
+		return false
+	end
+
+	return dayMap[day] == true or dayMap[tostring(day)] == true
+end
+
 local function getButtonState(day: number, status)
-	if day < status.ClaimDay then
+	if hasDay(status.ClaimedRewardDays, day) then
 		return "Collected"
 	end
 
-	if day == status.ClaimDay then
-		if status.ClaimedToday then
-			return "Collected"
-		end
+	if hasDay(status.AvailableClaimDays, day) then
 		return "Claim"
 	end
 
@@ -156,14 +161,14 @@ local function renderRewards(status)
 				end
 
 				isClaiming = true
-				local result = claimRewardRemote:InvokeServer()
+				local result = claimRewardRemote:InvokeServer(day)
 				isClaiming = false
 
-				if result and result.Success and result.Status then
+				if result and result.Status then
 					renderRewards(result.Status)
-				elseif result and result.Error == "AlreadyClaimed" and result.Status then
-					renderRewards(result.Status)
-				else
+				end
+
+				if not (result and result.Success) then
 					NotificationManager.show("Daily reward is not available right now.", "Error")
 				end
 			end)

@@ -25,6 +25,8 @@ local mainFrame = playtimeRewardsFrame:WaitForChild("MainFrame") :: Frame
 local rewardsGrid = mainFrame:WaitForChild("RewardsGrid") :: ScrollingFrame
 local template = rewardsGrid:WaitForChild("Template") :: ImageButton
 local openAllButton = mainFrame:WaitForChild("OpenAll") :: ImageButton
+local speedX2Button = mainFrame:WaitForChild("Speedx2") :: ImageButton
+local speedX5Button = mainFrame:WaitForChild("Speedx5") :: ImageButton
 
 local playtimeRewardsRemotes = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("PlaytimeRewards")
 local getStatusRemote = playtimeRewardsRemotes:WaitForChild("GetStatus") :: RemoteFunction
@@ -118,6 +120,27 @@ local function updateHeader(status)
 	else
 		timerLabel.Text = "Completed"
 	end
+end
+
+local function getCurrentSpeedMultiplier(): number
+	if currentStatus and type(currentStatus.SpeedMultiplier) == "number" then
+		return math.max(1, currentStatus.SpeedMultiplier)
+	end
+
+	local attributeMultiplier = player:GetAttribute("PlaytimeRewardSpeedMultiplier")
+	if type(attributeMultiplier) == "number" then
+		return math.max(1, attributeMultiplier)
+	end
+
+	return 1
+end
+
+local function updateSpeedButtons()
+	local hasSpeedX2 = player:GetAttribute("PlaytimeRewardHasSpeedX2") == true
+	local hasSpeedX5 = player:GetAttribute("PlaytimeRewardHasSpeedX5") == true
+
+	speedX2Button.Visible = not hasSpeedX2
+	speedX5Button.Visible = not hasSpeedX5
 end
 
 local function updateButtonVisual(button: ImageButton, reward, status)
@@ -223,28 +246,54 @@ openAllButton.MouseButton1Click:Connect(function()
 	MarketplaceService:PromptProductPurchase(player, productId)
 end)
 
+speedX2Button.MouseButton1Click:Connect(function()
+	local productId = ProductConfigurations.Products["PlaytimeRewardsSpeedX2"]
+	if type(productId) ~= "number" or productId <= 0 then
+		NotificationManager.show("Playtime x2 Speed product ID is not configured yet.", "Error")
+		return
+	end
+
+	MarketplaceService:PromptProductPurchase(player, productId)
+end)
+
+speedX5Button.MouseButton1Click:Connect(function()
+	local productId = ProductConfigurations.Products["PlaytimeRewardsSpeedX5"]
+	if type(productId) ~= "number" or productId <= 0 then
+		NotificationManager.show("Playtime x5 Speed product ID is not configured yet.", "Error")
+		return
+	end
+
+	MarketplaceService:PromptProductPurchase(player, productId)
+end)
+
 template.Visible = false
 updateHeader(nil)
+updateSpeedButtons()
 requestInitialStatus()
 
 statusUpdatedRemote.OnClientEvent:Connect(function(status)
 	renderRewards(status)
+	updateSpeedButtons()
 end)
+
+player:GetAttributeChangedSignal("PlaytimeRewardHasSpeedX2"):Connect(updateSpeedButtons)
+player:GetAttributeChangedSignal("PlaytimeRewardHasSpeedX5"):Connect(updateSpeedButtons)
 
 task.spawn(function()
 	while true do
 		task.wait(1)
+		local speedMultiplier = getCurrentSpeedMultiplier()
 
 		if currentStatus then
 			if #(currentStatus.ClaimableRewardIds or {}) == 0 and currentStatus.NextRewardId then
-				currentStatus.SecondsUntilNextReward = math.max(0, (currentStatus.SecondsUntilNextReward or 0) - 1)
+				currentStatus.SecondsUntilNextReward = math.max(0, (currentStatus.SecondsUntilNextReward or 0) - speedMultiplier)
 			end
 			updateHeader(currentStatus)
 		end
 
 		for rewardId, remaining in pairs(rewardCountdowns) do
 			if remaining > 0 then
-				rewardCountdowns[rewardId] = math.max(0, remaining - 1)
+				rewardCountdowns[rewardId] = math.max(0, remaining - speedMultiplier)
 				local button = rewardButtons[rewardId]
 				if button and currentStatus and getButtonState(rewardId, currentStatus) == "Locked" then
 					local rewardTime = (button:WaitForChild("Frame") :: Frame):WaitForChild("RewardTime") :: TextLabel

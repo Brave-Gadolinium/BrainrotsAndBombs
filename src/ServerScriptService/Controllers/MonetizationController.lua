@@ -109,6 +109,19 @@ function MonetizationController.ProcessReceipt(receiptInfo)
 		return Enum.ProductPurchaseDecision.NotProcessedYet
 	end
 
+	if productName == "PlaytimeRewardsSpeedX2" or productName == "PlaytimeRewardsSpeedX5" then
+		if not PlaytimeRewardController then
+			PlaytimeRewardController = require(ServerScriptService.Controllers.PlaytimeRewardController)
+		end
+
+		local success = PlaytimeRewardController:HandleSpeedProduct(player, productName)
+		if success then
+			playPurchaseEffects(player)
+			return Enum.ProductPurchaseDecision.PurchaseGranted
+		end
+		return Enum.ProductPurchaseDecision.NotProcessedYet
+	end
+
 	if productName == "DailyRewardsSkipAll" or productName == "DailyRewardsSkip1" then
 		if not DailyRewardController then
 			DailyRewardController = require(ServerScriptService.Controllers.DailyRewardController)
