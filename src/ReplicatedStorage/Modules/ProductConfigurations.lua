@@ -16,8 +16,8 @@ ProductConfigurations.Products = {
 	["SkipRebirth"] = 3535477160,
 	["RandomItem"] = 3541134967,
 	["PlaytimeRewardsSkipAll"] = 3555241775,
-	["DailyRewardsSkipAll"] = 0,
-	["DailyRewardsSkip1"] = 0,
+	["DailyRewardsSkipAll"] = 3555241775,
+	["DailyRewardsSkip1"] = 3555241775,
 
 	["ItemProduct1"] = 3507422194,
 	["ItemProduct2"] = 3507422461,

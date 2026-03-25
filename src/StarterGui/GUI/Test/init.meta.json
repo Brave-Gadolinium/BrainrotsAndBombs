@@ -1,0 +1,26 @@
+{
+  "className": "TextLabel",
+  "ignoreUnknownInstances": true,
+  "properties": {
+    "Active": false,
+    "Visible": false,
+    "ZIndex": 1,
+    "BorderSizePixel": 0,
+    "Size": {
+      "X": { "Scale": 0, "Offset": 200 },
+      "Y": { "Scale": 0, "Offset": 50 },
+      "_type": "UDim2"
+    },
+    "Position": {
+      "X": { "Scale": 0, "Offset": 0 },
+      "Y": { "Scale": 0, "Offset": 0 },
+      "_type": "UDim2"
+    },
+    "BackgroundColor3": [1, 1, 1],
+    "BackgroundTransparency": 0,
+    "Text": "Label",
+    "TextColor3": [0, 0, 0],
+    "TextTransparency": 0,
+    "Rotation": 0
+  }
+}
