@@ -9,6 +9,7 @@ local PickaxeController = {}
 
 -- [ MODULES ]
 local BombsConfigurations = require(ReplicatedStorage.Modules.BombsConfigurations)
+local BadgeManager = require(ServerScriptService.Modules.BadgeManager)
 local PlayerController -- Lazy Load
 
 -- [ ASSETS ]
@@ -120,6 +121,7 @@ function PickaxeController.HandlePickaxeAction(player: Player, pickaxeName: stri
 		profile.Data.EquippedPickaxe = pickaxeName -- Auto-Equip the new best pickaxe!
 
 		PickaxeController.EquipPickaxe(player, pickaxeName)
+		BadgeManager:EvaluatePickaxeMilestones(player, pickaxeName)
 
 		if NotificationEvent then 
 			NotificationEvent:FireClient(player, "Purchased " .. config.DisplayName .. "!", "Success") 

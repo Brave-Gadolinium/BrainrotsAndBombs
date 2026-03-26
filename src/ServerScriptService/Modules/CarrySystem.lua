@@ -13,6 +13,7 @@ local CarrySystem = {}
 -- [ MODULES ]
 local ItemConfigurations = require(ReplicatedStorage.Modules.ItemConfigurations)
 local PlayerController = require(ServerScriptService.Controllers.PlayerController) 
+local BadgeManager = require(ServerScriptService.Modules.BadgeManager)
 local ItemManager -- Lazy Loaded
 local PickaxeController -- ## ADDED ##
 
@@ -242,11 +243,19 @@ local function processZoneExit(player: Player)
 	if items and #items > 0 then
 		if isAlive then
 			local lastGivenTool = nil
+			local profile = PlayerController:GetProfile(player)
+			local totalCollected = profile and (profile.Data.TotalBrainrotsCollected or 0) or 0
 
 			for _, itemData in ipairs(items) do
 				-- Capture the returned tool
 				local newTool = ItemManager.GiveItemToPlayer(player, itemData.Name, itemData.Mutation, itemData.Rarity, 1, false)
 				if newTool then lastGivenTool = newTool end
+				totalCollected += 1
+				BadgeManager:EvaluateBrainrotMilestones(player, itemData.Rarity, totalCollected)
+			end
+
+			if profile then
+				profile.Data.TotalBrainrotsCollected = totalCollected
 			end
 
 			-- Auto-Equip the newly received item

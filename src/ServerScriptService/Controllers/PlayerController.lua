@@ -17,6 +17,8 @@ local NumberFormatter = require(ReplicatedStorage.Modules.NumberFormatter)
 local UpgradesConfiguration = require(ReplicatedStorage.Modules.UpgradesConfigurations)
 local SlotUnlockConfigurations = require(ReplicatedStorage.Modules.SlotUnlockConfigurations)
 local Constants = require(ReplicatedStorage.Modules.Constants)
+local BombsConfigurations = require(ReplicatedStorage.Modules.BombsConfigurations)
+local BadgeManager = require(ServerScriptService.Modules.BadgeManager)
 local ItemManager 
 local SlotManager 
 
@@ -52,6 +54,7 @@ type PlayerData = {
 	LastSaveTime: number,
 	SpinNumber: number,
 	LastDailySpin: number,
+	TotalBrainrotsCollected: number,
 	Inventory: {ItemData},
 	Plots: { [string]: FloorData },
 	DiscoveredItems: {[string]: boolean},
@@ -70,6 +73,7 @@ local Template: PlayerData = {
 	LastSaveTime = 0,
 	SpinNumber = 0,     
 	LastDailySpin = 0,   
+	TotalBrainrotsCollected = 0,
 	Inventory = {},
 	Plots = { Floor1 = {}, Floor2 = {}, Floor3 = {} },
 	DiscoveredItems = {},
@@ -111,6 +115,71 @@ local function playPurchaseEffects(player: Player)
 			end
 		end
 		Debris:AddItem(confetti, 3)
+	end
+end
+
+local function getHighestOwnedPickaxe(data): string?
+	local ownedPickaxes = data.OwnedPickaxes
+	if type(ownedPickaxes) ~= "table" then
+		return nil
+	end
+
+	local highestPickaxeName = nil
+	local highestPrice = -1
+
+	for pickaxeName, isOwned in pairs(ownedPickaxes) do
+		if isOwned then
+			local pickaxeData = BombsConfigurations.Bombs[pickaxeName]
+			local price = pickaxeData and pickaxeData.Price or -1
+			if price > highestPrice then
+				highestPrice = price
+				highestPickaxeName = pickaxeName
+			end
+		end
+	end
+
+	return highestPickaxeName
+end
+
+local function evaluateExistingBadgeProgress(player: Player, profile: any)
+	BadgeManager:AwardWelcome(player)
+	BadgeManager:EvaluateMoneyMilestones(player, profile.Data.Money or 0)
+	BadgeManager:EvaluateOnboardingStep(player, profile.Data.OnboardingStep or 1)
+
+	local highestOwnedPickaxe = getHighestOwnedPickaxe(profile.Data)
+	if highestOwnedPickaxe then
+		BadgeManager:EvaluatePickaxeMilestones(player, highestOwnedPickaxe)
+	end
+
+	local inventory = profile.Data.Inventory
+	local totalCollected = profile.Data.TotalBrainrotsCollected or 0
+	local sawAnyBrainrot = false
+	local sawLegendary = false
+	local sawMythic = false
+
+	if type(inventory) == "table" then
+		for _, itemData in ipairs(inventory) do
+			if type(itemData) == "table" and type(itemData.Rarity) == "string" then
+				sawAnyBrainrot = true
+				if itemData.Rarity == "Legendary" then
+					sawLegendary = true
+				elseif itemData.Rarity == "Mythic" then
+					sawMythic = true
+				end
+			end
+		end
+	end
+
+	if totalCollected > 0 or sawAnyBrainrot then
+		BadgeManager:EvaluateBrainrotMilestones(player, nil, math.max(totalCollected, sawAnyBrainrot and 1 or 0))
+	end
+
+	if sawLegendary then
+		BadgeManager:EvaluateBrainrotMilestones(player, "Legendary", totalCollected)
+	end
+
+	if sawMythic then
+		BadgeManager:EvaluateBrainrotMilestones(player, "Mythic", totalCollected)
 	end
 end
 
@@ -258,6 +327,7 @@ function PlayerController:AddMoney(player: Player, amount: number)
 	if profile then
 		profile.Data.Money += amount
 		player.leaderstats.Money.Value = profile.Data.Money
+		BadgeManager:EvaluateMoneyMilestones(player, profile.Data.Money)
 	end
 end
 
@@ -456,6 +526,7 @@ local function onPlayerAdded(player: Player)
 
 	if profile.Data.DiscoveredItems == nil then profile.Data.DiscoveredItems = {} end
 	if profile.Data.ClaimedPacks == nil then profile.Data.ClaimedPacks = {} end
+	if type(profile.Data.TotalBrainrotsCollected) ~= "number" then profile.Data.TotalBrainrotsCollected = 0 end
 
 	profile.OnSessionEnd:Connect(function() 
 		profiles[player] = nil
@@ -465,6 +536,7 @@ local function onPlayerAdded(player: Player)
 	if player.Parent == Players then
 		profiles[player] = profile
 		createLeaderstats(player, profile.Data)
+		evaluateExistingBadgeProgress(player, profile)
 
 		local function setupBackpackTracking(backpack: Backpack)
 			backpack.ChildAdded:Connect(function() syncInventoryData(player) end)
@@ -563,6 +635,7 @@ function PlayerController:Init(controllers)
 			if step > current then
 				profile.Data.OnboardingStep = step
 				player:SetAttribute("OnboardingStep", step) 
+				BadgeManager:EvaluateOnboardingStep(player, step)
 				if step == 6 then checkAndGrantGroupReward(player, profile) end
 			end
 		end
