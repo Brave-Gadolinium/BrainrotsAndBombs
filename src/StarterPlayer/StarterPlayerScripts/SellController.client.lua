@@ -5,20 +5,19 @@ local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
-local RunService = game:GetService("RunService")
+local CollectionService = game:GetService("CollectionService")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
 -- [ NPC REFERENCES ]
 local sellNPC = Workspace:WaitForChild("SellNPC")
-local proxPart = sellNPC:WaitForChild("ProxPart")
-local prompt = proxPart:WaitForChild("ProximityPrompt") :: ProximityPrompt
 local sourceGui = sellNPC:WaitForChild("SellGUI") -- The template inside the NPC
 
 -- [ CONFIG ]
-local MAX_DISTANCE = prompt.MaxActivationDistance + 5 
+local MAX_DISTANCE = 15
 local CHECK_RATE = 0.2
+local DEBOUNCE_TIME = 0.5
 
 -- [ EVENTS ]
 local Events = ReplicatedStorage:WaitForChild("Events")
@@ -32,6 +31,8 @@ local TWEEN_INFO = TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirecti
 -- [ STATE ]
 local isMenuOpen = false
 local SellGUI: BillboardGui? = nil -- Variable to hold the current GUI
+local activeSellPart: BasePart? = nil
+local lastInteraction = 0
 
 -- [ HELPER: Button Animation ]
 local function setupButtonAnimation(button: GuiButton)
@@ -57,20 +58,16 @@ local function closeSellMenu()
 		SellGUI.Enabled = false
 	end
 	isMenuOpen = false
-
-	-- ## FIX: Robust Re-Enable Logic ##
-	prompt.Enabled = false
-	task.delay(0.5, function()
-		prompt.Enabled = true
-	end)
+	activeSellPart = nil
 end
 
-local function openSellMenu()
+local function openSellMenu(sellPart: BasePart)
 	if isMenuOpen or not SellGUI then return end
 	isMenuOpen = true
+	activeSellPart = sellPart
 
 	SellGUI.Enabled = true
-	prompt.Enabled = false 
+	SellGUI.Adornee = sellPart
 
 	-- Reset buttons scale (Manual find because references might change)
 	local buttons = {SellGUI:FindFirstChild("Close", true), SellGUI:FindFirstChild("SellEquipped", true), SellGUI:FindFirstChild("SellInventory", true)}
@@ -89,12 +86,12 @@ local function openSellMenu()
 			local char = player.Character
 			local root = char and char:FindFirstChild("HumanoidRootPart")
 
-			if not root or not proxPart then
+			if not root or not activeSellPart then
 				closeSellMenu()
 				break
 			end
 
-			local distance = (root.Position - proxPart.Position).Magnitude
+			local distance = (root.Position - activeSellPart.Position).Magnitude
 
 			if distance > MAX_DISTANCE then
 				closeSellMenu()
@@ -117,7 +114,6 @@ local function setupUI()
 	SellGUI = sourceGui:Clone()
 	if SellGUI then
 		SellGUI.Parent = playerGui
-		SellGUI.Adornee = proxPart 
 		SellGUI.Enabled = false
 
 		-- 3. Get New Buttons
@@ -143,10 +139,43 @@ local function setupUI()
 	end
 end
 
--- [ CONNECTIONS ]
+local function connectSellPart(instance: Instance)
+	if not instance:IsA("BasePart") then
+		return
+	end
 
--- Connect the ProximityPrompt (This stays in Workspace, so we don't need to re-connect it)
-prompt.Triggered:Connect(openSellMenu)
+	if instance:GetAttribute("SellTouchConnected") then
+		return
+	end
+
+	instance:SetAttribute("SellTouchConnected", true)
+
+	instance.Touched:Connect(function(hit)
+		local now = tick()
+		if now - lastInteraction < DEBOUNCE_TIME then
+			return
+		end
+
+		local character = hit.Parent
+		if character ~= player.Character then
+			return
+		end
+
+		local humanoid = character:FindFirstChild("Humanoid")
+		if not humanoid or humanoid.Health <= 0 then
+			return
+		end
+
+		lastInteraction = now
+		openSellMenu(instance)
+	end)
+end
+
+for _, taggedPart in ipairs(CollectionService:GetTagged("SellPart")) do
+	connectSellPart(taggedPart)
+end
+
+CollectionService:GetInstanceAddedSignal("SellPart"):Connect(connectSellPart)
 
 -- Setup UI immediately on load
 setupUI()
@@ -157,11 +186,9 @@ player.CharacterAdded:Connect(function()
 	task.wait(0.5) 
 	setupUI()
 	isMenuOpen = false -- Reset state
-	prompt.Enabled = true
+	activeSellPart = nil
 end)
 
--- Ensure prompt is enabled on load
 sourceGui.Enabled = false 
-prompt.Enabled = true
 
 print("[SellController] Loaded - Death Fix Applied")

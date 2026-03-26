@@ -6,6 +6,7 @@ local Workspace = game:GetService("Workspace")
 local StarterGui = game:GetService("StarterGui")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
+local CollectionService = game:GetService("CollectionService")
 
 -- Modules
 local FrameManager = require(ReplicatedStorage.Modules.FrameManager)
@@ -74,43 +75,60 @@ local function setupHudButtons()
 end
 
 -- [ LOGIC: WORKSPACE TOUCH ]
-local function setupTouchTrigger(modelName: string, frameName: string)
-	local model = Workspace:WaitForChild(modelName, 5)
-	if not model then return end
-	local touchPart = model:WaitForChild("Touch", 5) :: BasePart
-	if not touchPart then return end
+local function setupTaggedTouchTrigger(tagName: string, frameName: string)
 	local targetFrame = framesContainer:FindFirstChild(frameName) :: GuiObject
 	if not targetFrame then return end
 
 	local openedByTouch = false
+	local activeTouchPart: BasePart? = nil
+
+	local function connectTouchPart(touchPart: Instance)
+		if not touchPart:IsA("BasePart") then
+			return
+		end
+
+		if touchPart:GetAttribute("TouchTriggerConnected") then
+			return
+		end
+
+		touchPart:SetAttribute("TouchTriggerConnected", true)
+
+		touchPart.Touched:Connect(function(hit)
+			local now = tick()
+			if now - lastInteraction < DEBOUNCE_TIME then return end
+			local char = hit.Parent
+			if char == player.Character then
+				local hum = char:FindFirstChild("Humanoid")
+				if hum and hum.Health > 0 then
+					lastInteraction = now
+					openedByTouch = true
+					activeTouchPart = touchPart
+					FrameManager.open(frameName)
+				end
+			end
+		end)
+	end
 
 	-- Reset the touch flag if the frame gets closed by ANY means (Distance, HUD button, or X button)
 	targetFrame:GetPropertyChangedSignal("Visible"):Connect(function()
 		if not targetFrame.Visible then
 			openedByTouch = false
+			activeTouchPart = nil
 		end
 	end)
 
-	touchPart.Touched:Connect(function(hit)
-		local now = tick()
-		if now - lastInteraction < DEBOUNCE_TIME then return end
-		local char = hit.Parent
-		if char == player.Character then
-			local hum = char:FindFirstChild("Humanoid")
-			if hum and hum.Health > 0 then
-				lastInteraction = now
-				openedByTouch = true -- Flag that we specifically used the physical part
-				FrameManager.open(frameName)
-			end
-		end
-	end)
+	for _, taggedInstance in ipairs(CollectionService:GetTagged(tagName)) do
+		connectTouchPart(taggedInstance)
+	end
+
+	CollectionService:GetInstanceAddedSignal(tagName):Connect(connectTouchPart)
 
 	task.spawn(function()
 		while true do
 			task.wait(0.5)
 			-- ONLY check distance if the menu was opened by walking onto the part
-			if openedByTouch and targetFrame.Visible and player.Character and player.Character.PrimaryPart then
-				local dist = (player.Character.PrimaryPart.Position - touchPart.Position).Magnitude
+			if openedByTouch and targetFrame.Visible and player.Character and player.Character.PrimaryPart and activeTouchPart then
+				local dist = (player.Character.PrimaryPart.Position - activeTouchPart.Position).Magnitude
 				if dist > CLOSE_DISTANCE then
 					FrameManager.close(frameName)
 				end
@@ -140,9 +158,8 @@ function UIInitializer:Init()
 	end
 
 	setupHudButtons()
-	setupTouchTrigger("Upgrades", "Upgrades")
-	setupTouchTrigger("Robux", "Shop")
-	setupTouchTrigger("Pickaxes", "Pickaxes") 
+	setupTaggedTouchTrigger("UpgradePart", "Upgrades")
+	setupTaggedTouchTrigger("ShopPart", "Pickaxes")
 
 	print("[UIInitializer] Ready.")
 end

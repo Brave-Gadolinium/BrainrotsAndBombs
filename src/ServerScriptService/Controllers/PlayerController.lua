@@ -281,9 +281,9 @@ local function calculateOfflineEarnings(player: Player, profile: any)
 	if totalEarned > 0 then
 		task.delay(4, function() 
 			if player and player.Parent then
-				local events = ReplicatedStorage:FindFirstChild("Events")
-				local notif = events and events:FindFirstChild("ShowNotification")
-				if notif then notif:FireClient(player, "Collect your offline earnings!", "Success") end
+				--local events = ReplicatedStorage:FindFirstChild("Events")
+				--local notif = events and events:FindFirstChild("ShowNotification")
+				--if notif then notif:FireClient(player, "Collect your offline earnings!", "Success") end
 			end
 		end)
 	end

@@ -104,7 +104,7 @@ local function initializeUI()
 				task.spawn(function()
 					local success, info = pcall(function() return MarketplaceService:GetProductInfo(robuxId, Enum.InfoType.Product) end)
 					if success and info and robuxPriceLabel then
-						robuxPriceLabel.Text = "" .. tostring(info.PriceInRobux)
+						robuxPriceLabel.Text = "оЂ‚" .. tostring(info.PriceInRobux)
 					end
 				end)
 				robuxBtn.MouseButton1Click:Connect(function()
