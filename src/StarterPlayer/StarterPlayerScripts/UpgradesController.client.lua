@@ -17,30 +17,23 @@ local UpgradesController = {}
 
 print("[UpgradesController] Loaded")
 
+local function hideSlotUpgrade(button: TextButton)
+	button.Visible = false
+	button.Active = false
+	button.AutoButtonColor = false
+
+	local surfaceGui = button.Parent
+	if surfaceGui and surfaceGui:IsA("SurfaceGui") then
+		-- Можно разблокировать и будут видны улучшения слотов.
+		surfaceGui.Enabled = false
+	end
+end
+
 local function setupButton(button: TextButton)
-	if button:GetAttribute("Connected") then return end
-	button:SetAttribute("Connected", true)
-
-	button.MouseButton1Click:Connect(function()
-		-- [[ ADDED: Play Upgrade Sound Locally ]]
-		local soundTemplate = SoundFolder:FindFirstChild("Upgrade")
-		if soundTemplate and soundTemplate:IsA("Sound") then
-			local newSound = soundTemplate:Clone()
-			newSound.Parent = playerGui
-			newSound:Play()
-			Debris:AddItem(newSound, newSound.TimeLength + 0.1)
-		end
-
-		local surfaceGui = button.Parent
-		if surfaceGui and surfaceGui:IsA("SurfaceGui") then
-			local slotName = surfaceGui:GetAttribute("SlotName")
-			local floorName = surfaceGui:GetAttribute("FloorName")
-
-			if slotName and floorName then
-				UpgradeEvent:FireServer(floorName, slotName)
-			end
-		end
-	end)
+	if button:FindFirstAncestor("UpgradeSlotsButton") then
+		return
+	end
+	hideSlotUpgrade(button)
 end
 
 local function onDescendantAdded(descendant: Instance)

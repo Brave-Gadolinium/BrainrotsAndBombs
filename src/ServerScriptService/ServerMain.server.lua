@@ -97,6 +97,3 @@ game:BindToClose(function()
 end)
 
 print("[ServerMain] --- Server Ready ---")
-
-task.wait(5)
-require(game.ServerScriptService.Modules.ItemManager).GiveLuckyBlockToPlayer(game.Players:FindFirstChild("Seper131Dragon"), "luckyblock_common")

@@ -216,6 +216,11 @@ function ItemManager.GiveItemToPlayer(player: Player, itemName: string, mutation
 	return newTool
 end
 function ItemManager.GiveLuckyBlockToPlayer(player: Player, blockId: string)
+	if not player then
+		warn("[ItemManager] GiveLuckyBlockToPlayer called without a player")
+		return nil
+	end
+
 	local blockConfig = LuckyBlockManager.GetBlockConfig(blockId)
 	if not blockConfig then
 		warn("[ItemManager] Lucky block config not found:", blockId)

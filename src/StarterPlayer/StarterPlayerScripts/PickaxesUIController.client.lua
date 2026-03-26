@@ -11,6 +11,7 @@ local player = Players.LocalPlayer
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local PickaxesConfigurations = require(Modules:WaitForChild("PickaxesConfigurations"))
 local NumberFormatter = require(Modules:WaitForChild("NumberFormatter"))
+local PickaxesFolder = ReplicatedStorage:WaitForChild("Pickaxes")
 
 -- Templates & Events
 local Templates = ReplicatedStorage:WaitForChild("Templates")
@@ -113,10 +114,21 @@ local function initializeUI()
 
 	-- 2. Sort pickaxes safely
 	local sortedPickaxes = {}
+
 	for id, data in pairs(PickaxesConfigurations.Pickaxes) do
-		table.insert(sortedPickaxes, {Id = id, Data = data})
+		local toolTemplate = PickaxesFolder:FindFirstChild(id)
+		if toolTemplate then
+			table.insert(sortedPickaxes, {Id = id, Data = data})
+		end
 	end
 	table.sort(sortedPickaxes, function(a, b) return a.Data.Price < b.Data.Price end)
+
+	if #sortedPickaxes == 0 then
+		selectedPickaxeId = nil
+		isCurrentlyOwned = false
+		isCurrentlyLocked = true
+		return
+	end
 
 	-- 3. Figure out which pickaxe is "Next"
 	local nextAvailableId = nil

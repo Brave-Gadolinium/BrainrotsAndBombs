@@ -15,6 +15,7 @@ local ItemConfigurations = require(ReplicatedStorage.Modules.ItemConfigurations)
 local ProductConfigurations = require(ReplicatedStorage.Modules.ProductConfigurations)
 local NumberFormatter = require(ReplicatedStorage.Modules.NumberFormatter)
 local UpgradesConfiguration = require(ReplicatedStorage.Modules.UpgradesConfigurations)
+local SlotUnlockConfigurations = require(ReplicatedStorage.Modules.SlotUnlockConfigurations)
 local Constants = require(ReplicatedStorage.Modules.Constants)
 local ItemManager 
 local SlotManager 
@@ -46,6 +47,7 @@ type PlayerData = {
 	Rebirths: number,
 	TimePlayed: number, -- ## ADDED ##
 	BaseLevel: number,
+	unlocked_slots: number,
 	OnboardingStep: number, 
 	LastSaveTime: number,
 	SpinNumber: number,
@@ -63,6 +65,7 @@ local Template: PlayerData = {
 	Rebirths = 0,
 	TimePlayed = 0, -- ## ADDED ##
 	BaseLevel = 0,
+	unlocked_slots = SlotUnlockConfigurations.StartSlots,
 	OnboardingStep = 1, 
 	LastSaveTime = 0,
 	SpinNumber = 0,     
@@ -264,6 +267,35 @@ function PlayerController:IncrementBaseLevel(player: Player)
 	return 0
 end
 
+function PlayerController:GetUnlockedSlots(player: Player): number
+	local profile = profiles[player]
+	if not profile then
+		return SlotUnlockConfigurations.StartSlots
+	end
+
+	local unlockedSlots = profile.Data.unlocked_slots
+	if type(unlockedSlots) ~= "number" then
+		local legacyBaseLevel = tonumber(profile.Data.BaseLevel) or 0
+		unlockedSlots = SlotUnlockConfigurations.StartSlots + (legacyBaseLevel * 10)
+		profile.Data.unlocked_slots = SlotUnlockConfigurations.ClampSlots(unlockedSlots)
+	end
+
+	return SlotUnlockConfigurations.ClampSlots(profile.Data.unlocked_slots)
+end
+
+function PlayerController:AddUnlockedSlots(player: Player, amount: number): number
+	local profile = profiles[player]
+	if not profile then
+		return SlotUnlockConfigurations.StartSlots
+	end
+
+	local currentSlots = self:GetUnlockedSlots(player)
+	local updatedSlots = SlotUnlockConfigurations.ClampSlots(currentSlots + amount)
+	profile.Data.unlocked_slots = updatedSlots
+	player:SetAttribute("UnlockedSlots", updatedSlots)
+	return updatedSlots
+end
+
 function PlayerController:SetupSharedInstances()
 	local eventsFolder = ReplicatedStorage:FindFirstChild("Events")
 	if not eventsFolder then 
@@ -275,7 +307,7 @@ function PlayerController:SetupSharedInstances()
 		end
 	end
 	createRemote("RemoteEvent", "ShowNotification") 
-	createRemote("RemoteEvent", "RequestBaseUpgrade")
+	createRemote("RemoteEvent", "RequestSlotPurchase")
 	createRemote("RemoteEvent", "RequestRebirth")
 	createRemote("RemoteEvent", "UpdateRebirthUI")
 	createRemote("RemoteEvent", "RefreshIndex")
@@ -410,9 +442,17 @@ local function onPlayerAdded(player: Player)
 	if profile.Data.BoatSpeed then profile.Data.BoatSpeed = nil end
 	if profile.Data.HelicopterSpeed then profile.Data.HelicopterSpeed = nil end
 
+	if type(profile.Data.unlocked_slots) ~= "number" then
+		local legacyBaseLevel = tonumber(profile.Data.BaseLevel) or 0
+		profile.Data.unlocked_slots = SlotUnlockConfigurations.ClampSlots(
+			SlotUnlockConfigurations.StartSlots + (legacyBaseLevel * 10)
+		)
+	end
+
 	player:SetAttribute("OnboardingStep", profile.Data.OnboardingStep or 1)
 	player:SetAttribute("SpinNumber", profile.Data.SpinNumber or 0)
 	player:SetAttribute("LastDailySpin", profile.Data.LastDailySpin or 0)
+	player:SetAttribute("UnlockedSlots", SlotUnlockConfigurations.ClampSlots(profile.Data.unlocked_slots))
 
 	if profile.Data.DiscoveredItems == nil then profile.Data.DiscoveredItems = {} end
 	if profile.Data.ClaimedPacks == nil then profile.Data.ClaimedPacks = {} end
