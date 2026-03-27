@@ -8,6 +8,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local DailyRewardManager = require(script.Parent.DailyRewardManager)
 local PlaytimeRewardManager = require(script.Parent.PlaytimeRewardManager)
 local TutorialConfiguration = require(ReplicatedStorage.Modules.TutorialConfiguration)
+local RebirthRequirements = require(ReplicatedStorage.Modules.RebirthRequirements)
 
 type SessionState = {
 	SessionId: string,
@@ -23,9 +24,6 @@ local initialized = false
 
 local TUTORIAL_VERSION = "ftue_v2"
 local ONE_DAY_SECONDS = 86400
-local BASE_REBIRTH_COST = 1000000
-local REBIRTH_COST_STEP = 500000
-
 local OneTimeFunnels = {
 	TutorialFTUE = {
 		Kind = "Standard",
@@ -500,16 +498,19 @@ local function canAdvanceOneTime(player: Player, funnelKey: string, requiredStep
 	return getOneTimeStep(profile, funnelKey) >= requiredStep
 end
 
-local function getRebirthInfo(player: Player): (number, number, number)
+local function getRebirthInfo(player: Player): (number, number, number, boolean)
 	local profile = getProfile(player)
 	if not profile then
-		return 0, 0, 1
+		return 0, 0, 1, false
 	end
 
 	local rebirths = tonumber(profile.Data.Rebirths) or 0
-	local cost = BASE_REBIRTH_COST + (rebirths * REBIRTH_COST_STEP)
 	local money = tonumber(profile.Data.Money) or 0
-	return money, cost, rebirths + 1
+	local targetRebirth = rebirths + 1
+	local requirement = RebirthRequirements.Get(targetRebirth)
+	local cost = requirement and (tonumber(requirement.soft_required) or 0) or 0
+
+	return money, cost, targetRebirth, requirement ~= nil
 end
 
 function AnalyticsFunnelsService:LogFailure(player: Player, reason: string, customFields: {[string]: any}?)
@@ -528,8 +529,8 @@ function AnalyticsFunnelsService:SyncTutorial(player: Player, tutorialStep: numb
 end
 
 function AnalyticsFunnelsService:HandleMoneyBalanceChanged(player: Player)
-	local money, cost, targetRebirth = getRebirthInfo(player)
-	if money < cost then
+	local money, cost, targetRebirth, hasRequirement = getRebirthInfo(player)
+	if not hasRequirement or money < cost then
 		return
 	end
 
@@ -712,8 +713,8 @@ function AnalyticsFunnelsService:HandleUpgradeSelected(player: Player, upgradeId
 end
 
 function AnalyticsFunnelsService:HandleRebirthUIOpened(player: Player)
-	local money, cost, targetRebirth = getRebirthInfo(player)
-	if money < cost then
+	local money, cost, targetRebirth, hasRequirement = getRebirthInfo(player)
+	if not hasRequirement or money < cost then
 		return
 	end
 
@@ -725,8 +726,8 @@ function AnalyticsFunnelsService:HandleRebirthUIOpened(player: Player)
 end
 
 function AnalyticsFunnelsService:HandleRebirthRequested(player: Player)
-	local money, cost, targetRebirth = getRebirthInfo(player)
-	if money < cost then
+	local money, cost, targetRebirth, hasRequirement = getRebirthInfo(player)
+	if not hasRequirement or money < cost then
 		return
 	end
 

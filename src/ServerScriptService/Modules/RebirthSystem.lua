@@ -1,65 +1,168 @@
 --!strict
 -- LOCATION: ServerScriptService/Modules/RebirthSystem
 
-local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local RebirthSystem = {}
 
--- [ MODULES ]
-local PlayerController 
+local PlayerController
 local NumberFormatter = require(ReplicatedStorage.Modules.NumberFormatter)
+local ItemConfigurations = require(ReplicatedStorage.Modules.ItemConfigurations)
+local RebirthRequirements = require(ReplicatedStorage.Modules.RebirthRequirements)
 local UpgradesConfiguration = require(ReplicatedStorage.Modules.UpgradesConfigurations)
 local AnalyticsFunnelsService = require(ServerScriptService.Modules.AnalyticsFunnelsService)
 local AnalyticsEconomyService = require(ServerScriptService.Modules.AnalyticsEconomyService)
-local SlotManager 
+local SlotManager
 local TRANSACTION_TYPES = AnalyticsEconomyService:GetTransactionTypes()
+local connected = false
 
--- [ CONFIG ]
-local BASE_REBIRTH_COST = 1000000 -- Cost for the first Rebirth in Cash
-local REBIRTH_COST_STEP = 500000  -- How much the price increases per Rebirth
+export type RebirthEvaluation = {
+	targetLevel: number,
+	requirement: any?,
+	canRebirth: boolean,
+	missingMoney: number,
+	missingItems: {string},
+}
 
--- [ HELPERS ]
+local function getEventsFolder(): Folder
+	return ReplicatedStorage:WaitForChild("Events")
+end
+
+local function fireNotification(player: Player, message: string, messageType: string)
+	local notif = getEventsFolder():FindFirstChild("ShowNotification")
+	if notif and notif:IsA("RemoteEvent") then
+		notif:FireClient(player, message, messageType)
+	end
+end
+
+local function getItemDisplayName(itemId: string): string
+	local itemData = ItemConfigurations.GetItemData(itemId) :: any
+	if itemData and type(itemData.DisplayName) == "string" and itemData.DisplayName ~= "" then
+		return itemData.DisplayName
+	end
+
+	return itemId
+end
+
+local function buildOwnedBrainrotSet(player: Player, profile: any): {[string]: boolean}
+	local owned: {[string]: boolean} = {}
+
+	local function mark(itemName: any)
+		if type(itemName) == "string" and itemName ~= "" then
+			owned[itemName] = true
+		end
+	end
+
+	local function scanContainer(container: Instance?)
+		if not container then
+			return
+		end
+
+		for _, child in ipairs(container:GetChildren()) do
+			if child:IsA("Tool") and child:GetAttribute("IsTemporary") ~= true then
+				mark(child:GetAttribute("OriginalName"))
+			end
+		end
+	end
+
+	scanContainer(player:FindFirstChild("Backpack"))
+	scanContainer(player.Character)
+
+	local plots = profile and profile.Data and profile.Data.Plots
+	if type(plots) == "table" then
+		for _, floorData in pairs(plots) do
+			if type(floorData) == "table" then
+				for _, slotData in pairs(floorData) do
+					if type(slotData) == "table" and type(slotData.Item) == "table" then
+						mark(slotData.Item.Name)
+					end
+				end
+			end
+		end
+	end
+
+	return owned
+end
+
+function RebirthSystem.EvaluateRequirements(player: Player, targetLevel: number?): RebirthEvaluation
+	local profile = PlayerController:GetProfile(player)
+	local currentRebirths = profile and profile.Data and tonumber(profile.Data.Rebirths) or 0
+	local resolvedTargetLevel = tonumber(targetLevel) or (currentRebirths + 1)
+	local requirement = RebirthRequirements.Get(resolvedTargetLevel)
+
+	if not profile or not requirement then
+		return {
+			targetLevel = resolvedTargetLevel,
+			requirement = requirement,
+			canRebirth = false,
+			missingMoney = 0,
+			missingItems = {},
+		}
+	end
+
+	local money = tonumber(profile.Data.Money) or 0
+	local requiredMoney = tonumber(requirement.soft_required) or 0
+	local missingMoney = math.max(requiredMoney - money, 0)
+	local ownedBrainrots = buildOwnedBrainrotSet(player, profile)
+	local missingItems = {}
+
+	for _, itemId in ipairs(requirement.item_required or {}) do
+		if type(itemId) == "string" and itemId ~= "" and not ownedBrainrots[itemId] then
+			table.insert(missingItems, itemId)
+		end
+	end
+
+	return {
+		targetLevel = resolvedTargetLevel,
+		requirement = requirement,
+		canRebirth = missingMoney <= 0 and #missingItems == 0,
+		missingMoney = missingMoney,
+		missingItems = missingItems,
+	}
+end
+
 function RebirthSystem.GetInfo(player: Player)
 	local profile = PlayerController:GetProfile(player)
-	if not profile then return 0, 0, 0 end
+	if not profile then
+		return 0, 0, 0
+	end
 
-	local reb = profile.Data.Rebirths or 0
-	local cost = BASE_REBIRTH_COST + (reb * REBIRTH_COST_STEP)
+	local rebirths = tonumber(profile.Data.Rebirths) or 0
+	local currentMult = 1 + (rebirths * 0.5)
+	local nextMult = 1 + ((rebirths + 1) * 0.5)
+	local requirement = RebirthRequirements.Get(rebirths + 1)
+	local cost = requirement and (tonumber(requirement.soft_required) or 0) or 0
 
-	local currentMult = 1 + (reb * 0.5)
-	local nextMult = 1 + ((reb + 1) * 0.5)
+	if not requirement then
+		nextMult = currentMult
+	end
 
 	return cost, currentMult, nextMult
 end
 
--- [ INTERNAL: DO REBIRTH ]
 local function executeRebirth(player: Player, profile: any)
 	profile.Data.Rebirths += 1
 	player:SetAttribute("Rebirths", profile.Data.Rebirths)
 
-	-- Reset Upgrades to 0 using the new Array format and StatId
 	for _, config in ipairs(UpgradesConfiguration.Upgrades) do
 		local statId = config.StatId
-		profile.Data[statId] = nil -- Set to nil so it falls back to defaults
+		profile.Data[statId] = nil
 		player:SetAttribute(statId, nil)
 	end
 
-	-- ## FIXED: Apply physical reset to a base WalkSpeed of 20 ##
 	local char = player.Character
-	local hum = char and char:FindFirstChild("Humanoid") :: Humanoid
-	if hum then hum.WalkSpeed = 20 end
-
-	-- NOTIFICATION
-	local Events = ReplicatedStorage:FindFirstChild("Events")
-	local notif = Events and Events:FindFirstChild("ShowNotification")
-	if notif then 
-		notif:FireClient(player, "Rebirth Successful!", "Success") 
+	local hum = char and char:FindFirstChild("Humanoid") :: Humanoid?
+	if hum then
+		hum.WalkSpeed = 20
 	end
 
-	local updateEvent = Events:FindFirstChild("UpdateRebirthUI")
-	if updateEvent then updateEvent:FireClient(player) end
+	fireNotification(player, "Rebirth Successful!", "Success")
+
+	local updateEvent = getEventsFolder():FindFirstChild("UpdateRebirthUI")
+	if updateEvent and updateEvent:IsA("RemoteEvent") then
+		updateEvent:FireClient(player)
+	end
 
 	local UpgradesSystem = require(ServerScriptService.Modules.UpgradesSystem)
 	if UpgradesSystem and UpgradesSystem.UpdateClientUI then
@@ -73,7 +176,6 @@ local function executeRebirth(player: Player, profile: any)
 	AnalyticsFunnelsService:HandleRebirthSuccess(player, profile.Data.Rebirths)
 end
 
--- [ PUBLIC API ]
 function RebirthSystem.ForceRebirth(player: Player)
 	local profile = PlayerController:GetProfile(player)
 	if profile then
@@ -83,13 +185,69 @@ end
 
 function RebirthSystem.AttemptRebirth(player: Player)
 	local profile = PlayerController:GetProfile(player)
-	if not profile then return end
+	if not profile then
+		return
+	end
 
-	local cost, _, _ = RebirthSystem.GetInfo(player)
-	local targetRebirth = (profile.Data.Rebirths or 0) + 1
+	local evaluation = RebirthSystem.EvaluateRequirements(player)
+	if not evaluation.requirement then
+		fireNotification(player, "Max rebirth reached!", "Error")
+		AnalyticsFunnelsService:LogFailure(player, "max_rebirth", {
+			zone = "base",
+			funnel = "RebirthConversion",
+		})
+		return
+	end
+
 	AnalyticsFunnelsService:HandleRebirthRequested(player)
 
-	-- Check and deduct money
+	if not evaluation.canRebirth then
+		if evaluation.missingMoney > 0 and #evaluation.missingItems > 0 then
+			local missingNames = {}
+			for _, itemId in ipairs(evaluation.missingItems) do
+				table.insert(missingNames, getItemDisplayName(itemId))
+			end
+
+			fireNotification(
+				player,
+				`Need ${NumberFormatter.Format(evaluation.missingMoney)} more cash and: {table.concat(missingNames, ", ")}`,
+				"Error"
+			)
+			AnalyticsFunnelsService:LogFailure(player, "rebirth_requirements_missing", {
+				zone = "base",
+				funnel = "RebirthConversion",
+				target_rebirth = evaluation.targetLevel,
+			})
+			return
+		end
+
+		if evaluation.missingMoney > 0 then
+			fireNotification(player, `Need ${NumberFormatter.Format(evaluation.missingMoney)} more cash!`, "Error")
+			AnalyticsFunnelsService:LogFailure(player, "not_enough_money", {
+				zone = "base",
+				funnel = "RebirthConversion",
+				target_rebirth = evaluation.targetLevel,
+			})
+			return
+		end
+
+		local missingNames = {}
+		for _, itemId in ipairs(evaluation.missingItems) do
+			table.insert(missingNames, getItemDisplayName(itemId))
+		end
+
+		fireNotification(player, table.concat(missingNames, ", "), "Error")
+		AnalyticsFunnelsService:LogFailure(player, "missing_brainrots", {
+			zone = "base",
+			funnel = "RebirthConversion",
+			target_rebirth = evaluation.targetLevel,
+		})
+		return
+	end
+
+	local cost = tonumber(evaluation.requirement.soft_required) or 0
+	local targetRebirth = evaluation.targetLevel
+
 	AnalyticsEconomyService:FlushBombIncome(player)
 	if PlayerController:DeductMoney(player, cost) then
 		AnalyticsEconomyService:LogCashSink(player, cost, TRANSACTION_TYPES.Gameplay, `Rebirth:{targetRebirth}`, {
@@ -99,42 +257,41 @@ function RebirthSystem.AttemptRebirth(player: Player)
 		})
 		executeRebirth(player, profile)
 	else
-		local Events = ReplicatedStorage:FindFirstChild("Events")
-		local notif = Events and Events:FindFirstChild("ShowNotification")
-		if notif then 
-			notif:FireClient(player, "Not enough money!", "Error") 
-		end
+		fireNotification(player, "Not enough money!", "Error")
 		AnalyticsFunnelsService:LogFailure(player, "not_enough_money", {
 			zone = "base",
 			funnel = "RebirthConversion",
+			target_rebirth = targetRebirth,
 		})
 	end
 end
 
--- [ INIT ]
 function RebirthSystem:Init(controllers)
 	print("[RebirthSystem] Initialized")
 	PlayerController = controllers.PlayerController
 
-	local Modules = ServerScriptService:WaitForChild("Modules")
-	SlotManager = require(Modules:WaitForChild("SlotManager"))
+	local modules = ServerScriptService:WaitForChild("Modules")
+	SlotManager = require(modules:WaitForChild("SlotManager"))
 
-	local Events = ReplicatedStorage:WaitForChild("Events")
-	if not Events:FindFirstChild("RequestRebirth") then
+	local events = getEventsFolder()
+	if not events:FindFirstChild("RequestRebirth") then
 		local re = Instance.new("RemoteEvent")
 		re.Name = "RequestRebirth"
-		re.Parent = Events
+		re.Parent = events
 	end
 
-	if not Events:FindFirstChild("UpdateRebirthUI") then
+	if not events:FindFirstChild("UpdateRebirthUI") then
 		local re = Instance.new("RemoteEvent")
 		re.Name = "UpdateRebirthUI"
-		re.Parent = Events
+		re.Parent = events
 	end
 
-	Events.RequestRebirth.OnServerEvent:Connect(function(player)
-		RebirthSystem.AttemptRebirth(player)
-	end)
+	if not connected then
+		connected = true
+		events.RequestRebirth.OnServerEvent:Connect(function(player)
+			RebirthSystem.AttemptRebirth(player)
+		end)
+	end
 end
 
 function RebirthSystem:Start() end
