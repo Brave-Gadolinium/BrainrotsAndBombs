@@ -15,6 +15,7 @@ local RarityConfigurations = require(ReplicatedStorage.Modules.RarityConfigurati
 local MutationConfigurations = require(ReplicatedStorage.Modules.MutationConfigurations)
 local NumberFormatter = require(ReplicatedStorage.Modules.NumberFormatter)
 local LuckyBlockManager = require(ServerScriptService.Modules.LuckyBlockManager)
+local TutorialService = require(ServerScriptService.Modules.TutorialService)
 local ConfigItems = require(ReplicatedStorage.Modules.ItemConfigurations)
 local Constants = require(ReplicatedStorage.Modules.Constants)
 
@@ -322,6 +323,7 @@ local function onItemPickedUp(player: Player, itemModel: Model)
 		end
 
 		if pickedUp then 
+			TutorialService:HandleBrainrotPickedUp(player)
 			itemModel:Destroy() 
 
 			-- ## FIXED: Queue a replacement immediately when an item is picked up! ##

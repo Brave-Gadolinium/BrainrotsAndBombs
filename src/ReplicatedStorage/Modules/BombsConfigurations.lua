@@ -320,4 +320,8 @@ function BombsConfigurations.GetBlastRadius(bombData: BombData, material: Enum.M
 	return bombData.ExplosionRadius * ratio
 end
 
+for _, bombData in pairs(BombsConfigurations.Bombs) do
+	bombData.ExplosionRadius *= 2
+end
+
 return BombsConfigurations

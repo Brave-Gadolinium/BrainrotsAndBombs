@@ -2,64 +2,225 @@
 -- LOCATION: StarterPlayerScripts/OnboardingController
 
 local Players = game:GetService("Players")
+local CollectionService = game:GetService("CollectionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
+
+local TutorialConfiguration = require(ReplicatedStorage.Modules.TutorialConfiguration)
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
--- [ ASSETS ]
 local Templates = ReplicatedStorage:WaitForChild("Templates")
 local BeamTemplate = Templates:WaitForChild("OnboardingBeam")
 local Events = ReplicatedStorage:WaitForChild("Events")
-local SetStepEvent = Events:WaitForChild("SetOnboardingStep")
+local ReportTutorialAction = Events:WaitForChild("ReportTutorialAction") :: RemoteEvent
 
--- [ UI REFERENCES ]
 local mainGui = playerGui:WaitForChild("GUI")
 local frames = mainGui:WaitForChild("Frames")
+local hud = mainGui:WaitForChild("HUD")
 local notifFrame = frames:WaitForChild("Notifications")
 local instructionsLabel = notifFrame:WaitForChild("Instructions") :: TextLabel
+local pickaxesFrame = frames:WaitForChild("Pickaxes")
 
--- [ CONFIG ]
-local MAX_SEARCH_DIST = 500
-
--- [ STATE ]
 local currentStep = 0
-local activeBeam: Beam?
-local activeAttachment0: Attachment?
-local activeAttachment1: Attachment?
-local targetItem: Model?
-local savedItemName: string = "Item" 
-
-print("[OnboardingController] Initialized (2-Step Fast Track - Pickaxe Ignored)")
-
--- [ HELPERS ]
+local activeBeam: Beam? = nil
+local activeAttachment0: Attachment? = nil
+local activeAttachment1: Attachment? = nil
+local activeHighlight: Highlight? = nil
+local worldTarget: BasePart? = nil
+local refreshAccumulator = 0
+local reportDebounce: {[string]: number} = {}
+local finalMessageHideAt = 0
 
 local function getCharacter()
 	return player.Character or player.CharacterAdded:Wait()
 end
 
-local function findClosestItem(): Model?
-	local char = player.Character
-	if not char then return nil end
-	local root = char:FindFirstChild("HumanoidRootPart") :: BasePart
-	if not root then return nil end
+local function getRootPart(): BasePart?
+	local character = player.Character
+	if not character then
+		return nil
+	end
 
-	local closestItem = nil
-	local minDist = MAX_SEARCH_DIST
+	local rootPart = character:FindFirstChild("HumanoidRootPart")
+	if rootPart and rootPart:IsA("BasePart") then
+		return rootPart
+	end
 
-	local spawners = Workspace:WaitForChild("Mines")
+	return nil
+end
 
-	-- Loop through every mine zone
-	for _, spawner in ipairs(spawners:GetChildren()) do
-		-- Loop through every item inside that mine zone
-		for _, item in ipairs(spawner:GetChildren()) do
-			if item.Name == "SpawnedItem" and item:IsA("Model") and item:GetAttribute("IsSpawnedItem") then
-				local prim = item.PrimaryPart or item:FindFirstChildWhichIsA("BasePart")
-				if prim then
-					local dist = (prim.Position - root.Position).Magnitude
-					if dist < minDist then
-						minDist = dist
+local function cleanupWorldVisuals()
+	if activeBeam then
+		activeBeam:Destroy()
+		activeBeam = nil
+	end
+	if activeAttachment0 then
+		activeAttachment0:Destroy()
+		activeAttachment0 = nil
+	end
+	if activeAttachment1 then
+		activeAttachment1:Destroy()
+		activeAttachment1 = nil
+	end
+	if activeHighlight then
+		activeHighlight:Destroy()
+		activeHighlight = nil
+	end
+
+	worldTarget = nil
+end
+
+local function cleanupBeamVisuals()
+	if activeBeam then
+		activeBeam:Destroy()
+		activeBeam = nil
+	end
+	if activeAttachment0 then
+		activeAttachment0:Destroy()
+		activeAttachment0 = nil
+	end
+	if activeAttachment1 then
+		activeAttachment1:Destroy()
+		activeAttachment1 = nil
+	end
+
+	worldTarget = nil
+end
+
+local function cleanupHighlightVisual()
+	if activeHighlight then
+		activeHighlight:Destroy()
+		activeHighlight = nil
+	end
+end
+
+local function setupBeam(targetPart: BasePart)
+	local rootPart = getCharacter():WaitForChild("HumanoidRootPart") :: BasePart
+
+	if worldTarget == targetPart and activeBeam and activeAttachment0 and activeAttachment1 then
+		return
+	end
+
+	cleanupBeamVisuals()
+
+	local att0 = Instance.new("Attachment")
+	att0.Name = "TutorialAtt0"
+	att0.Parent = rootPart
+	activeAttachment0 = att0
+
+	local att1 = Instance.new("Attachment")
+	att1.Name = "TutorialAtt1"
+	att1.Parent = targetPart
+	activeAttachment1 = att1
+
+	local beam = BeamTemplate:Clone()
+	beam.Attachment0 = att1
+	beam.Attachment1 = att0
+	beam.Parent = rootPart
+	activeBeam = beam
+	worldTarget = targetPart
+end
+
+local function setupHighlight(targetInstance: Instance)
+	if activeHighlight and activeHighlight.Adornee == targetInstance then
+		return
+	end
+
+	cleanupHighlightVisual()
+
+	local highlight = Instance.new("Highlight")
+	highlight.Name = "TutorialHighlight"
+	highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+	highlight.FillColor = Color3.fromRGB(255, 225, 80)
+	highlight.FillTransparency = 0.35
+	highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
+	highlight.OutlineTransparency = 0
+	highlight.Adornee = targetInstance
+	highlight.Parent = playerGui
+
+	activeHighlight = highlight
+end
+
+local function clearAllTargets(keepText: boolean?)
+	cleanupWorldVisuals()
+	if not keepText then
+		instructionsLabel.Visible = false
+	end
+end
+
+local function reportAction(actionId: string)
+	local now = tick()
+	local lastReportedAt = reportDebounce[actionId] or 0
+	if now - lastReportedAt < 0.25 then
+		return
+	end
+
+	reportDebounce[actionId] = now
+	ReportTutorialAction:FireServer(actionId)
+end
+
+local function hasEquippedBrainrot(): boolean
+	local character = player.Character
+	if not character then
+		return false
+	end
+
+	for _, child in ipairs(character:GetChildren()) do
+		if child:IsA("Tool") and child:GetAttribute("Mutation") ~= nil then
+			return true
+		end
+	end
+
+	return character:FindFirstChild("StackItem") ~= nil or character:FindFirstChild("HeadStackItem") ~= nil
+end
+
+local function findTutorialMiningZonePart(): BasePart?
+	local rootPart = getRootPart()
+	if not rootPart then
+		return nil
+	end
+
+	local closestPart: BasePart? = nil
+	local closestDistance = math.huge
+
+	for _, instance in ipairs(CollectionService:GetTagged("MiningZoneTutorial")) do
+		if instance:IsA("BasePart") then
+			local distance = (instance.Position - rootPart.Position).Magnitude
+			if distance < closestDistance then
+				closestDistance = distance
+				closestPart = instance
+			end
+		end
+	end
+
+	return closestPart
+end
+
+local function findClosestBrainrot(): Model?
+	local rootPart = getRootPart()
+	if not rootPart then
+		return nil
+	end
+
+	local minesFolder = Workspace:FindFirstChild("Mines")
+	if not minesFolder then
+		return nil
+	end
+
+	local closestItem: Model? = nil
+	local closestDistance = math.huge
+
+	for _, mine in ipairs(minesFolder:GetChildren()) do
+		for _, item in ipairs(mine:GetChildren()) do
+			if item:IsA("Model") and item.Name == "SpawnedItem" and item:GetAttribute("IsSpawnedItem") then
+				local primary = item.PrimaryPart or item:FindFirstChildWhichIsA("BasePart")
+				if primary then
+					local distance = (primary.Position - rootPart.Position).Magnitude
+					if distance < closestDistance then
+						closestDistance = distance
 						closestItem = item
 					end
 				end
@@ -70,243 +231,209 @@ local function findClosestItem(): Model?
 	return closestItem
 end
 
-local function cleanupVisuals()
-	if activeBeam then activeBeam:Destroy() end
-	if activeAttachment0 then activeAttachment0:Destroy() end
-	if activeAttachment1 then activeAttachment1:Destroy() end
-
-	activeBeam = nil
-	activeAttachment0 = nil
-	activeAttachment1 = nil
-	targetItem = nil
-
-	instructionsLabel.Visible = false
-end
-
-local function setupBeam(targetPart: BasePart)
-	local char = getCharacter()
-	local root = char:WaitForChild("HumanoidRootPart") :: BasePart
-
-	cleanupVisuals()
-
-	local att0 = Instance.new("Attachment")
-	att0.Name = "OnboardingAtt0"
-	att0.Parent = root
-	activeAttachment0 = att0
-
-	local att1 = Instance.new("Attachment")
-	att1.Name = "OnboardingAtt1"
-	att1.Parent = targetPart
-	activeAttachment1 = att1
-
-	local beam = BeamTemplate:Clone()
-	beam.Attachment0 = att1 -- Target
-	beam.Attachment1 = att0 -- Player
-	beam.Parent = root
-	activeBeam = beam
-end
-
--- ## FIXED: Now explicitly checks for the "Mutation" attribute so it ignores Pickaxes! ##
-local function hasPickedUpItem(): boolean
-	local char = player.Character
-	if char then
-		-- Check if carrying it physically
-		if char:FindFirstChild("HeadStackItem") or char:FindFirstChild("StackItem") then return true end
-
-		-- Check if holding it (must be a Tycoon Item, not a Pickaxe)
-		for _, child in ipairs(char:GetChildren()) do
-			if child:IsA("Tool") and child:GetAttribute("Mutation") ~= nil then return true end
-		end
+local function getPlayerPlot(): Model?
+	local plot = Workspace:FindFirstChild("Plot_" .. player.Name)
+	if plot and plot:IsA("Model") then
+		return plot
 	end
 
-	local backpack = player:FindFirstChild("Backpack")
-	if backpack then
-		-- Check if it's in the backpack (must be a Tycoon Item, not a Pickaxe)
-		for _, child in ipairs(backpack:GetChildren()) do
-			if child:IsA("Tool") and child:GetAttribute("Mutation") ~= nil then return true end
-		end
-	end
-
-	return false
+	return nil
 end
 
--- Checks if the player has successfully placed an item on their plot
-local function hasPlacedItem(): boolean
-	local plotName = "Plot_" .. player.Name
-	local plot = Workspace:FindFirstChild(plotName)
-	if not plot then return false end
-
-	local floor1 = plot:FindFirstChild("Floor1")
-	local slots = floor1 and floor1:FindFirstChild("Slots")
-	if slots then
-		for _, slot in ipairs(slots:GetChildren()) do
-			local sp = slot:FindFirstChild("Spawn")
-			if sp and sp:FindFirstChild("VisualItem") then
-				return true
-			end
-		end
-	end
-	return false
-end
-
--- [ FORWARD DECLARATIONS ]
-local startStep1, startStep2
-
--- [ STEP 1: PICK UP ITEM ]
-
-startStep1 = function()
-	currentStep = 1
-
-	-- If they already placed an item somehow, skip the whole tutorial!
-	if hasPlacedItem() then
-		print("[Onboarding] Already placed an item. Skipping.")
-		SetStepEvent:FireServer(6)
-		currentStep = 6
+local function iteratePlotSlots(callback: (Model, BasePart, BasePart?) -> boolean?)
+	local plot = getPlayerPlot()
+	if not plot then
 		return
 	end
 
-	-- If they already have an item, go straight to step 2
-	if hasPickedUpItem() then
-		print("[Onboarding] Step 1 Auto-Complete")
-		SetStepEvent:FireServer(2)
-		startStep2()
-		return
-	end
-
-	local target = findClosestItem()
-	if not target then
-		task.delay(1, startStep1)
-		return
-	end
-
-	targetItem = target
-	savedItemName = targetItem:GetAttribute("OriginalName") or "Item"
-
-	local targetPart = targetItem.PrimaryPart or targetItem:FindFirstChildWhichIsA("BasePart")
-	if not targetPart then return end
-
-	setupBeam(targetPart)
-
-	instructionsLabel.Text = "Pick up a " .. savedItemName .. "!"
-	instructionsLabel.Visible = true
-
-	task.spawn(function()
-		while currentStep == 1 do
-			if hasPickedUpItem() then
-				print("[Onboarding] Step 1 Complete")
-				cleanupVisuals()
-				SetStepEvent:FireServer(2) 
-				startStep2()
-				break
-			end
-
-			if targetItem and not targetItem.Parent then
-				task.wait(0.1) 
-				if hasPickedUpItem() then
-					print("[Onboarding] Step 1 Complete")
-					cleanupVisuals()
-					SetStepEvent:FireServer(2)
-					startStep2()
-					break
-				else
-					print("[Onboarding] Item lost, finding new one...")
-					cleanupVisuals()
-					startStep1()
-					break
+	for _, floor in ipairs(plot:GetChildren()) do
+		if floor:IsA("Model") and floor.Name:match("^Floor%d+$") then
+			local slots = floor:FindFirstChild("Slots")
+			if slots then
+				for _, slot in ipairs(slots:GetChildren()) do
+					if slot:IsA("Model") and slot:GetAttribute("IsUnlocked") == true then
+						local spawnPart = slot:FindFirstChild("Spawn")
+						local collectTouch = slot:FindFirstChild("CollectTouch")
+						if spawnPart and spawnPart:IsA("BasePart") then
+							local shouldBreak = callback(slot, spawnPart, if collectTouch and collectTouch:IsA("BasePart") then collectTouch else nil)
+							if shouldBreak then
+								return
+							end
+						end
+					end
 				end
 			end
-
-			task.wait(0.2)
 		end
-	end)
+	end
 end
 
--- [ STEP 2: PLACE ON PLOT ]
+local function findClosestFreeSlot(): BasePart?
+	local rootPart = getRootPart()
+	if not rootPart then
+		return nil
+	end
 
-startStep2 = function()
-	currentStep = 2
+	local closestSlot: BasePart? = nil
+	local closestDistance = math.huge
 
-	if hasPlacedItem() then
-		print("[Onboarding] Step 2 Auto-Complete")
-		cleanupVisuals()
-		SetStepEvent:FireServer(6) -- 6 triggers the end & Group rewards on the server!
-		currentStep = 6
+	iteratePlotSlots(function(_, spawnPart)
+		if not spawnPart:FindFirstChild("VisualItem") then
+			local distance = (spawnPart.Position - rootPart.Position).Magnitude
+			if distance < closestDistance then
+				closestDistance = distance
+				closestSlot = spawnPart
+			end
+		end
+		return false
+	end)
+
+	return closestSlot
+end
+
+local function findClosestCollectTouch(): BasePart?
+	local rootPart = getRootPart()
+	if not rootPart then
+		return nil
+	end
+
+	local closestCollect: BasePart? = nil
+	local closestDistance = math.huge
+
+	iteratePlotSlots(function(_, spawnPart, collectTouch)
+		local collectGui = collectTouch and collectTouch:FindFirstChild("CollectGUI")
+		if collectTouch and spawnPart:FindFirstChild("VisualItem") and (not collectGui or not collectGui:IsA("SurfaceGui") or collectGui.Enabled) then
+			local distance = (collectTouch.Position - rootPart.Position).Magnitude
+			if distance < closestDistance then
+				closestDistance = distance
+				closestCollect = collectTouch
+			end
+		end
+		return false
+	end)
+
+	return closestCollect
+end
+
+local function resolveWorldTargetForStep(step: number): Instance?
+	if step == 1 then
+		return findTutorialMiningZonePart()
+	elseif step == 3 then
+		return findClosestBrainrot()
+	elseif step == 5 then
+		if hasEquippedBrainrot() then
+			return findClosestFreeSlot()
+		end
+		return nil
+	elseif step == 6 then
+		return findClosestCollectTouch()
+	end
+
+	return nil
+end
+
+local function applyStepPresentation()
+	local stepDefinition = TutorialConfiguration.Steps[currentStep]
+	if not stepDefinition then
+		clearAllTargets()
 		return
 	end
 
-	local plotName = "Plot_" .. player.Name
-	local plot = Workspace:WaitForChild(plotName, 10)
-	if not plot then return end
+	if currentStep >= TutorialConfiguration.FinalStep then
+		instructionsLabel.Text = stepDefinition.Text
+		instructionsLabel.Visible = tick() < finalMessageHideAt
+		clearAllTargets(true)
+		return
+	end
 
-	local floor1 = plot:WaitForChild("Floor1", 10)
-	local slots = floor1 and floor1:WaitForChild("Slots", 10)
-	local slot1 = slots and slots:WaitForChild("Slot1", 10)
-	local spawnPart = slot1 and slot1:WaitForChild("Spawn", 10) :: BasePart
-
-	if spawnPart then setupBeam(spawnPart) end
-
-	instructionsLabel.Text = "Place " .. savedItemName .. " on your plot!"
+	instructionsLabel.Text = stepDefinition.Text
 	instructionsLabel.Visible = true
 
-	task.spawn(function()
-		while currentStep == 2 do
-			if hasPlacedItem() then
-				print("[Onboarding] ALL STEPS COMPLETE")
-				cleanupVisuals()
-				SetStepEvent:FireServer(6) -- We use 6 so the Server's GroupReward check still fires
-				currentStep = 6
-				break
+	local newWorldTarget = resolveWorldTargetForStep(currentStep)
+	if newWorldTarget then
+		if currentStep == 3 then
+			if newWorldTarget:IsA("Model") then
+				local targetPart = newWorldTarget.PrimaryPart or newWorldTarget:FindFirstChildWhichIsA("BasePart")
+				if targetPart then
+					setupBeam(targetPart)
+				else
+					cleanupBeamVisuals()
+				end
+				setupHighlight(newWorldTarget)
+			else
+				cleanupWorldVisuals()
 			end
-
-			-- If they drop it or sell it before placing it, send them back to step 1
-			if not hasPickedUpItem() then
-				print("[Onboarding] Player lost item, returning to Step 1")
-				cleanupVisuals()
-				SetStepEvent:FireServer(1)
-				startStep1()
-				break
-			end
-
-			task.wait(0.2)
+		elseif newWorldTarget:IsA("BasePart") then
+			setupBeam(newWorldTarget)
+			cleanupHighlightVisual()
+		else
+			cleanupWorldVisuals()
 		end
-	end)
+	else
+		cleanupWorldVisuals()
+	end
 end
 
--- [ INIT ]
-
-local function initializeOnboarding()
+local function refreshCurrentStep()
 	local savedStep = player:GetAttribute("OnboardingStep")
-
-	if not savedStep then
-		task.spawn(function()
-			while not savedStep do
-				task.wait(0.5)
-				savedStep = player:GetAttribute("OnboardingStep")
-			end
-			initializeOnboarding() 
-		end)
+	if type(savedStep) ~= "number" then
 		return
 	end
 
-	print("[Onboarding] Starting from Step:", savedStep)
+	local clampedStep = math.clamp(savedStep, 1, TutorialConfiguration.FinalStep)
+	if currentStep ~= clampedStep then
+		if clampedStep >= TutorialConfiguration.FinalStep then
+			finalMessageHideAt = tick() + 10
+		end
+		currentStep = clampedStep
+	end
 
-	if savedStep == 1 then startStep1()
-	elseif savedStep == 2 then startStep2()
-	else
-		print("[Onboarding] Already Completed.")
+	applyStepPresentation()
+end
+
+local function connectUiReporting()
+	local backButton = hud:FindFirstChild("Back")
+	if backButton and backButton:IsA("GuiButton") and not backButton:GetAttribute("TutorialConnected") then
+		backButton:SetAttribute("TutorialConnected", true)
+		backButton.MouseButton1Click:Connect(function()
+			reportAction("BackPressed")
+		end)
+	end
+
+	if not pickaxesFrame:GetAttribute("TutorialConnected") then
+		pickaxesFrame:SetAttribute("TutorialConnected", true)
+		pickaxesFrame:GetPropertyChangedSignal("Visible"):Connect(function()
+			if pickaxesFrame.Visible then
+				reportAction("ShopOpened")
+				task.defer(refreshCurrentStep)
+			end
+		end)
 	end
 end
 
 task.spawn(function()
-	task.wait(2)
-	initializeOnboarding()
+	while player:GetAttribute("OnboardingStep") == nil do
+		task.wait(0.25)
+	end
+
+	connectUiReporting()
+	refreshCurrentStep()
+end)
+
+player:GetAttributeChangedSignal("OnboardingStep"):Connect(function()
+	refreshCurrentStep()
 end)
 
 player.CharacterAdded:Connect(function()
-	task.wait(1)
-	cleanupVisuals()
+	task.wait(0.5)
+	clearAllTargets(true)
+	connectUiReporting()
+	refreshCurrentStep()
+end)
 
-	if currentStep == 1 then startStep1()
-	elseif currentStep == 2 then startStep2()
+RunService.RenderStepped:Connect(function(deltaTime)
+	refreshAccumulator += deltaTime
+	if refreshAccumulator >= 0.25 then
+		refreshAccumulator = 0
+		refreshCurrentStep()
 	end
 end)

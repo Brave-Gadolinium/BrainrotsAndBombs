@@ -13,6 +13,7 @@ local SlotManager = {}
 local ItemConfigurations = require(ReplicatedStorage.Modules.ItemConfigurations)
 local LuckyBlockConfiguration = require(ReplicatedStorage.Modules.LuckyBlockConfiguration)
 local NumberFormatter = require(ReplicatedStorage.Modules.NumberFormatter)
+local TutorialService = require(ServerScriptService.Modules.TutorialService)
 local PlayerController -- Lazy load
 local ItemManager -- Lazy load
 local LuckyBlockManager -- Lazy load
@@ -368,6 +369,7 @@ function SlotManager.HandleInteraction(player: Player, floorName: string, slotNa
 					IsOpening = false,
 				}
 				heldTool:Destroy()
+				TutorialService:HandleBrainrotPlaced(player)
 			elseif heldLuckyBlockId then
 				floorData[slotName] = {
 					ContentType = "LuckyBlock",

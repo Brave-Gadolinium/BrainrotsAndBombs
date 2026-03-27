@@ -8,6 +8,7 @@ local Debris = game:GetService("Debris")
 local Workspace = game:GetService("Workspace")
 
 local BombsConfigurations = require(ReplicatedStorage.Modules.BombsConfigurations)
+local TutorialService = require(game.ServerScriptService.Modules.TutorialService)
 
 local PlayerController
 local CarrySystem
@@ -293,6 +294,7 @@ local function tryThrowBomb(player: Player)
 
 	local origin = getThrowOrigin(root)
 	createThrownBomb(player, origin, root.CFrame.LookVector, bombData)
+	TutorialService:HandleBombThrown(player)
 end
 
 function BombManager:Init()

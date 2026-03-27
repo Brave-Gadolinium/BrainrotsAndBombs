@@ -14,6 +14,7 @@ local CarrySystem = {}
 local ItemConfigurations = require(ReplicatedStorage.Modules.ItemConfigurations)
 local PlayerController = require(ServerScriptService.Controllers.PlayerController) 
 local BadgeManager = require(ServerScriptService.Modules.BadgeManager)
+local TutorialService = require(ServerScriptService.Modules.TutorialService)
 local ItemManager -- Lazy Loaded
 local PickaxeController -- ## ADDED ##
 
@@ -240,6 +241,10 @@ local function processZoneExit(player: Player)
 	local isDead = not humanoid or humanoid.Health <= 0 or humanoid:GetState() == Enum.HumanoidStateType.Dead
 	local isAlive = not isDead
 
+	if isAlive then
+		TutorialService:HandleMineZoneExited(player)
+	end
+
 	if items and #items > 0 then
 		if isAlive then
 			local lastGivenTool = nil
@@ -291,6 +296,14 @@ end
 
 local function processZoneEnter(player: Player)
 	if not carryingData[player] then carryingData[player] = {} end
+	TutorialService:HandleMineZoneEntered(player)
+
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if humanoid then
+		-- Hide any equipped carryable/tool item when the player goes back into the mine.
+		humanoid:UnequipTools()
+	end
 
 	-- ## FIXED: Auto-Equip the player's Pickaxe when re-entering the mine! ##
 	local profile = PlayerController:GetProfile(player)

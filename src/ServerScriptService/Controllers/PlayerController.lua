@@ -18,9 +18,11 @@ local UpgradesConfiguration = require(ReplicatedStorage.Modules.UpgradesConfigur
 local SlotUnlockConfigurations = require(ReplicatedStorage.Modules.SlotUnlockConfigurations)
 local Constants = require(ReplicatedStorage.Modules.Constants)
 local BombsConfigurations = require(ReplicatedStorage.Modules.BombsConfigurations)
+local TutorialConfiguration = require(ReplicatedStorage.Modules.TutorialConfiguration)
 local BadgeManager = require(ServerScriptService.Modules.BadgeManager)
 local ItemManager 
 local SlotManager 
+local TutorialService
 
 -- [ CONFIGURATION ]
 local DATA_VERSION = "ProjectData_v90" 
@@ -116,6 +118,17 @@ local function playPurchaseEffects(player: Player)
 		end
 		Debris:AddItem(confetti, 3)
 	end
+end
+
+local function getTutorialService()
+	if not TutorialService then
+		local tutorialModule = ServerScriptService.Modules:FindFirstChild("TutorialService")
+		if tutorialModule and tutorialModule:IsA("ModuleScript") then
+			TutorialService = require(tutorialModule)
+		end
+	end
+
+	return TutorialService
 end
 
 local function getHighestOwnedPickaxe(data): string?
@@ -292,7 +305,7 @@ end
 local function checkAndGrantGroupReward(player: Player, profile: any)
 	if profile.Data.ClaimedPacks["GroupReward"] then return end
 	local currentStep = profile.Data.OnboardingStep or 1
-	if currentStep < 6 then return end
+	if currentStep < TutorialConfiguration.FinalStep then return end
 
 	local targetGroupId = GROUP_ID
 	if targetGroupId <= 0 then return end 
@@ -328,6 +341,10 @@ function PlayerController:AddMoney(player: Player, amount: number)
 		profile.Data.Money += amount
 		player.leaderstats.Money.Value = profile.Data.Money
 		BadgeManager:EvaluateMoneyMilestones(player, profile.Data.Money)
+		local tutorialService = getTutorialService()
+		if tutorialService then
+			tutorialService:HandleMoneyChanged(player)
+		end
 	end
 end
 
@@ -381,7 +398,7 @@ function PlayerController:SetupSharedInstances()
 	createRemote("RemoteEvent", "RequestRebirth")
 	createRemote("RemoteEvent", "UpdateRebirthUI")
 	createRemote("RemoteEvent", "RefreshIndex")
-	createRemote("RemoteEvent", "SetOnboardingStep") 
+	createRemote("RemoteEvent", "ReportTutorialAction") 
 	createRemote("RemoteEvent", "TriggerUIEffect") 
 end
 
@@ -537,6 +554,11 @@ local function onPlayerAdded(player: Player)
 		profiles[player] = profile
 		createLeaderstats(player, profile.Data)
 		evaluateExistingBadgeProgress(player, profile)
+		local tutorialService = getTutorialService()
+		if tutorialService then
+			tutorialService:SyncPlayer(player)
+			tutorialService:EvaluateCurrentStep(player)
+		end
 
 		local function setupBackpackTracking(backpack: Backpack)
 			backpack.ChildAdded:Connect(function() syncInventoryData(player) end)
@@ -607,6 +629,18 @@ function PlayerController:SyncSpinData(player: Player)
 	end
 end
 
+function PlayerController:OnTutorialStepChanged(player: Player, step: number)
+	local profile = profiles[player]
+	if not profile then
+		return
+	end
+
+	BadgeManager:EvaluateOnboardingStep(player, step)
+	if step >= TutorialConfiguration.FinalStep then
+		checkAndGrantGroupReward(player, profile)
+	end
+end
+
 function PlayerController:Init(controllers)
 	local Modules = ServerScriptService:WaitForChild("Modules")
 	ItemManager = require(Modules:WaitForChild("ItemManager"))
@@ -625,21 +659,6 @@ function PlayerController:Init(controllers)
 		local profile = PlayerController:GetProfile(player)
 		return profile and profile.Data.DiscoveredItems or {}
 	end
-
-	local setStepEvent = Events:FindFirstChild("SetOnboardingStep") or Instance.new("RemoteEvent", Events)
-	setStepEvent.Name = "SetOnboardingStep"
-	setStepEvent.OnServerEvent:Connect(function(player, step)
-		local profile = profiles[player]
-		if profile then
-			local current = profile.Data.OnboardingStep or 1
-			if step > current then
-				profile.Data.OnboardingStep = step
-				player:SetAttribute("OnboardingStep", step) 
-				BadgeManager:EvaluateOnboardingStep(player, step)
-				if step == 6 then checkAndGrantGroupReward(player, profile) end
-			end
-		end
-	end)
 
 	MarketplaceService.PromptGamePassPurchaseFinished:Connect(function(player, passId, wasPurchased)
 		if wasPurchased then

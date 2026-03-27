@@ -10,6 +10,7 @@ local PickaxeController = {}
 -- [ MODULES ]
 local BombsConfigurations = require(ReplicatedStorage.Modules.BombsConfigurations)
 local BadgeManager = require(ServerScriptService.Modules.BadgeManager)
+local TutorialService = require(ServerScriptService.Modules.TutorialService)
 local PlayerController -- Lazy Load
 
 -- [ ASSETS ]
@@ -126,6 +127,7 @@ function PickaxeController.HandlePickaxeAction(player: Player, pickaxeName: stri
 		if NotificationEvent then 
 			NotificationEvent:FireClient(player, "Purchased " .. config.DisplayName .. "!", "Success") 
 		end
+		TutorialService:HandleBombPurchased(player)
 
 		local UpdateUIEvent = Events:FindFirstChild("UpdatePickaxeUI")
 		if UpdateUIEvent and UpdateUIEvent:IsA("RemoteEvent") then
