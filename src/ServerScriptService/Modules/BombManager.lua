@@ -9,6 +9,8 @@ local Workspace = game:GetService("Workspace")
 
 local BombsConfigurations = require(ReplicatedStorage.Modules.BombsConfigurations)
 local TutorialService = require(game.ServerScriptService.Modules.TutorialService)
+local AnalyticsFunnelsService = require(game.ServerScriptService.Modules.AnalyticsFunnelsService)
+local AnalyticsEconomyService = require(game.ServerScriptService.Modules.AnalyticsEconomyService)
 
 local PlayerController
 local CarrySystem
@@ -68,19 +70,19 @@ end
 local function getEquippedBomb(player: Player)
 	local character = player.Character
 	if not character then
-		return nil, nil
+		return nil, nil, nil
 	end
 
 	for _, child in ipairs(character:GetChildren()) do
 		if child:IsA("Tool") then
 			local bombData = BombsConfigurations.GetBombData(child.Name)
 			if bombData then
-				return child, bombData
+				return child, bombData, child.Name
 			end
 		end
 	end
 
-	return nil, nil
+	return nil, nil, nil
 end
 
 local function getMaterialAtPosition(position: Vector3): Enum.Material
@@ -183,7 +185,7 @@ local function affectPlayers(owner: Player, explosionPosition: Vector3, blastRad
 	end
 end
 
-local function explodeBomb(player: Player, bombPart: BasePart, hitPosition: Vector3, material: Enum.Material, bombData)
+local function explodeBomb(player: Player, bombPart: BasePart, hitPosition: Vector3, material: Enum.Material, bombData, bombName: string)
 	if not bombPart.Parent then
 		return
 	end
@@ -212,13 +214,14 @@ local function explodeBomb(player: Player, bombPart: BasePart, hitPosition: Vect
 	end
 
 	PlayerController:AddMoney(player, bombData.ExplosionIncome)
+	AnalyticsEconomyService:BufferBombIncome(player, bombName, bombData.ExplosionIncome)
 
 	if cashPopupEvent then
 		cashPopupEvent:FireClient(player, bombData.ExplosionIncome)
 	end
 end
 
-local function createThrownBomb(player: Player, origin: Vector3, direction: Vector3, bombData)
+local function createThrownBomb(player: Player, origin: Vector3, direction: Vector3, bombData, bombName: string)
 	local bomb = Instance.new("Part")
 	bomb.Shape = Enum.PartType.Ball
 	bomb.Size = Vector3.new(2, 2, 2)
@@ -238,6 +241,7 @@ local function createThrownBomb(player: Player, origin: Vector3, direction: Vect
 	activeBombs[bomb] = {
 		Owner = player,
 		Data = bombData,
+		BombName = bombName,
 		LastPosition = origin,
 	}
 
@@ -248,7 +252,7 @@ local function createThrownBomb(player: Player, origin: Vector3, direction: Vect
 		end
 
 		if hit == Terrain then
-			explodeBomb(state.Owner, bomb, bomb.Position, getMaterialAtPosition(bomb.Position), state.Data)
+			explodeBomb(state.Owner, bomb, bomb.Position, getMaterialAtPosition(bomb.Position), state.Data, state.BombName)
 		end
 	end)
 
@@ -278,7 +282,7 @@ local function tryThrowBomb(player: Player)
 		return
 	end
 
-	local bombTool, bombData = getEquippedBomb(player)
+	local bombTool, bombData, bombName = getEquippedBomb(player)
 	if not bombTool or not bombData then
 		return
 	end
@@ -293,8 +297,9 @@ local function tryThrowBomb(player: Player)
 	playerCooldowns[player] = now
 
 	local origin = getThrowOrigin(root)
-	createThrownBomb(player, origin, root.CFrame.LookVector, bombData)
+	createThrownBomb(player, origin, root.CFrame.LookVector, bombData, bombName or bombTool.Name)
 	TutorialService:HandleBombThrown(player)
+	AnalyticsFunnelsService:HandleMineBombThrown(player)
 end
 
 function BombManager:Init()
@@ -328,7 +333,7 @@ function BombManager:Start()
 
 				local result = workspace:Raycast(state.LastPosition, travel, raycastParams)
 				if result and result.Instance == Terrain and result.Material ~= Enum.Material.Air then
-					explodeBomb(state.Owner, bombPart, result.Position, result.Material, state.Data)
+					explodeBomb(state.Owner, bombPart, result.Position, result.Material, state.Data, state.BombName)
 					continue
 				end
 			end

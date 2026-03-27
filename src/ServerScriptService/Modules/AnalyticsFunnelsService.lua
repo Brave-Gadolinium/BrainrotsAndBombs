@@ -1,0 +1,988 @@
+--!strict
+
+local AnalyticsService = game:GetService("AnalyticsService")
+local HttpService = game:GetService("HttpService")
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local DailyRewardManager = require(script.Parent.DailyRewardManager)
+local PlaytimeRewardManager = require(script.Parent.PlaytimeRewardManager)
+local TutorialConfiguration = require(ReplicatedStorage.Modules.TutorialConfiguration)
+
+type SessionState = {
+	SessionId: string,
+	Step: number,
+}
+
+local AnalyticsFunnelsService = {}
+
+local PlayerController: any = nil
+local reportIntentEvent: RemoteEvent? = nil
+local activeSessions: {[Player]: {[string]: SessionState}} = {}
+local initialized = false
+
+local TUTORIAL_VERSION = "ftue_v2"
+local ONE_DAY_SECONDS = 86400
+local BASE_REBIRTH_COST = 1000000
+local REBIRTH_COST_STEP = 500000
+
+local OneTimeFunnels = {
+	TutorialFTUE = {
+		Kind = "Standard",
+		FunnelName = "TutorialFTUE",
+		LegacyKey = "OnboardingFunnelStep",
+		Steps = {
+			[1] = "JoinGame",
+			[2] = "WalkToZone",
+			[3] = "ThrowBomb",
+			[4] = "PickupBrainrot",
+			[5] = "BackToSurface",
+			[6] = "PlaceBrainrot",
+			[7] = "Collect100Cash",
+			[8] = "OpenBombShop",
+			[9] = "BuyBomb2",
+			[10] = "TutorialComplete",
+		},
+	},
+	EarlyProgressionToFirstRebirth = {
+		Kind = "Standard",
+		FunnelName = "EarlyProgressionToFirstRebirth",
+		Steps = {
+			[1] = "TutorialComplete",
+			[2] = "FirstExtraSlotsBought",
+			[3] = "FirstSlotUpgrade",
+			[4] = "Bomb3Bought",
+			[5] = "Rebirth1",
+		},
+	},
+	BaseEconomyActivation = {
+		Kind = "Standard",
+		FunnelName = "BaseEconomyActivation",
+		Steps = {
+			[1] = "FirstItemPlaced",
+			[2] = "FirstStoredCashPositive",
+			[3] = "FirstManualCollect",
+			[4] = "FirstSlotUpgradeAfterCollect",
+		},
+	},
+}
+
+local RecurringFunnels = {
+	MineRunLoop = {
+		FunnelName = "MineRunLoop",
+		Steps = {
+			[1] = "EnterMine",
+			[2] = "ThrowBomb",
+			[3] = "PickupBrainrot",
+			[4] = "ExitMineWithCarry",
+			[5] = "ToolGrantedOnExit",
+			[6] = "PlaceOrSellFirstItem",
+		},
+		ClearOnComplete = true,
+	},
+	BombShopConversion = {
+		FunnelName = "BombShopConversion",
+		Steps = {
+			[1] = "ShopOpened",
+			[2] = "BombSelected",
+			[3] = "BuyPressed",
+			[4] = "PurchaseSuccess",
+		},
+		ClearOnComplete = true,
+	},
+	StatUpgradesConversion = {
+		FunnelName = "StatUpgradesConversion",
+		Steps = {
+			[1] = "UpgradesOpened",
+			[2] = "UpgradeSelected",
+			[3] = "CashBuyPressed",
+			[4] = "UpgradeSuccess",
+		},
+		ClearOnComplete = true,
+	},
+	RebirthConversion = {
+		FunnelName = "RebirthConversion",
+		Steps = {
+			[1] = "RebirthEligible",
+			[2] = "RebirthUIOpened",
+			[3] = "RebirthPressed",
+			[4] = "RebirthSuccess",
+		},
+		ClearOnComplete = true,
+	},
+	DailyRewardClaim = {
+		FunnelName = "DailyRewardClaim",
+		Steps = {
+			[1] = "ClaimAvailable",
+			[2] = "DailyRewardsOpened",
+			[3] = "RewardClicked",
+			[4] = "ClaimSuccess",
+		},
+		ClearOnComplete = true,
+	},
+	PlaytimeRewards = {
+		FunnelName = "PlaytimeRewards",
+		Steps = {
+			[1] = "FirstRewardClaimable",
+			[2] = "PlaytimeRewardsOpened",
+			[3] = "FirstRewardClaimed",
+			[4] = "MultipleRewardsClaimed",
+			[5] = "AllTodayClaimed",
+		},
+		ClearOnComplete = false,
+	},
+	DailySpin = {
+		FunnelName = "DailySpin",
+		Steps = {
+			[1] = "SpinAvailable",
+			[2] = "WheelOpened",
+			[3] = "SpinPressed",
+			[4] = "RewardGranted",
+		},
+		ClearOnComplete = true,
+	},
+}
+
+local function getProfile(player: Player)
+	if not PlayerController then
+		return nil
+	end
+
+	return PlayerController:GetProfile(player)
+end
+
+local function ensureAnalyticsData(profile: any)
+	if type(profile.Data.AnalyticsFunnels) ~= "table" then
+		profile.Data.AnalyticsFunnels = {}
+	end
+
+	local analyticsData = profile.Data.AnalyticsFunnels
+	if type(analyticsData.OneTime) ~= "table" then
+		analyticsData.OneTime = {}
+	end
+
+	return analyticsData
+end
+
+local function getBombTierFromName(bombName: string?): number
+	if type(bombName) ~= "string" then
+		return 0
+	end
+
+	return tonumber(bombName:match("(%d+)")) or 0
+end
+
+local function getEquippedBombTier(player: Player): number
+	local profile = getProfile(player)
+	local equippedBomb = profile and profile.Data and profile.Data.EquippedPickaxe or nil
+	return getBombTierFromName(equippedBomb)
+end
+
+local function getRebirthBucket(player: Player): string
+	local profile = getProfile(player)
+	local rebirths = profile and profile.Data and tonumber(profile.Data.Rebirths) or 0
+
+	if rebirths <= 0 then
+		return "0"
+	end
+	if rebirths < 5 then
+		return "1-4"
+	end
+	if rebirths < 10 then
+		return "5-9"
+	end
+
+	return "10+"
+end
+
+local function isVip(player: Player): boolean
+	if PlayerController and PlayerController.IsVIP then
+		return PlayerController:IsVIP(player) == true
+	end
+
+	return player:GetAttribute("IsVIP") == true
+end
+
+local function sanitizeCustomFields(fields: {[string]: any}?): {[string]: any}?
+	if not fields then
+		return nil
+	end
+
+	local sanitized = {}
+	for key, value in pairs(fields) do
+		local valueType = typeof(value)
+		if value ~= nil and (valueType == "string" or valueType == "number" or valueType == "boolean") then
+			sanitized[key] = value
+		end
+	end
+
+	if next(sanitized) == nil then
+		return nil
+	end
+
+	return sanitized
+end
+
+local function buildFirstStepFields(player: Player, customFields: {[string]: any}?): {[string]: any}?
+	local fields = {
+		tutorial_version = TUTORIAL_VERSION,
+		bomb_tier = getEquippedBombTier(player),
+		rebirth_bucket = getRebirthBucket(player),
+		vip = isVip(player),
+	}
+
+	for key, value in pairs(customFields or {}) do
+		fields[key] = value
+	end
+
+	return sanitizeCustomFields(fields)
+end
+
+local function getPlayerSessions(player: Player): {[string]: SessionState}
+	local sessions = activeSessions[player]
+	if sessions then
+		return sessions
+	end
+
+	sessions = {}
+	activeSessions[player] = sessions
+	return sessions
+end
+
+local function clearRecurringSession(player: Player, funnelKey: string)
+	local sessions = activeSessions[player]
+	if sessions then
+		sessions[funnelKey] = nil
+	end
+end
+
+local function getShortGuidToken(): string
+	return HttpService:GenerateGUID(false):gsub("%-", ""):sub(1, 12)
+end
+
+local function buildSessionId(player: Player, prefix: string, suffix: string): string
+	local cleanPrefix = tostring(prefix):gsub("[^%w]", ""):sub(1, 8)
+	local cleanSuffix = tostring(suffix):gsub("[^%w_]", "")
+	local base = `u{player.UserId}_{cleanPrefix}_`
+	local maxSuffixLength = math.max(1, 50 - #base)
+
+	if #cleanSuffix > maxSuffixLength then
+		cleanSuffix = cleanSuffix:sub(1, maxSuffixLength)
+	end
+
+	return base .. cleanSuffix
+end
+
+local function getOneTimeSessionId(player: Player, funnelKey: string): string
+	return buildSessionId(player, "once", funnelKey)
+end
+
+local function getOneTimeStep(profile: any, funnelKey: string): number
+	local analyticsData = ensureAnalyticsData(profile)
+	local funnelConfig = OneTimeFunnels[funnelKey]
+	local storedStep = tonumber(analyticsData.OneTime[funnelKey]) or 0
+
+	if funnelConfig and funnelConfig.LegacyKey then
+		storedStep = math.max(storedStep, tonumber(profile.Data[funnelConfig.LegacyKey]) or 0)
+	end
+
+	local maxStep = funnelConfig and #funnelConfig.Steps or storedStep
+	return math.clamp(storedStep, 0, maxStep)
+end
+
+local function setOneTimeStep(profile: any, funnelKey: string, step: number)
+	local analyticsData = ensureAnalyticsData(profile)
+	analyticsData.OneTime[funnelKey] = step
+
+	local funnelConfig = OneTimeFunnels[funnelKey]
+	if funnelConfig and funnelConfig.LegacyKey then
+		profile.Data[funnelConfig.LegacyKey] = step
+	end
+end
+
+local function safeLogCustomEvent(player: Player, eventName: string, value: number?, customFields: {[string]: any}?)
+	local success, err = pcall(function()
+		AnalyticsService:LogCustomEvent(player, eventName, value or 1, sanitizeCustomFields(customFields))
+	end)
+	if not success then
+		warn(`[AnalyticsFunnelsService] Failed to log custom event {eventName} for {player.Name}: {err}`)
+	end
+end
+
+local function safeLogOnboardingStep(player: Player, step: number, stepName: string, customFields: {[string]: any}?)
+	local success, err = pcall(function()
+		AnalyticsService:LogOnboardingFunnelStepEvent(player, step, stepName, customFields)
+	end)
+	if not success then
+		warn(`[AnalyticsFunnelsService] Failed to log onboarding step {stepName} for {player.Name}: {err}`)
+		return false
+	end
+
+	return true
+end
+
+local function safeLogFunnelStep(
+	player: Player,
+	funnelName: string,
+	funnelSessionId: string,
+	step: number,
+	stepName: string,
+	customFields: {[string]: any}?
+)
+	local success, err = pcall(function()
+		AnalyticsService:LogFunnelStepEvent(player, funnelName, funnelSessionId, step, stepName, customFields)
+	end)
+	if not success then
+		warn(`[AnalyticsFunnelsService] Failed to log funnel step {funnelName}/{stepName} for {player.Name}: {err}`)
+		return false
+	end
+
+	return true
+end
+
+local function advanceOneTimeFunnel(player: Player, funnelKey: string, targetStep: number, firstStepFields: {[string]: any}?): boolean
+	local profile = getProfile(player)
+	local funnelConfig = OneTimeFunnels[funnelKey]
+	if not profile or not funnelConfig then
+		return false
+	end
+
+	local clampedTarget = math.clamp(targetStep, 1, #funnelConfig.Steps)
+	local currentStep = getOneTimeStep(profile, funnelKey)
+	if clampedTarget <= currentStep then
+		return false
+	end
+
+	for step = currentStep + 1, clampedTarget do
+		local stepName = funnelConfig.Steps[step]
+		local customFields = if step == 1 then buildFirstStepFields(player, firstStepFields) else nil
+		local logged = false
+
+		if funnelConfig.Kind == "Onboarding" then
+			logged = safeLogOnboardingStep(player, step, stepName, customFields)
+		else
+			logged = safeLogFunnelStep(
+				player,
+				funnelConfig.FunnelName,
+				getOneTimeSessionId(player, funnelKey),
+				step,
+				stepName,
+				customFields
+			)
+		end
+
+		if not logged then
+			return false
+		end
+
+		setOneTimeStep(profile, funnelKey, step)
+	end
+
+	return true
+end
+
+local function startRecurringSession(player: Player, funnelKey: string, sessionId: string, firstStepFields: {[string]: any}?): boolean
+	local funnelConfig = RecurringFunnels[funnelKey]
+	if not funnelConfig then
+		return false
+	end
+
+	local sessions = getPlayerSessions(player)
+	local session = sessions[funnelKey]
+	if not session or session.SessionId ~= sessionId then
+		session = {
+			SessionId = sessionId,
+			Step = 0,
+		}
+		sessions[funnelKey] = session
+	end
+
+	if session.Step >= 1 then
+		return false
+	end
+
+	local logged = safeLogFunnelStep(
+		player,
+		funnelConfig.FunnelName,
+		session.SessionId,
+		1,
+		funnelConfig.Steps[1],
+		buildFirstStepFields(player, firstStepFields)
+	)
+	if not logged then
+		return false
+	end
+
+	session.Step = 1
+	return true
+end
+
+local function advanceRecurringFunnel(player: Player, funnelKey: string, targetStep: number): boolean
+	local funnelConfig = RecurringFunnels[funnelKey]
+	if not funnelConfig then
+		return false
+	end
+
+	local sessions = getPlayerSessions(player)
+	local session = sessions[funnelKey]
+	if not session then
+		return false
+	end
+
+	local clampedTarget = math.clamp(targetStep, 1, #funnelConfig.Steps)
+	if clampedTarget <= session.Step then
+		return false
+	end
+
+	for step = session.Step + 1, clampedTarget do
+		local logged = safeLogFunnelStep(player, funnelConfig.FunnelName, session.SessionId, step, funnelConfig.Steps[step], nil)
+		if not logged then
+			return false
+		end
+
+		session.Step = step
+	end
+
+	if funnelConfig.ClearOnComplete and session.Step >= #funnelConfig.Steps then
+		clearRecurringSession(player, funnelKey)
+	end
+
+	return true
+end
+
+local function hasSpinAvailable(profile: any): boolean
+	local spins = tonumber(profile.Data.SpinNumber) or 0
+	if spins > 0 then
+		return true
+	end
+
+	local lastFreeSpin = tonumber(profile.Data.LastDailySpin) or 0
+	return (os.time() - lastFreeSpin) >= ONE_DAY_SECONDS
+end
+
+local function getCurrentDayKey(): number
+	return math.floor(os.time() / ONE_DAY_SECONDS)
+end
+
+local function getDailyRewardSessionId(player: Player): string
+	return buildSessionId(player, "daily", tostring(getCurrentDayKey()))
+end
+
+local function getPlaytimeRewardSessionId(player: Player, dayKey: number): string
+	return buildSessionId(player, "play", tostring(dayKey))
+end
+
+local function getRebirthSessionId(player: Player, targetRebirth: number): string
+	return buildSessionId(player, "rebirth", tostring(targetRebirth))
+end
+
+local function getDailySpinSessionId(player: Player): string
+	local profile = getProfile(player)
+	if not profile then
+		return buildSessionId(player, "spin", getShortGuidToken())
+	end
+
+	local lastDailySpin = tonumber(profile.Data.LastDailySpin) or 0
+	local spins = tonumber(profile.Data.SpinNumber) or 0
+	return buildSessionId(player, "spin", `{lastDailySpin}_{spins}`)
+end
+
+local function getGuidSessionId(player: Player, prefix: string): string
+	return buildSessionId(player, prefix, getShortGuidToken())
+end
+
+local function canAdvanceOneTime(player: Player, funnelKey: string, requiredStep: number): boolean
+	local profile = getProfile(player)
+	if not profile then
+		return false
+	end
+
+	return getOneTimeStep(profile, funnelKey) >= requiredStep
+end
+
+local function getRebirthInfo(player: Player): (number, number, number)
+	local profile = getProfile(player)
+	if not profile then
+		return 0, 0, 1
+	end
+
+	local rebirths = tonumber(profile.Data.Rebirths) or 0
+	local cost = BASE_REBIRTH_COST + (rebirths * REBIRTH_COST_STEP)
+	local money = tonumber(profile.Data.Money) or 0
+	return money, cost, rebirths + 1
+end
+
+function AnalyticsFunnelsService:LogFailure(player: Player, reason: string, customFields: {[string]: any}?)
+	safeLogCustomEvent(player, reason, 1, buildFirstStepFields(player, customFields))
+end
+
+function AnalyticsFunnelsService:SyncTutorial(player: Player, tutorialStep: number)
+	local funnelStep = if tutorialStep >= TutorialConfiguration.FinalStep then 10 else math.clamp(tutorialStep, 1, 9)
+	if advanceOneTimeFunnel(player, "TutorialFTUE", funnelStep, {
+		zone = "tutorial",
+	}) and tutorialStep >= TutorialConfiguration.FinalStep then
+		advanceOneTimeFunnel(player, "EarlyProgressionToFirstRebirth", 1, {
+			zone = "base",
+		})
+	end
+end
+
+function AnalyticsFunnelsService:HandleMoneyBalanceChanged(player: Player)
+	local money, cost, targetRebirth = getRebirthInfo(player)
+	if money < cost then
+		return
+	end
+
+	startRecurringSession(player, "RebirthConversion", getRebirthSessionId(player, targetRebirth), {
+		zone = "base",
+		target_rebirth = targetRebirth,
+	})
+end
+
+function AnalyticsFunnelsService:HandleExtraSlotsBought(player: Player, newUnlockedSlots: number)
+	if canAdvanceOneTime(player, "EarlyProgressionToFirstRebirth", 1) then
+		advanceOneTimeFunnel(player, "EarlyProgressionToFirstRebirth", 2, {
+			zone = "base",
+			unlocked_slots = newUnlockedSlots,
+		})
+	end
+end
+
+function AnalyticsFunnelsService:HandleSlotUpgraded(player: Player, floorName: string, slotName: string, upgradeId: string)
+	if canAdvanceOneTime(player, "EarlyProgressionToFirstRebirth", 2) then
+		advanceOneTimeFunnel(player, "EarlyProgressionToFirstRebirth", 3, {
+			zone = "base",
+			upgrade_id = upgradeId,
+		})
+	end
+
+	if canAdvanceOneTime(player, "BaseEconomyActivation", 3) then
+		advanceOneTimeFunnel(player, "BaseEconomyActivation", 4, {
+			zone = "base",
+			upgrade_id = upgradeId,
+			floor = floorName,
+			slot = slotName,
+		})
+	end
+end
+
+function AnalyticsFunnelsService:HandleStatUpgradePurchased(player: Player, upgradeId: string)
+	advanceRecurringFunnel(player, "StatUpgradesConversion", 4)
+	safeLogCustomEvent(player, "stat_upgrade_purchase_success", 1, buildFirstStepFields(player, {
+		zone = "base",
+		upgrade_id = upgradeId,
+	}))
+end
+
+function AnalyticsFunnelsService:HandleBombPurchased(player: Player, pickaxeName: string)
+	local bombTier = getBombTierFromName(pickaxeName)
+	if canAdvanceOneTime(player, "EarlyProgressionToFirstRebirth", 3) and bombTier >= 3 then
+		advanceOneTimeFunnel(player, "EarlyProgressionToFirstRebirth", 4, {
+			zone = "base",
+			bomb_tier = bombTier,
+		})
+	end
+
+	advanceRecurringFunnel(player, "BombShopConversion", 4)
+end
+
+function AnalyticsFunnelsService:HandleMineZoneEntered(player: Player)
+	startRecurringSession(player, "MineRunLoop", getGuidSessionId(player, "mine-run"), {
+		zone = "mine",
+	})
+end
+
+function AnalyticsFunnelsService:HandleMineBombThrown(player: Player)
+	advanceRecurringFunnel(player, "MineRunLoop", 2)
+end
+
+function AnalyticsFunnelsService:HandleMineBrainrotPickedUp(player: Player)
+	advanceRecurringFunnel(player, "MineRunLoop", 3)
+end
+
+function AnalyticsFunnelsService:HandleMineZoneExited(player: Player, hadItems: boolean)
+	if hadItems then
+		advanceRecurringFunnel(player, "MineRunLoop", 4)
+	end
+end
+
+function AnalyticsFunnelsService:HandleMineExitToolGranted(player: Player)
+	advanceRecurringFunnel(player, "MineRunLoop", 5)
+end
+
+function AnalyticsFunnelsService:HandlePlaceBrainrot(player: Player)
+	advanceRecurringFunnel(player, "MineRunLoop", 6)
+	advanceOneTimeFunnel(player, "BaseEconomyActivation", 1, {
+		zone = "base",
+	})
+end
+
+function AnalyticsFunnelsService:HandleSellSuccess(player: Player, actionType: string, soldCount: number)
+	if soldCount > 0 then
+		advanceRecurringFunnel(player, "MineRunLoop", 6)
+	end
+
+	safeLogCustomEvent(player, "sell_success", 1, buildFirstStepFields(player, {
+		zone = "base",
+		sell_action = actionType,
+		sold_count = soldCount,
+	}))
+end
+
+function AnalyticsFunnelsService:HandleStoredCashPositive(player: Player, floorName: string, slotName: string)
+	if canAdvanceOneTime(player, "BaseEconomyActivation", 1) then
+		advanceOneTimeFunnel(player, "BaseEconomyActivation", 2, {
+			zone = "base",
+			floor = floorName,
+			slot = slotName,
+		})
+	end
+end
+
+function AnalyticsFunnelsService:HandleManualCollect(player: Player, amount: number)
+	if amount > 0 and canAdvanceOneTime(player, "BaseEconomyActivation", 2) then
+		advanceOneTimeFunnel(player, "BaseEconomyActivation", 3, {
+			zone = "base",
+		})
+	end
+end
+
+function AnalyticsFunnelsService:HandleBombShopOpened(player: Player)
+	startRecurringSession(player, "BombShopConversion", getGuidSessionId(player, "bomb-shop"), {
+		zone = "base",
+	})
+end
+
+function AnalyticsFunnelsService:HandleBombSelected(player: Player, pickaxeName: string)
+	local sessions = getPlayerSessions(player)
+	if not sessions.BombShopConversion then
+		return
+	end
+
+	advanceRecurringFunnel(player, "BombShopConversion", 2)
+	safeLogCustomEvent(player, "bomb_shop_selection", 1, buildFirstStepFields(player, {
+		zone = "base",
+		target_bomb_tier = getBombTierFromName(pickaxeName),
+	}))
+end
+
+function AnalyticsFunnelsService:HandleBombPurchaseRequested(player: Player, pickaxeName: string)
+	local sessions = getPlayerSessions(player)
+	if not sessions.BombShopConversion then
+		return
+	end
+
+	advanceRecurringFunnel(player, "BombShopConversion", 3)
+	safeLogCustomEvent(player, "bomb_shop_buy_pressed", 1, buildFirstStepFields(player, {
+		zone = "base",
+		target_bomb_tier = getBombTierFromName(pickaxeName),
+	}))
+end
+
+function AnalyticsFunnelsService:HandleUpgradesOpened(player: Player)
+	startRecurringSession(player, "StatUpgradesConversion", getGuidSessionId(player, "upgrades"), {
+		zone = "base",
+	})
+end
+
+function AnalyticsFunnelsService:HandleUpgradePurchaseRequested(player: Player, upgradeId: string)
+	local sessions = getPlayerSessions(player)
+	if not sessions.StatUpgradesConversion then
+		return
+	end
+
+	advanceRecurringFunnel(player, "StatUpgradesConversion", 3)
+	safeLogCustomEvent(player, "upgrade_buy_pressed", 1, buildFirstStepFields(player, {
+		zone = "base",
+		upgrade_id = upgradeId,
+	}))
+end
+
+function AnalyticsFunnelsService:HandleUpgradeSelected(player: Player, upgradeId: string)
+	local sessions = getPlayerSessions(player)
+	if not sessions.StatUpgradesConversion then
+		return
+	end
+
+	advanceRecurringFunnel(player, "StatUpgradesConversion", 2)
+	safeLogCustomEvent(player, "upgrade_selected", 1, buildFirstStepFields(player, {
+		zone = "base",
+		upgrade_id = upgradeId,
+	}))
+end
+
+function AnalyticsFunnelsService:HandleRebirthUIOpened(player: Player)
+	local money, cost, targetRebirth = getRebirthInfo(player)
+	if money < cost then
+		return
+	end
+
+	startRecurringSession(player, "RebirthConversion", getRebirthSessionId(player, targetRebirth), {
+		zone = "base",
+		target_rebirth = targetRebirth,
+	})
+	advanceRecurringFunnel(player, "RebirthConversion", 2)
+end
+
+function AnalyticsFunnelsService:HandleRebirthRequested(player: Player)
+	local money, cost, targetRebirth = getRebirthInfo(player)
+	if money < cost then
+		return
+	end
+
+	local sessions = getPlayerSessions(player)
+	local session = sessions.RebirthConversion
+	if not session or session.SessionId ~= getRebirthSessionId(player, targetRebirth) then
+		return
+	end
+
+	advanceRecurringFunnel(player, "RebirthConversion", 3)
+end
+
+function AnalyticsFunnelsService:HandleRebirthSuccess(player: Player, newRebirthCount: number)
+	local targetRebirth = math.max(1, newRebirthCount)
+	local sessionId = getRebirthSessionId(player, targetRebirth)
+	local sessions = getPlayerSessions(player)
+	local session = sessions.RebirthConversion
+	if session and session.SessionId == sessionId then
+		advanceRecurringFunnel(player, "RebirthConversion", 4)
+	end
+
+	if canAdvanceOneTime(player, "EarlyProgressionToFirstRebirth", 4) and newRebirthCount >= 1 then
+		advanceOneTimeFunnel(player, "EarlyProgressionToFirstRebirth", 5, {
+			zone = "base",
+		})
+	end
+end
+
+function AnalyticsFunnelsService:HandleDailyRewardStatus(player: Player, status: any)
+	if not status or status.CanClaim ~= true then
+		return
+	end
+
+	startRecurringSession(player, "DailyRewardClaim", getDailyRewardSessionId(player), {
+		zone = "base",
+		reward_day = status.ClaimDay,
+		reward_id = status.ClaimDay,
+	})
+end
+
+function AnalyticsFunnelsService:HandleDailyRewardsOpened(player: Player)
+	local profile = getProfile(player)
+	if not profile then
+		return
+	end
+
+	local status = DailyRewardManager.GetStatus(profile.Data)
+	if status.CanClaim ~= true then
+		return
+	end
+
+	startRecurringSession(player, "DailyRewardClaim", getDailyRewardSessionId(player), {
+		zone = "base",
+		reward_day = status.ClaimDay,
+		reward_id = status.ClaimDay,
+	})
+	advanceRecurringFunnel(player, "DailyRewardClaim", 2)
+end
+
+function AnalyticsFunnelsService:HandleDailyRewardClaimAttempt(player: Player, day: number)
+	local sessions = getPlayerSessions(player)
+	if not sessions.DailyRewardClaim then
+		return
+	end
+
+	advanceRecurringFunnel(player, "DailyRewardClaim", 3)
+	safeLogCustomEvent(player, "daily_reward_claim_clicked", 1, buildFirstStepFields(player, {
+		zone = "base",
+		reward_day = day,
+		reward_id = day,
+	}))
+end
+
+function AnalyticsFunnelsService:HandleDailyRewardClaimSuccess(player: Player, day: number)
+	advanceRecurringFunnel(player, "DailyRewardClaim", 4)
+	safeLogCustomEvent(player, "daily_reward_claim_success", 1, buildFirstStepFields(player, {
+		zone = "base",
+		reward_day = day,
+		reward_id = day,
+	}))
+end
+
+function AnalyticsFunnelsService:HandleDailyRewardClaimFailure(player: Player, day: number, reason: string)
+	if reason == "RewardLocked" then
+		self:LogFailure(player, "reward_locked", {
+			zone = "base",
+			funnel = "DailyRewardClaim",
+			reward_day = day,
+			reward_id = day,
+		})
+	end
+end
+
+function AnalyticsFunnelsService:HandlePlaytimeRewardStatus(player: Player, status: any)
+	if not status or not status.ClaimableRewardIds or #status.ClaimableRewardIds <= 0 then
+		return
+	end
+
+	startRecurringSession(player, "PlaytimeRewards", getPlaytimeRewardSessionId(player, status.DayKey), {
+		zone = "base",
+		reward_id = status.ClaimableRewardIds[1],
+	})
+end
+
+function AnalyticsFunnelsService:HandlePlaytimeRewardsOpened(player: Player)
+	local profile = getProfile(player)
+	if not profile then
+		return
+	end
+
+	local status = PlaytimeRewardManager.GetStatus(profile.Data)
+	if not status.ClaimableRewardIds or #status.ClaimableRewardIds <= 0 then
+		return
+	end
+
+	startRecurringSession(player, "PlaytimeRewards", getPlaytimeRewardSessionId(player, status.DayKey), {
+		zone = "base",
+		reward_id = status.ClaimableRewardIds[1],
+	})
+	advanceRecurringFunnel(player, "PlaytimeRewards", 2)
+end
+
+function AnalyticsFunnelsService:HandlePlaytimeRewardClaimSuccess(player: Player, rewardId: number, status: any)
+	advanceRecurringFunnel(player, "PlaytimeRewards", 3)
+
+	local claimedCount = 0
+	for _, claimed in pairs(status.ClaimedRewards or {}) do
+		if claimed == true then
+			claimedCount += 1
+		end
+	end
+
+	if claimedCount >= 2 then
+		advanceRecurringFunnel(player, "PlaytimeRewards", 4)
+	end
+
+	if claimedCount >= #(status.Rewards or {}) and #(status.Rewards or {}) > 0 then
+		advanceRecurringFunnel(player, "PlaytimeRewards", 5)
+	end
+
+	safeLogCustomEvent(player, "playtime_reward_claim_success", 1, buildFirstStepFields(player, {
+		zone = "base",
+		reward_id = rewardId,
+	}))
+end
+
+function AnalyticsFunnelsService:HandlePlaytimeRewardClaimFailure(player: Player, rewardId: number, reason: string)
+	if reason == "RewardLocked" then
+		self:LogFailure(player, "reward_locked", {
+			zone = "base",
+			funnel = "PlaytimeRewards",
+			reward_id = rewardId,
+		})
+	end
+end
+
+function AnalyticsFunnelsService:HandleDailySpinWheelOpened(player: Player)
+	local profile = getProfile(player)
+	if not profile or not hasSpinAvailable(profile) then
+		return
+	end
+
+	self:HandleDailySpinAvailable(player)
+	advanceRecurringFunnel(player, "DailySpin", 2)
+end
+
+function AnalyticsFunnelsService:HandleDailySpinAvailable(player: Player)
+	local profile = getProfile(player)
+	if not profile or not hasSpinAvailable(profile) then
+		return
+	end
+
+	startRecurringSession(player, "DailySpin", getDailySpinSessionId(player), {
+		zone = "base",
+	})
+end
+
+function AnalyticsFunnelsService:HandleDailySpinAttempt(player: Player)
+	local sessions = getPlayerSessions(player)
+	if not sessions.DailySpin then
+		return
+	end
+
+	advanceRecurringFunnel(player, "DailySpin", 3)
+end
+
+function AnalyticsFunnelsService:HandleDailySpinRewardGranted(player: Player, rewardData: any)
+	advanceRecurringFunnel(player, "DailySpin", 4)
+
+	safeLogCustomEvent(player, "daily_spin_reward_granted", 1, buildFirstStepFields(player, {
+		zone = "base",
+		reward_id = rewardData.Name or rewardData.Type or "Unknown",
+	}))
+
+	self:HandleDailySpinAvailable(player)
+end
+
+function AnalyticsFunnelsService:HandleDailySpinNoSpins(player: Player)
+	self:LogFailure(player, "no_spins_available", {
+		zone = "base",
+		funnel = "DailySpin",
+	})
+end
+
+function AnalyticsFunnelsService:HandleGroupRewardRejected(player: Player)
+	self:LogFailure(player, "not_in_group", {
+		zone = "base",
+		funnel = "GroupReward",
+	})
+end
+
+function AnalyticsFunnelsService:ReportIntent(player: Player, intentName: string, payload: any)
+	if intentName == "BombShopOpened" then
+		self:HandleBombShopOpened(player)
+	elseif intentName == "BombSelected" and type(payload) == "table" and type(payload.pickaxeName) == "string" then
+		self:HandleBombSelected(player, payload.pickaxeName)
+	elseif intentName == "UpgradeSelected" and type(payload) == "table" and type(payload.upgradeId) == "string" then
+		self:HandleUpgradeSelected(player, payload.upgradeId)
+	elseif intentName == "UpgradesOpened" then
+		self:HandleUpgradesOpened(player)
+	elseif intentName == "RebirthUIOpened" then
+		self:HandleRebirthUIOpened(player)
+	elseif intentName == "DailyRewardsOpened" then
+		self:HandleDailyRewardsOpened(player)
+	elseif intentName == "PlaytimeRewardsOpened" then
+		self:HandlePlaytimeRewardsOpened(player)
+	elseif intentName == "DailySpinWheelOpened" then
+		self:HandleDailySpinWheelOpened(player)
+	end
+end
+
+function AnalyticsFunnelsService:Init(controllers)
+	if initialized then
+		return
+	end
+	initialized = true
+
+	PlayerController = controllers.PlayerController
+
+	local events = ReplicatedStorage:WaitForChild("Events")
+	reportIntentEvent = events:FindFirstChild("ReportAnalyticsIntent") :: RemoteEvent
+	if not reportIntentEvent then
+		reportIntentEvent = Instance.new("RemoteEvent")
+		reportIntentEvent.Name = "ReportAnalyticsIntent"
+		reportIntentEvent.Parent = events
+	end
+
+	reportIntentEvent.OnServerEvent:Connect(function(player, intentName, payload)
+		if type(intentName) == "string" then
+			self:ReportIntent(player, intentName, payload)
+		end
+	end)
+
+	Players.PlayerRemoving:Connect(function(player)
+		activeSessions[player] = nil
+	end)
+end
+
+return AnalyticsFunnelsService

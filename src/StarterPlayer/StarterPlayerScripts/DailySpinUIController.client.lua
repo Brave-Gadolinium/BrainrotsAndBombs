@@ -37,6 +37,7 @@ local hudWheelText = hudWheel:WaitForChild("Text") :: TextLabel
 local hudWheelNotification = hudWheel:FindFirstChild("Notification") :: Frame 
 
 local RequestSpin = ReplicatedStorage:WaitForChild("Events"):WaitForChild("RequestSpin") :: RemoteFunction
+local ReportAnalyticsIntent = ReplicatedStorage:WaitForChild("Events"):WaitForChild("ReportAnalyticsIntent") :: RemoteEvent
 local isSpinning = false
 local ONE_DAY_SECONDS = 86400
 
@@ -204,6 +205,12 @@ task.spawn(function()
 end)
 player:GetAttributeChangedSignal("SpinNumber"):Connect(updateSpinButton)
 player:GetAttributeChangedSignal("LastDailySpin"):Connect(updateSpinButton)
+
+wheelFrame:GetPropertyChangedSignal("Visible"):Connect(function()
+	if wheelFrame.Visible then
+		ReportAnalyticsIntent:FireServer("DailySpinWheelOpened")
+	end
+end)
 
 local totalWeight = Config.GetTotalWeight() 
 

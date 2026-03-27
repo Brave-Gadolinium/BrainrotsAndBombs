@@ -16,6 +16,7 @@ local MutationConfigurations = require(ReplicatedStorage.Modules.MutationConfigu
 local NumberFormatter = require(ReplicatedStorage.Modules.NumberFormatter)
 local LuckyBlockManager = require(ServerScriptService.Modules.LuckyBlockManager)
 local TutorialService = require(ServerScriptService.Modules.TutorialService)
+local AnalyticsFunnelsService = require(ServerScriptService.Modules.AnalyticsFunnelsService)
 local ConfigItems = require(ReplicatedStorage.Modules.ItemConfigurations)
 local Constants = require(ReplicatedStorage.Modules.Constants)
 
@@ -316,6 +317,9 @@ local function onItemPickedUp(player: Player, itemModel: Model)
 				local Events = ReplicatedStorage:FindFirstChild("Events")
 				local notif = Events and Events:FindFirstChild("ShowNotification")
 				if notif then notif:FireClient(player, "Carry limit reached!", "Error") end
+				AnalyticsFunnelsService:LogFailure(player, "carry_limit_reached", {
+					zone = "mine",
+				})
 			end
 		else
 			ItemManager.GiveItemToPlayer(player, name, mutation, rarity, level, false)
@@ -324,6 +328,7 @@ local function onItemPickedUp(player: Player, itemModel: Model)
 
 		if pickedUp then 
 			TutorialService:HandleBrainrotPickedUp(player)
+			AnalyticsFunnelsService:HandleMineBrainrotPickedUp(player)
 			itemModel:Destroy() 
 
 			-- ## FIXED: Queue a replacement immediately when an item is picked up! ##

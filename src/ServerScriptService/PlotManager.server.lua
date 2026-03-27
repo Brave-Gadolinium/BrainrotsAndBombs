@@ -9,6 +9,8 @@ local MarketplaceService = game:GetService("MarketplaceService")
 
 -- Modules
 local PlayerController = require(ServerScriptService.Controllers.PlayerController)
+local AnalyticsFunnelsService = require(ServerScriptService.Modules.AnalyticsFunnelsService)
+local AnalyticsEconomyService = require(ServerScriptService.Modules.AnalyticsEconomyService)
 local NumberFormatter = require(ReplicatedStorage.Modules.NumberFormatter)
 local SlotUnlockConfigurations = require(ReplicatedStorage.Modules.SlotUnlockConfigurations)
 
@@ -22,6 +24,7 @@ local COLLECT_ALL_GAMEPASS = 1736841051
 local COLLECT_ALL_COOLDOWN = 0.8
 local COLLECT_ALL_BUTTON_NAME = "CollectAll"
 local UPGRADE_SLOTS_BUTTON_NAME = "UpgradeSlotsButton"
+local TRANSACTION_TYPES = AnalyticsEconomyService:GetTransactionTypes()
 
 -- State
 local occupiedPlots = {}
@@ -157,7 +160,13 @@ local function collectAllFromPlot(player: Player, plotModel: Model)
 
 	local notif = Events:FindFirstChild("ShowNotification")
 	if totalCollected > 0 then
+		AnalyticsEconomyService:FlushBombIncome(player)
 		PlayerController:AddMoney(player, totalCollected)
+		AnalyticsEconomyService:LogCashSource(player, totalCollected, TRANSACTION_TYPES.Gameplay, "CollectAll", {
+			feature = "collect_all",
+			content_id = "CollectAll",
+			context = "base",
+		})
 
 		local popupEvent = Events:FindFirstChild("ShowCashPopUp")
 		if popupEvent then
@@ -304,7 +313,7 @@ local function updateUpgradeSlotsButton(player: Player, plotModel: Model)
 
 	upgradeButton.Active = true
 	upgradeButton.AutoButtonColor = true
-	upgradeButton.Text = "UPGRADE"
+	--upgradeButton.Text = "UPGRADE"
 	if costLabel and costLabel:IsA("TextLabel") then
 		costLabel.Text = "Build - $" .. NumberFormatter.Format(upgradeData.money_req)
 	end
@@ -376,8 +385,21 @@ local function purchaseSlotUpgrade(player: Player)
 		return
 	end
 
+	AnalyticsEconomyService:FlushBombIncome(player)
 	if PlayerController:DeductMoney(player, upgradeData.money_req) then
 		local newUnlockedSlots = PlayerController:AddUnlockedSlots(player, upgradeData.new_slots)
+		AnalyticsEconomyService:LogCashSink(
+			player,
+			upgradeData.money_req,
+			TRANSACTION_TYPES.Shop,
+			`SlotUnlock:{unlockedSlots}->{newUnlockedSlots}`,
+			{
+				feature = "slot_unlock",
+				content_id = tostring(newUnlockedSlots),
+				context = "base",
+			}
+		)
+		AnalyticsFunnelsService:HandleExtraSlotsBought(player, newUnlockedSlots)
 		updatePlotVisuals(player)
 
 		if notif then
@@ -387,6 +409,10 @@ local function purchaseSlotUpgrade(player: Player)
 		if notif then
 			notif:FireClient(player, "Not enough Money!", "Error")
 		end
+		AnalyticsFunnelsService:LogFailure(player, "not_enough_money", {
+			zone = "base",
+			funnel = "SlotUnlock",
+		})
 	end
 end
 

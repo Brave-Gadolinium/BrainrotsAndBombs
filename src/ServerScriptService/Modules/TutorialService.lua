@@ -5,6 +5,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local Workspace = game:GetService("Workspace")
 
 local TutorialConfiguration = require(ReplicatedStorage.Modules.TutorialConfiguration)
+local AnalyticsFunnelsService = require(ServerScriptService.Modules.AnalyticsFunnelsService)
 
 type PlayerControllerType = {
 	GetProfile: (self: any, player: Player) -> any,
@@ -155,6 +156,7 @@ local function setCurrentStep(player: Player, profile: any, step: number)
 	local clampedStep = math.clamp(step, 1, TutorialConfiguration.FinalStep)
 	profile.Data.OnboardingStep = clampedStep
 	syncStepAttribute(player, clampedStep)
+	AnalyticsFunnelsService:SyncTutorial(player, clampedStep)
 
 	if PlayerController and PlayerController.OnTutorialStepChanged then
 		PlayerController:OnTutorialStepChanged(player, clampedStep)
@@ -172,6 +174,8 @@ end
 function TutorialService:SyncPlayer(player: Player)
 	local step = getCurrentStep(player)
 	syncStepAttribute(player, step)
+	AnalyticsFunnelsService:SyncTutorial(player, step)
+
 	return step
 end
 

@@ -5,6 +5,7 @@ local Players = game:GetService("Players")
 local CollectionService = game:GetService("CollectionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
 
 local TutorialConfiguration = require(ReplicatedStorage.Modules.TutorialConfiguration)
@@ -16,6 +17,7 @@ local Templates = ReplicatedStorage:WaitForChild("Templates")
 local BeamTemplate = Templates:WaitForChild("OnboardingBeam")
 local Events = ReplicatedStorage:WaitForChild("Events")
 local ReportTutorialAction = Events:WaitForChild("ReportTutorialAction") :: RemoteEvent
+local TeleportPlayer = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("Helper"):WaitForChild("TeleportPlayer") :: RemoteEvent
 
 local mainGui = playerGui:WaitForChild("GUI")
 local frames = mainGui:WaitForChild("Frames")
@@ -33,6 +35,12 @@ local worldTarget: BasePart? = nil
 local refreshAccumulator = 0
 local reportDebounce: {[string]: number} = {}
 local finalMessageHideAt = 0
+local tutorialBackOverlayGui: ScreenGui? = nil
+local tutorialBackBlackout: Frame? = nil
+local tutorialBackProxyButton: GuiButton? = nil
+local tutorialBackPulseScale: UIScale? = nil
+local tutorialBackPulseTween: Tween? = nil
+local backOverlaySuppressedUntil = 0
 
 local function getCharacter()
 	return player.Character or player.CharacterAdded:Wait()
@@ -160,6 +168,164 @@ local function reportAction(actionId: string)
 
 	reportDebounce[actionId] = now
 	ReportTutorialAction:FireServer(actionId)
+end
+
+local function ensureBackOverlayGui()
+	if tutorialBackOverlayGui and tutorialBackOverlayGui.Parent then
+		return
+	end
+
+	local overlayGui = Instance.new("ScreenGui")
+	overlayGui.Name = "TutorialBackOverlay"
+	overlayGui.ResetOnSpawn = false
+	overlayGui.IgnoreGuiInset = true
+	overlayGui.DisplayOrder = 1000
+	overlayGui.Enabled = false
+	overlayGui.Parent = playerGui
+
+	local blackout = Instance.new("Frame")
+	blackout.Name = "Blackout"
+	blackout.Size = UDim2.fromScale(1, 1)
+	blackout.Position = UDim2.fromScale(0, 0)
+	blackout.BackgroundColor3 = Color3.new(0, 0, 0)
+	blackout.BackgroundTransparency = 0.45
+	blackout.BorderSizePixel = 0
+	blackout.Active = true
+	blackout.ZIndex = 1
+	blackout.Parent = overlayGui
+
+	tutorialBackOverlayGui = overlayGui
+	tutorialBackBlackout = blackout
+end
+
+local function stopBackPulseTween()
+	if tutorialBackPulseTween then
+		tutorialBackPulseTween:Cancel()
+		tutorialBackPulseTween = nil
+	end
+end
+
+local function removeScripts(instance: Instance)
+	for _, descendant in ipairs(instance:GetDescendants()) do
+		if descendant:IsA("Script") or descendant:IsA("LocalScript") then
+			descendant:Destroy()
+		end
+	end
+end
+
+local function applyOverlayZIndex(instance: Instance, zIndex: number)
+	if instance:IsA("GuiObject") then
+		instance.ZIndex = zIndex
+	end
+
+	for _, descendant in ipairs(instance:GetDescendants()) do
+		if descendant:IsA("GuiObject") then
+			descendant.ZIndex = zIndex
+		end
+	end
+end
+
+local function destroyBackProxyButton()
+	stopBackPulseTween()
+
+	if tutorialBackProxyButton then
+		tutorialBackProxyButton:Destroy()
+		tutorialBackProxyButton = nil
+	end
+
+	tutorialBackPulseScale = nil
+end
+
+local function hideBackOverlay()
+	destroyBackProxyButton()
+
+	if tutorialBackOverlayGui then
+		tutorialBackOverlayGui.Enabled = false
+	end
+end
+
+local function syncBackProxyLayout(backButton: GuiButton)
+	if not tutorialBackProxyButton then
+		return
+	end
+
+	tutorialBackProxyButton.AnchorPoint = Vector2.zero
+	tutorialBackProxyButton.Position = UDim2.fromOffset(backButton.AbsolutePosition.X, backButton.AbsolutePosition.Y)
+	tutorialBackProxyButton.Size = UDim2.fromOffset(backButton.AbsoluteSize.X, backButton.AbsoluteSize.Y)
+	tutorialBackProxyButton.Rotation = backButton.Rotation
+end
+
+local function createBackProxyButton(backButton: GuiButton)
+	ensureBackOverlayGui()
+	destroyBackProxyButton()
+
+	local proxyButton = backButton:Clone()
+	removeScripts(proxyButton)
+	proxyButton.Name = "TutorialBackProxy"
+	proxyButton.Visible = true
+	proxyButton.Active = true
+	proxyButton.Selectable = true
+	proxyButton.Parent = tutorialBackOverlayGui
+	tutorialBackProxyButton = proxyButton
+	applyOverlayZIndex(proxyButton, 10)
+	syncBackProxyLayout(backButton)
+
+	local pulseScale = proxyButton:FindFirstChild("TutorialPulseScale") :: UIScale?
+	if not pulseScale then
+		pulseScale = Instance.new("UIScale")
+		pulseScale.Name = "TutorialPulseScale"
+		pulseScale.Parent = proxyButton
+	end
+	pulseScale.Scale = 1
+
+	local pulseTween = TweenService:Create(
+		pulseScale,
+		TweenInfo.new(0.75, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
+		{Scale = 1.08}
+	)
+	pulseTween:Play()
+
+	proxyButton.MouseButton1Click:Connect(function()
+		backOverlaySuppressedUntil = tick() + 1
+		hideBackOverlay()
+		reportAction("BackPressed")
+		TeleportPlayer:FireServer()
+	end)
+
+	tutorialBackPulseScale = pulseScale
+	tutorialBackPulseTween = pulseTween
+end
+
+local function refreshBackOverlay()
+	local backButton = hud:FindFirstChild("Back")
+	if not backButton or not backButton:IsA("GuiButton") then
+		hideBackOverlay()
+		return
+	end
+
+	local shouldShow = currentStep == 4
+		and backButton.Visible
+		and tick() >= backOverlaySuppressedUntil
+
+	if not shouldShow then
+		hideBackOverlay()
+		return
+	end
+
+	ensureBackOverlayGui()
+	if tutorialBackOverlayGui then
+		tutorialBackOverlayGui.Enabled = true
+	end
+
+	if tutorialBackBlackout then
+		tutorialBackBlackout.Visible = true
+	end
+
+	if not tutorialBackProxyButton or tutorialBackProxyButton.Parent ~= tutorialBackOverlayGui then
+		createBackProxyButton(backButton)
+	else
+		syncBackProxyLayout(backButton)
+	end
 end
 
 local function hasEquippedBrainrot(): boolean
@@ -334,6 +500,7 @@ end
 local function applyStepPresentation()
 	local stepDefinition = TutorialConfiguration.Steps[currentStep]
 	if not stepDefinition then
+		hideBackOverlay()
 		clearAllTargets()
 		return
 	end
@@ -341,7 +508,9 @@ local function applyStepPresentation()
 	if currentStep >= TutorialConfiguration.FinalStep then
 		instructionsLabel.Text = stepDefinition.Text
 		instructionsLabel.Visible = tick() < finalMessageHideAt
+		hideBackOverlay()
 		clearAllTargets(true)
+		refreshBackOverlay()
 		return
 	end
 
@@ -371,6 +540,8 @@ local function applyStepPresentation()
 	else
 		cleanupWorldVisuals()
 	end
+
+	refreshBackOverlay()
 end
 
 local function refreshCurrentStep()
@@ -396,6 +567,9 @@ local function connectUiReporting()
 		backButton:SetAttribute("TutorialConnected", true)
 		backButton.MouseButton1Click:Connect(function()
 			reportAction("BackPressed")
+		end)
+		backButton:GetPropertyChangedSignal("Visible"):Connect(function()
+			refreshBackOverlay()
 		end)
 	end
 
@@ -425,12 +599,22 @@ end)
 
 player.CharacterAdded:Connect(function()
 	task.wait(0.5)
+	hideBackOverlay()
 	clearAllTargets(true)
+	backOverlaySuppressedUntil = 0
 	connectUiReporting()
 	refreshCurrentStep()
 end)
 
 RunService.RenderStepped:Connect(function(deltaTime)
+	refreshBackOverlay()
+	if tutorialBackProxyButton then
+		local backButton = hud:FindFirstChild("Back")
+		if backButton and backButton:IsA("GuiButton") then
+			syncBackProxyLayout(backButton)
+		end
+	end
+
 	refreshAccumulator += deltaTime
 	if refreshAccumulator >= 0.25 then
 		refreshAccumulator = 0

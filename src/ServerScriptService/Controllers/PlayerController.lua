@@ -22,7 +22,10 @@ local TutorialConfiguration = require(ReplicatedStorage.Modules.TutorialConfigur
 local BadgeManager = require(ServerScriptService.Modules.BadgeManager)
 local ItemManager 
 local SlotManager 
+local PickaxeController
 local TutorialService
+local AnalyticsFunnelsService
+local AnalyticsEconomyService
 
 -- [ CONFIGURATION ]
 local DATA_VERSION = "ProjectData_v90" 
@@ -30,6 +33,7 @@ local DATA_VERSION = "ProjectData_v90"
 local MAX_OFFLINE_TIME = 8 * 60 * 60
 local INCOME_SCALING = Constants.INCOME_SCALING
 local VIP_TAG = "V.I.P"
+local COLLECT_ALL_GAMEPASS = 1736841051
 
 local GROUP_ID = 0 
 
@@ -52,7 +56,9 @@ type PlayerData = {
 	TimePlayed: number, -- ## ADDED ##
 	BaseLevel: number,
 	unlocked_slots: number,
-	OnboardingStep: number, 
+	OnboardingStep: number,
+	OnboardingFunnelStep: number,
+	AnalyticsFunnels: {[string]: any},
 	LastSaveTime: number,
 	SpinNumber: number,
 	LastDailySpin: number,
@@ -71,7 +77,11 @@ local Template: PlayerData = {
 	TimePlayed = 0, -- ## ADDED ##
 	BaseLevel = 0,
 	unlocked_slots = SlotUnlockConfigurations.StartSlots,
-	OnboardingStep = 1, 
+	OnboardingStep = 1,
+	OnboardingFunnelStep = 0,
+	AnalyticsFunnels = {
+		OneTime = {},
+	},
 	LastSaveTime = 0,
 	SpinNumber = 0,     
 	LastDailySpin = 0,   
@@ -129,6 +139,39 @@ local function getTutorialService()
 	end
 
 	return TutorialService
+end
+
+local function getPickaxeController()
+	if not PickaxeController then
+		local pickaxeModule = ServerScriptService.Controllers:FindFirstChild("PickaxeController")
+		if pickaxeModule and pickaxeModule:IsA("ModuleScript") then
+			PickaxeController = require(pickaxeModule)
+		end
+	end
+
+	return PickaxeController
+end
+
+local function getAnalyticsFunnelsService()
+	if not AnalyticsFunnelsService then
+		local analyticsModule = ServerScriptService.Modules:FindFirstChild("AnalyticsFunnelsService")
+		if analyticsModule and analyticsModule:IsA("ModuleScript") then
+			AnalyticsFunnelsService = require(analyticsModule)
+		end
+	end
+
+	return AnalyticsFunnelsService
+end
+
+local function getAnalyticsEconomyService()
+	if not AnalyticsEconomyService then
+		local analyticsModule = ServerScriptService.Modules:FindFirstChild("AnalyticsEconomyService")
+		if analyticsModule and analyticsModule:IsA("ModuleScript") then
+			AnalyticsEconomyService = require(analyticsModule)
+		end
+	end
+
+	return AnalyticsEconomyService
 end
 
 local function getHighestOwnedPickaxe(data): string?
@@ -203,15 +246,49 @@ local function grantPackRewards(player: Player, packName: string)
 
 	local rewards = ProductConfigurations.PackRewards[packName]
 	if not rewards then return end
+	local analyticsEconomyService = getAnalyticsEconomyService()
+	local transactionTypes = analyticsEconomyService and analyticsEconomyService:GetTransactionTypes() or nil
 
 	profile.Data.ClaimedPacks[packName] = true
+	if analyticsEconomyService and rewards.Money > 0 then
+		analyticsEconomyService:FlushBombIncome(player)
+	end
 	PlayerController:AddMoney(player, rewards.Money)
+	if analyticsEconomyService and transactionTypes and rewards.Money > 0 then
+		analyticsEconomyService:LogCashSource(player, rewards.Money, transactionTypes.IAP, `Pack:{packName}`, {
+			feature = "pack",
+			content_id = packName,
+			context = "shop",
+		})
+		analyticsEconomyService:LogEntitlementGranted(player, "Pack", packName, rewards.Money, {
+			feature = "pack",
+			content_id = packName,
+			context = "shop",
+		})
+	end
 
 	if ItemManager then
 		for _, item in ipairs(rewards.Items) do
 			local itemConf = ItemConfigurations.GetItemData(item.Name)
 			local rarity = itemConf and itemConf.Rarity or "Common"
-			ItemManager.GiveItemToPlayer(player, item.Name, item.Mutation, rarity, item.Level)
+			local tool = ItemManager.GiveItemToPlayer(player, item.Name, item.Mutation, rarity, item.Level)
+			if tool and analyticsEconomyService and transactionTypes then
+				analyticsEconomyService:LogItemValueSourceForItem(
+					player,
+					item.Name,
+					item.Mutation,
+					item.Level,
+					transactionTypes.IAP,
+					`ItemIAP:{packName}_{item.Name}`,
+					{
+						feature = "pack_item",
+						content_id = item.Name,
+						context = "shop",
+						rarity = rarity,
+						mutation = item.Mutation,
+					}
+				)
+			end
 		end
 	end
 
@@ -314,7 +391,19 @@ local function checkAndGrantGroupReward(player: Player, profile: any)
 		local success, isInGroup = pcall(function() return player:IsInGroup(targetGroupId) end)
 		if success and isInGroup then
 			profile.Data.ClaimedPacks["GroupReward"] = true
+			local analyticsEconomyService = getAnalyticsEconomyService()
+			local transactionTypes = analyticsEconomyService and analyticsEconomyService:GetTransactionTypes() or nil
+			if analyticsEconomyService then
+				analyticsEconomyService:FlushBombIncome(player)
+			end
 			PlayerController:AddMoney(player, 1000)
+			if analyticsEconomyService and transactionTypes then
+				analyticsEconomyService:LogCashSource(player, 1000, transactionTypes.Onboarding, "GroupRewardCash", {
+					feature = "group_reward",
+					content_id = "GroupRewardCash",
+					context = "onboarding",
+				})
+			end
 			local Events = ReplicatedStorage:FindFirstChild("Events")
 			local notif = Events and Events:FindFirstChild("ShowNotification")
 			if notif then notif:FireClient(player, "Thanks for joining the group! +$1,000", "Success") end
@@ -341,9 +430,15 @@ function PlayerController:AddMoney(player: Player, amount: number)
 		profile.Data.Money += amount
 		player.leaderstats.Money.Value = profile.Data.Money
 		BadgeManager:EvaluateMoneyMilestones(player, profile.Data.Money)
+
 		local tutorialService = getTutorialService()
 		if tutorialService then
 			tutorialService:HandleMoneyChanged(player)
+		end
+
+		local analyticsFunnelsService = getAnalyticsFunnelsService()
+		if analyticsFunnelsService then
+			analyticsFunnelsService:HandleMoneyBalanceChanged(player)
 		end
 	end
 end
@@ -399,6 +494,7 @@ function PlayerController:SetupSharedInstances()
 	createRemote("RemoteEvent", "UpdateRebirthUI")
 	createRemote("RemoteEvent", "RefreshIndex")
 	createRemote("RemoteEvent", "ReportTutorialAction") 
+	createRemote("RemoteEvent", "ReportAnalyticsIntent")
 	createRemote("RemoteEvent", "TriggerUIEffect") 
 end
 
@@ -475,6 +571,15 @@ local function loadInventory(player: Player, profile: any)
 	local Events = ReplicatedStorage:FindFirstChild("Events")
 	local refresh = Events and Events:FindFirstChild("RefreshIndex")
 	if refresh then refresh:FireClient(player) end
+
+	local pickaxeController = getPickaxeController()
+	if pickaxeController and pickaxeController.EnsureBombFirstSlot then
+		task.defer(function()
+			if player.Parent then
+				pickaxeController.EnsureBombFirstSlot(player)
+			end
+		end)
+	end
 end
 
 -- =========================================================
@@ -541,6 +646,20 @@ local function onPlayerAdded(player: Player)
 	player:SetAttribute("LastDailySpin", profile.Data.LastDailySpin or 0)
 	player:SetAttribute("UnlockedSlots", SlotUnlockConfigurations.ClampSlots(profile.Data.unlocked_slots))
 
+	if type(profile.Data.AnalyticsFunnels) ~= "table" then
+		profile.Data.AnalyticsFunnels = {
+			OneTime = {},
+		}
+	end
+	if type(profile.Data.AnalyticsFunnels.OneTime) ~= "table" then
+		profile.Data.AnalyticsFunnels.OneTime = {}
+	end
+
+	profile.Data.OnboardingFunnelStep = math.clamp(tonumber(profile.Data.OnboardingFunnelStep) or 0, 0, 10)
+	profile.Data.AnalyticsFunnels.OneTime.TutorialFTUE = math.max(
+		tonumber(profile.Data.AnalyticsFunnels.OneTime.TutorialFTUE) or 0,
+		profile.Data.OnboardingFunnelStep
+	)
 	if profile.Data.DiscoveredItems == nil then profile.Data.DiscoveredItems = {} end
 	if profile.Data.ClaimedPacks == nil then profile.Data.ClaimedPacks = {} end
 	if type(profile.Data.TotalBrainrotsCollected) ~= "number" then profile.Data.TotalBrainrotsCollected = 0 end
@@ -558,6 +677,11 @@ local function onPlayerAdded(player: Player)
 		if tutorialService then
 			tutorialService:SyncPlayer(player)
 			tutorialService:EvaluateCurrentStep(player)
+		end
+
+		local analyticsFunnelsService = getAnalyticsFunnelsService()
+		if analyticsFunnelsService then
+			analyticsFunnelsService:HandleMoneyBalanceChanged(player)
 		end
 
 		local function setupBackpackTracking(backpack: Backpack)
@@ -642,6 +766,16 @@ function PlayerController:OnTutorialStepChanged(player: Player, step: number)
 end
 
 function PlayerController:Init(controllers)
+	local analyticsFunnelsService = getAnalyticsFunnelsService()
+	if analyticsFunnelsService and analyticsFunnelsService.Init then
+		analyticsFunnelsService:Init(controllers)
+	end
+
+	local analyticsEconomyService = getAnalyticsEconomyService()
+	if analyticsEconomyService and analyticsEconomyService.Init then
+		analyticsEconomyService:Init(controllers)
+	end
+
 	local Modules = ServerScriptService:WaitForChild("Modules")
 	ItemManager = require(Modules:WaitForChild("ItemManager"))
 	SlotManager = require(Modules:WaitForChild("SlotManager"))
@@ -662,12 +796,27 @@ function PlayerController:Init(controllers)
 
 	MarketplaceService.PromptGamePassPurchaseFinished:Connect(function(player, passId, wasPurchased)
 		if wasPurchased then
+			local analyticsEconomyService = getAnalyticsEconomyService()
 			if passId == ProductConfigurations.GamePasses.VIP then
 				vipCache[player] = true
 				player:SetAttribute("IsVIP", true)
 				local notif = Events:FindFirstChild("ShowNotification")
 				if notif then notif:FireClient(player, "Gamepass bought!", "Success") end
 				if SlotManager and SlotManager.RefreshAllSlots then SlotManager.RefreshAllSlots(player) end
+				if analyticsEconomyService then
+					analyticsEconomyService:LogEntitlementGranted(player, "VIP", "VIP", nil, {
+						feature = "vip",
+						content_id = "VIP",
+						context = "shop",
+					})
+				end
+			end
+			if passId == COLLECT_ALL_GAMEPASS and analyticsEconomyService then
+				analyticsEconomyService:LogEntitlementGranted(player, "CollectAll", "CollectAll", nil, {
+					feature = "collect_all",
+					content_id = "CollectAll",
+					context = "shop",
+				})
 			end
 
 			local packName = ProductConfigurations.GetGamePassById(passId)

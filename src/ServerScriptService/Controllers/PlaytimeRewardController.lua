@@ -6,6 +6,8 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local PlaytimeRewardManager = require(ServerScriptService.Modules.PlaytimeRewardManager)
+local AnalyticsFunnelsService = require(ServerScriptService.Modules.AnalyticsFunnelsService)
+local AnalyticsEconomyService = require(ServerScriptService.Modules.AnalyticsEconomyService)
 local PlaytimeRewardConfiguration = require(ReplicatedStorage.Modules.PlaytimeRewardConfiguration)
 local NumberFormatter = require(ReplicatedStorage.Modules.NumberFormatter)
 
@@ -17,6 +19,7 @@ local remotesFolder
 local getStatusRemote
 local claimRewardRemote
 local statusUpdatedRemote
+local TRANSACTION_TYPES = AnalyticsEconomyService:GetTransactionTypes()
 
 local function getProfile(player: Player)
 	if not PlayerController then
@@ -62,6 +65,9 @@ end
 
 function PlaytimeRewardController:PushStatus(player: Player)
 	local status = self:GetStatusForPlayer(player)
+	if status then
+		AnalyticsFunnelsService:HandlePlaytimeRewardStatus(player, status)
+	end
 	if status and statusUpdatedRemote then
 		statusUpdatedRemote:FireClient(player, status)
 	end
@@ -110,7 +116,14 @@ function PlaytimeRewardController:ApplyReward(player: Player, reward)
 	end
 
 	if reward.Type == "Money" then
+		AnalyticsEconomyService:FlushBombIncome(player)
 		PlayerController:AddMoney(player, reward.Amount)
+		AnalyticsEconomyService:LogCashSource(player, reward.Amount, TRANSACTION_TYPES.TimedReward, `PlaytimeReward:{reward.Id or 0}`, {
+			feature = "playtime_reward",
+			content_id = tostring(reward.Id or 0),
+			context = "reward_claim",
+			reward_id = reward.Id or 0,
+		})
 		showNotification(player, "You got $" .. NumberFormatter.Format(reward.Amount) .. "!", "Success")
 		return true, nil
 	end
@@ -128,6 +141,18 @@ function PlaytimeRewardController:ApplyReward(player: Player, reward)
 		if not tool then
 			return false, "LuckyBlockGiveFailed"
 		end
+		AnalyticsEconomyService:LogItemValueSourceForLuckyBlock(
+			player,
+			reward.LuckyBlockId,
+			TRANSACTION_TYPES.TimedReward,
+			`LuckyBlock:{reward.LuckyBlockId}`,
+			{
+				feature = "playtime_reward",
+				content_id = reward.LuckyBlockId,
+				context = "reward_claim",
+				reward_id = reward.Id or 0,
+			}
+		)
 
 		showNotification(player, "You got " .. (reward.DisplayName or tool.Name) .. "!", "Success")
 		return true, nil
@@ -147,6 +172,7 @@ function PlaytimeRewardController:HandleClaim(player: Player, rewardId: number)
 
 	local success, err, status, reward = PlaytimeRewardManager.Claim(profile.Data, rewardId)
 	if not success then
+		AnalyticsFunnelsService:HandlePlaytimeRewardClaimFailure(player, rewardId, err or "Unknown")
 		setPlayerAttributes(player, status)
 		return {
 			Success = false,
@@ -165,6 +191,7 @@ function PlaytimeRewardController:HandleClaim(player: Player, rewardId: number)
 	end
 
 	setPlayerAttributes(player, status)
+	AnalyticsFunnelsService:HandlePlaytimeRewardClaimSuccess(player, rewardId, status)
 	if statusUpdatedRemote then
 		statusUpdatedRemote:FireClient(player, status)
 	end
@@ -254,6 +281,7 @@ function PlaytimeRewardController:Start()
 
 				local status = PlaytimeRewardManager.Tick(profile.Data, 1)
 				setPlayerAttributes(player, status)
+				AnalyticsFunnelsService:HandlePlaytimeRewardStatus(player, status)
 
 				local shouldPush = false
 				if status.DayKey ~= dayKeyBefore then

@@ -8,6 +8,7 @@ local Workspace = game:GetService("Workspace")
 local IncomeController = {}
 
 local ItemConfigurations = require(ReplicatedStorage.Modules.ItemConfigurations)
+local AnalyticsFunnelsService = require(script.Parent.Parent.Modules.AnalyticsFunnelsService)
 local PlayerController -- Lazy load
 local Constants = require(ReplicatedStorage.Modules.Constants)
 
@@ -48,10 +49,10 @@ function IncomeController:Start()
 								if type(slotData.Stored) ~= "number" then slotData.Stored = 0 end
 
 								local itemConf = ItemConfigurations.GetItemData(slotData.Item.Name)
-								if itemConf then
-									local base = itemConf.Income
-									local mutMult = MUTATION_MULTIPLIERS[slotData.Item.Mutation] or 1
-									local levelMult = INCOME_SCALING ^ (slotData.Level - 1)
+							if itemConf then
+								local base = itemConf.Income
+								local mutMult = MUTATION_MULTIPLIERS[slotData.Item.Mutation] or 1
+								local levelMult = INCOME_SCALING ^ (slotData.Level - 1)
 
 									local reb = profile.Data.Rebirths or 0
 									local rebMult = 1 + (reb * 0.5)
@@ -59,7 +60,11 @@ function IncomeController:Start()
 									-- ## APPLIED VIP MULT HERE ##
 									local income = base * mutMult * levelMult * rebMult * vipMult
 
+									local previousStored = slotData.Stored
 									slotData.Stored += income
+									if previousStored <= 0 and slotData.Stored > 0 then
+										AnalyticsFunnelsService:HandleStoredCashPositive(player, floorName, slotName)
+									end
 
 									-- Visual Update
 									if plotModel then

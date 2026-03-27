@@ -19,6 +19,7 @@ local pickaxeTemplate = Templates:WaitForChild("PickaxeTemplate")
 local Events = ReplicatedStorage:WaitForChild("Events")
 local requestEvent = Events:WaitForChild("RequestPickaxeAction") :: RemoteEvent
 local getDataFunction = Events:WaitForChild("GetPickaxeData") :: RemoteFunction
+local reportAnalyticsIntent = Events:WaitForChild("ReportAnalyticsIntent") :: RemoteEvent
 
 -- State
 local selectedPickaxeId: string? = nil
@@ -45,7 +46,7 @@ local function setupButtonAnimation(button: GuiButton)
 end
 
 -- [ CORE LOGIC ]
-local function selectPickaxe(pickaxeId: string, showcaseFrame: Frame, isOwned: boolean, isLocked: boolean)
+local function selectPickaxe(pickaxeId: string, showcaseFrame: Frame, isOwned: boolean, isLocked: boolean, shouldReport: boolean?)
 	selectedPickaxeId = pickaxeId
 	isCurrentlyOwned = isOwned
 	isCurrentlyLocked = isLocked
@@ -89,6 +90,12 @@ local function selectPickaxe(pickaxeId: string, showcaseFrame: Frame, isOwned: b
 			buyPriceText.Text = "FREE"
 		end
 		buyButton.BackgroundColor3 = Color3.fromRGB(50, 150, 50) -- Green
+	end
+
+	if shouldReport ~= false then
+		reportAnalyticsIntent:FireServer("BombSelected", {
+			pickaxeName = pickaxeId,
+		})
 	end
 end
 
@@ -188,12 +195,12 @@ local function initializeUI()
 
 		-- Handle Click
 		newTemplate.MouseButton1Click:Connect(function()
-			selectPickaxe(pickaxe.Id, showcaseFrame, isOwned, isLocked)
+			selectPickaxe(pickaxe.Id, showcaseFrame, isOwned, isLocked, true)
 		end)
 
 		-- ## FIXED: Auto-selects the pickaxe they left off on! ##
 		if pickaxe.Id == pickaxeToAutoSelect then
-			selectPickaxe(pickaxe.Id, showcaseFrame, isOwned, isLocked)
+			selectPickaxe(pickaxe.Id, showcaseFrame, isOwned, isLocked, false)
 		end
 	end
 
@@ -212,6 +219,19 @@ local function initializeUI()
 		end)
 	end
 end
+
+task.spawn(function()
+	local playerGui = player:WaitForChild("PlayerGui")
+	local mainGui = playerGui:WaitForChild("GUI")
+	local frames = mainGui:WaitForChild("Frames")
+	local pickaxesFrame = frames:WaitForChild("Pickaxes")
+
+	pickaxesFrame:GetPropertyChangedSignal("Visible"):Connect(function()
+		if pickaxesFrame.Visible then
+			reportAnalyticsIntent:FireServer("BombShopOpened")
+		end
+	end)
+end)
 
 -- Refresh UI when Server tells us a purchase was successful
 local updateUIEvent = Events:WaitForChild("UpdatePickaxeUI") :: RemoteEvent

@@ -14,6 +14,7 @@ local NumberFormatter = require(ReplicatedStorage.Modules.NumberFormatter)
 local Events = ReplicatedStorage:WaitForChild("Events")
 local RequestRebirth = Events:WaitForChild("RequestRebirth")
 local UpdateEvent = Events:WaitForChild("UpdateRebirthUI")
+local ReportAnalyticsIntent = Events:WaitForChild("ReportAnalyticsIntent") :: RemoteEvent
 
 local gui = playerGui:WaitForChild("GUI")
 local hud = gui:WaitForChild("HUD")
@@ -101,3 +102,9 @@ end)
 player:GetAttributeChangedSignal("Rebirths"):Connect(updateUI)
 UpdateEvent.OnClientEvent:Connect(updateUI)
 updateUI()
+
+rebirthFrame:GetPropertyChangedSignal("Visible"):Connect(function()
+	if rebirthFrame.Visible then
+		ReportAnalyticsIntent:FireServer("RebirthUIOpened")
+	end
+end)

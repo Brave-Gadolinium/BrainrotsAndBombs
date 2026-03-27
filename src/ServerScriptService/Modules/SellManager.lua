@@ -3,46 +3,128 @@
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
-local Players = game:GetService("Players")
 
 local SellManager = {}
 
 -- [ MODULES ]
 local ItemConfigurations = require(ReplicatedStorage.Modules.ItemConfigurations)
 local NumberFormatter = require(ReplicatedStorage.Modules.NumberFormatter)
-local Constants = require(ReplicatedStorage.Modules.Constants)
+local AnalyticsFunnelsService = require(ServerScriptService.Modules.AnalyticsFunnelsService)
+local AnalyticsEconomyService = require(ServerScriptService.Modules.AnalyticsEconomyService)
+local EconomyValueUtils = require(ServerScriptService.Modules.EconomyValueUtils)
 
 local PlayerController -- Lazy Load
 
--- [ CONFIG ]
-local HOURS_TO_SECONDS = 300
-local INCOME_SCALING = Constants.INCOME_SCALING
-
-local MUTATION_MULTIPLIERS = {
-	["Normal"] = 1,
-	["Golden"] = 2,
-	["Diamond"] = 3,
-	["Ruby"] = 4,
-	["Neon"] = 5,
-}
+local BATCH_THRESHOLD = 10
+local TRANSACTION_TYPES = AnalyticsEconomyService:GetTransactionTypes()
 
 -- [ HELPER: Calculate Price ]
+type SoldItemData = {
+	Name: string,
+	Mutation: string,
+	Rarity: string,
+	Level: number,
+	Value: number,
+}
+
 local function getItemSellValue(tool: Tool): number
+	return EconomyValueUtils.GetToolReferencePrice(tool)
+end
+
+local function getSoldItemData(tool: Tool): SoldItemData?
 	local name = tool:GetAttribute("OriginalName")
 	local mutation = tool:GetAttribute("Mutation")
 	local level = tool:GetAttribute("Level") or 1
 
-	if not name then return 0 end
+	if type(name) ~= "string" then return nil end
 
 	local itemData = ItemConfigurations.GetItemData(name)
-	if not itemData then return 0 end
+	if not itemData then return nil end
 
-	local baseIncome = itemData.Income
-	local mutMult = MUTATION_MULTIPLIERS[mutation] or 1
+	return {
+		Name = name,
+		Mutation = if type(mutation) == "string" then mutation else "Normal",
+		Rarity = itemData.Rarity,
+		Level = tonumber(level) or 1,
+		Value = getItemSellValue(tool),
+	}
+end
 
-	-- Formula: (Income/sec) * 3600 seconds
-	local incomePerSec = baseIncome * mutMult * (INCOME_SCALING ^ (level - 1))
-	return math.floor(incomePerSec * HOURS_TO_SECONDS)
+local function logSingleSale(player: Player, soldItem: SoldItemData)
+	PlayerController:AddMoney(player, soldItem.Value)
+	AnalyticsEconomyService:LogCashSource(player, soldItem.Value, TRANSACTION_TYPES.Shop, `Sell:{soldItem.Name}`, {
+		feature = "sell",
+		content_id = soldItem.Name,
+		context = "base",
+		rarity = soldItem.Rarity,
+		mutation = soldItem.Mutation,
+	})
+	AnalyticsEconomyService:LogItemValueSinkForItem(
+		player,
+		soldItem.Name,
+		soldItem.Mutation,
+		soldItem.Level,
+		TRANSACTION_TYPES.Shop,
+		`Item:{soldItem.Name}`,
+		{
+			feature = "sell",
+			content_id = soldItem.Name,
+			context = "base",
+			rarity = soldItem.Rarity,
+			mutation = soldItem.Mutation,
+		}
+	)
+end
+
+local function logBatchSale(player: Player, soldItems: {SoldItemData})
+	local groupedByRarity: {[string]: {Count: number, TotalValue: number}} = {}
+	local totalValue = 0
+
+	for _, soldItem in ipairs(soldItems) do
+		totalValue += soldItem.Value
+		local group = groupedByRarity[soldItem.Rarity]
+		if not group then
+			group = {
+				Count = 0,
+				TotalValue = 0,
+			}
+			groupedByRarity[soldItem.Rarity] = group
+		end
+
+		group.Count += 1
+		group.TotalValue += soldItem.Value
+	end
+
+	PlayerController:AddMoney(player, totalValue)
+	local runningCashBalance = math.max(0, AnalyticsEconomyService:EstimateCashBalance(player) - totalValue)
+	local runningItemValueBalance = AnalyticsEconomyService:EstimateItemValueBalance(player) + totalValue
+	local rarityKeys = {}
+
+	for rarity in pairs(groupedByRarity) do
+		table.insert(rarityKeys, rarity)
+	end
+
+	table.sort(rarityKeys)
+
+	for _, rarity in ipairs(rarityKeys) do
+		local group = groupedByRarity[rarity]
+		runningCashBalance += group.TotalValue
+		AnalyticsEconomyService:LogCashSource(player, group.TotalValue, TRANSACTION_TYPES.Shop, `SellBatch:{rarity}`, {
+			feature = "sell_batch",
+			content_id = rarity,
+			context = "base",
+			rarity = rarity,
+			item_count = group.Count,
+		}, runningCashBalance)
+		runningItemValueBalance = math.max(0, runningItemValueBalance - group.TotalValue)
+		AnalyticsEconomyService:LogItemValueSink(player, group.TotalValue, TRANSACTION_TYPES.Shop, `SellBatch:{rarity}`, {
+			feature = "sell_batch",
+			content_id = rarity,
+			context = "base",
+			rarity = rarity,
+			item_count = group.Count,
+		}, runningItemValueBalance)
+	end
 end
 
 -- [ ACTIONS ]
@@ -55,11 +137,16 @@ function SellManager.SellEquipped(player: Player)
 	local notif = Events and Events:FindFirstChild("ShowNotification")
 
 	if tool then
-		local value = getItemSellValue(tool)
+		local soldItem = getSoldItemData(tool)
+		local value = soldItem and soldItem.Value or 0
 
 		if value > 0 then
-			PlayerController:AddMoney(player, value)
+			AnalyticsEconomyService:FlushBombIncome(player)
 			tool:Destroy()
+			if soldItem then
+				logSingleSale(player, soldItem)
+			end
+			AnalyticsFunnelsService:HandleSellSuccess(player, "Equipped", 1)
 
 			-- Notify
 			if notif then notif:FireClient(player, "Sold for $"..NumberFormatter.Format(value), "Success") end
@@ -82,16 +169,21 @@ function SellManager.SellInventory(player: Player)
 
 	local totalValue = 0
 	local itemsSold = 0
+	local soldItems: {SoldItemData} = {}
 
 	-- ## FIXED: Helper to scan any container for sellable items ##
 	local function scanAndSell(container: Instance?)
 		if not container then return end
 		for _, tool in ipairs(container:GetChildren()) do
 			if tool:IsA("Tool") then
-				local value = getItemSellValue(tool)
+				local soldItem = getSoldItemData(tool)
+				local value = soldItem and soldItem.Value or 0
 				if value > 0 then
 					totalValue += value
 					itemsSold += 1
+					if soldItem then
+						table.insert(soldItems, soldItem)
+					end
 					tool:Destroy()
 				end
 			end
@@ -106,7 +198,15 @@ function SellManager.SellInventory(player: Player)
 	local notif = Events and Events:FindFirstChild("ShowNotification")
 
 	if totalValue > 0 then
-		PlayerController:AddMoney(player, totalValue)
+		AnalyticsEconomyService:FlushBombIncome(player)
+		if #soldItems <= BATCH_THRESHOLD then
+			for _, soldItem in ipairs(soldItems) do
+				logSingleSale(player, soldItem)
+			end
+		else
+			logBatchSale(player, soldItems)
+		end
+		AnalyticsFunnelsService:HandleSellSuccess(player, "Inventory", itemsSold)
 
 		if notif then notif:FireClient(player, "Sold "..itemsSold.." items for $"..NumberFormatter.Format(totalValue), "Success") end
 

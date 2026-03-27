@@ -17,6 +17,7 @@ local upgradeTemplate = Templates:WaitForChild("UpgradeTemplate") :: Frame
 local Events = ReplicatedStorage:WaitForChild("Events")
 local requestUpgradeEvent = Events:WaitForChild("RequestUpgradeAction") :: RemoteEvent
 local updateEvent = Events:WaitForChild("UpdateUpgradesUI") :: RemoteEvent
+local reportAnalyticsIntent = Events:WaitForChild("ReportAnalyticsIntent") :: RemoteEvent
 
 local HOVER_SCALE = 1.05
 local CLICK_SCALE = 0.95
@@ -57,6 +58,10 @@ local function initializeUI()
 	table.clear(uiReferences)
 
 	for _, upgrade in ipairs(UpgradesConfig.Upgrades) do
+		if upgrade.HiddenInUI == true then
+			continue
+		end
+
 		local newUpgrade = upgradeTemplate:Clone()
 		newUpgrade.Name = upgrade.Id
 		newUpgrade.Visible = true
@@ -92,6 +97,9 @@ local function initializeUI()
 		if moneyBtn then
 			setupButtonAnimation(moneyBtn)
 			moneyBtn.MouseButton1Click:Connect(function()
+				reportAnalyticsIntent:FireServer("UpgradeSelected", {
+					upgradeId = upgrade.Id,
+				})
 				requestUpgradeEvent:FireServer(upgrade.Id)
 			end)
 		end
@@ -125,6 +133,19 @@ local function initializeUI()
 		newUpgrade.Parent = scrollingFrame
 	end
 end
+
+task.spawn(function()
+	local playerGui = player:WaitForChild("PlayerGui")
+	local mainGui = playerGui:WaitForChild("GUI")
+	local frames = mainGui:WaitForChild("Frames")
+	local upgradesFrame = frames:WaitForChild("Upgrades")
+
+	upgradesFrame:GetPropertyChangedSignal("Visible"):Connect(function()
+		if upgradesFrame.Visible then
+			reportAnalyticsIntent:FireServer("UpgradesOpened")
+		end
+	end)
+end)
 
 local function onServerUpdate(data: any)
 	for upgradeId, upgradeData in pairs(data) do

@@ -6,6 +6,8 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local DailyRewardManager = require(ServerScriptService.Modules.DailyRewardManager)
+local AnalyticsFunnelsService = require(ServerScriptService.Modules.AnalyticsFunnelsService)
+local AnalyticsEconomyService = require(ServerScriptService.Modules.AnalyticsEconomyService)
 local DailyRewardConfiguration = require(ReplicatedStorage.Modules.DailyRewardConfiguration)
 local ItemConfigurations = require(ReplicatedStorage.Modules.ItemConfigurations)
 local NumberFormatter = require(ReplicatedStorage.Modules.NumberFormatter)
@@ -20,6 +22,7 @@ local remotesFolder
 local getStatusRemote
 local claimRewardRemote
 local statusUpdatedRemote
+local TRANSACTION_TYPES = AnalyticsEconomyService:GetTransactionTypes()
 
 local function setPlayerAttributes(player: Player, status)
 	player:SetAttribute("DailyRewardStreak", status.CurrentStreak)
@@ -50,14 +53,22 @@ end
 
 local function pushStatus(player: Player, status)
 	setPlayerAttributes(player, status)
+	AnalyticsFunnelsService:HandleDailyRewardStatus(player, status)
 	if statusUpdatedRemote then
 		statusUpdatedRemote:FireClient(player, status)
 	end
 end
 
-local function applyCompensation(player: Player, reward)
+local function applyCompensation(player: Player, day: number, reward)
 	if reward.CompensationType == "Money" and type(reward.CompensationAmount) == "number" then
+		AnalyticsEconomyService:FlushBombIncome(player)
 		PlayerController:AddMoney(player, reward.CompensationAmount)
+		AnalyticsEconomyService:LogCashSource(player, reward.CompensationAmount, TRANSACTION_TYPES.TimedReward, `DailyReward:{day}`, {
+			feature = "daily_reward",
+			content_id = tostring(day),
+			context = "reward_compensation",
+			reward_day = day,
+		})
 		showNotification(player, "You already own this reward. Compensation: $" .. NumberFormatter.Format(reward.CompensationAmount), "Success")
 		return true, nil
 	end
@@ -78,19 +89,26 @@ end
 
 function DailyRewardController:PushStatus(player: Player)
 	local status = self:GetStatusForPlayer(player)
-	if status and statusUpdatedRemote then
-		statusUpdatedRemote:FireClient(player, status)
+	if status then
+		pushStatus(player, status)
 	end
 	return status
 end
 
-function DailyRewardController:ApplyReward(player: Player, reward)
+function DailyRewardController:ApplyReward(player: Player, day: number, reward)
 	if not reward then
 		return false, "MissingReward"
 	end
 
 	if reward.Type == "Money" then
+		AnalyticsEconomyService:FlushBombIncome(player)
 		PlayerController:AddMoney(player, reward.Amount)
+		AnalyticsEconomyService:LogCashSource(player, reward.Amount, TRANSACTION_TYPES.TimedReward, `DailyReward:{day}`, {
+			feature = "daily_reward",
+			content_id = tostring(day),
+			context = "reward_claim",
+			reward_day = day,
+		})
 		showNotification(player, "You got $" .. NumberFormatter.Format(reward.Amount) .. "!", "Success")
 		return true, nil
 	end
@@ -113,7 +131,26 @@ function DailyRewardController:ApplyReward(player: Player, reward)
 			return false, "ItemConfigMissing"
 		end
 
-		ItemManager.GiveItemToPlayer(player, itemName, "Normal", itemData.Rarity, 1)
+		local tool = ItemManager.GiveItemToPlayer(player, itemName, "Normal", itemData.Rarity, 1)
+		if not tool then
+			return false, "ItemGrantFailed"
+		end
+		AnalyticsEconomyService:LogItemValueSourceForItem(
+			player,
+			itemName,
+			"Normal",
+			1,
+			TRANSACTION_TYPES.TimedReward,
+			`DailyRewardItem:{day}`,
+			{
+				feature = "daily_reward",
+				content_id = itemName,
+				context = "reward_claim",
+				reward_day = day,
+				rarity = itemData.Rarity,
+				mutation = "Normal",
+			}
+		)
 		showNotification(player, "You got a " .. itemData.Rarity .. " " .. itemName .. "!", "Success")
 		return true, nil
 	end
@@ -134,12 +171,18 @@ function DailyRewardController:ApplyReward(player: Player, reward)
 		end
 
 		if profile.Data.OwnedPickaxes[pickaxeName] then
-			return applyCompensation(player, reward)
+			return applyCompensation(player, day, reward)
 		end
 
 		profile.Data.OwnedPickaxes[pickaxeName] = true
 		profile.Data.EquippedPickaxe = pickaxeName
 		PickaxeController.EquipPickaxe(player, pickaxeName)
+		AnalyticsEconomyService:LogEntitlementGranted(player, "PickaxeReward", pickaxeName, reward.CompensationAmount, {
+			feature = "daily_reward",
+			content_id = pickaxeName,
+			context = "reward_claim",
+			reward_day = day,
+		})
 
 		local updateUIEvent = getEventsFolder() and getEventsFolder():FindFirstChild("UpdatePickaxeUI")
 		if updateUIEvent and updateUIEvent:IsA("RemoteEvent") then
@@ -226,7 +269,9 @@ function DailyRewardController:HandleClaim(player: Player, day: number)
 	end
 
 	local success, err, status, reward = DailyRewardManager.GetClaimableReward(profile.Data, day)
+	AnalyticsFunnelsService:HandleDailyRewardClaimAttempt(player, day)
 	if not success then
+		AnalyticsFunnelsService:HandleDailyRewardClaimFailure(player, day, err or "Unknown")
 		setPlayerAttributes(player, status)
 		return {
 			Success = false,
@@ -235,7 +280,7 @@ function DailyRewardController:HandleClaim(player: Player, day: number)
 		}
 	end
 
-	local applied, applyError = self:ApplyReward(player, reward)
+	local applied, applyError = self:ApplyReward(player, day, reward)
 	if not applied then
 		return {
 			Success = false,
@@ -246,6 +291,7 @@ function DailyRewardController:HandleClaim(player: Player, day: number)
 
 	local marked, markError, updatedStatus = DailyRewardManager.MarkRewardClaimed(profile.Data, day)
 	if not marked then
+		AnalyticsFunnelsService:HandleDailyRewardClaimFailure(player, day, markError or "Unknown")
 		return {
 			Success = false,
 			Error = markError,
@@ -254,6 +300,7 @@ function DailyRewardController:HandleClaim(player: Player, day: number)
 	end
 
 	pushStatus(player, updatedStatus)
+	AnalyticsFunnelsService:HandleDailyRewardClaimSuccess(player, day)
 
 	return {
 		Success = true,

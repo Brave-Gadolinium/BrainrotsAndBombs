@@ -12,6 +12,9 @@ local PlayerController
 local ItemManager 
 local ProductConfigurations = require(ReplicatedStorage.Modules.ProductConfigurations)
 local ItemConfigurations = require(ReplicatedStorage.Modules.ItemConfigurations)
+local AnalyticsFunnelsService = require(ServerScriptService.Modules.AnalyticsFunnelsService)
+local AnalyticsEconomyService = require(ServerScriptService.Modules.AnalyticsEconomyService)
+local TRANSACTION_TYPES = AnalyticsEconomyService:GetTransactionTypes()
 
 function GroupRewardController:ProcessRewardRequest(player: Player)
 	local profile = PlayerController:GetProfile(player)
@@ -42,13 +45,30 @@ function GroupRewardController:ProcessRewardRequest(player: Player)
 		local itemData = ItemConfigurations.GetItemData(rewardConfig.Name)
 		local rarity = itemData and itemData.Rarity or "Common"
 
-		ItemManager.GiveItemToPlayer(
+		local tool = ItemManager.GiveItemToPlayer(
 			player, 
 			rewardConfig.Name, 
 			rewardConfig.Mutation, 
 			rarity, 
 			rewardConfig.Level or 1
 		)
+		if tool then
+			AnalyticsEconomyService:LogItemValueSourceForItem(
+				player,
+				rewardConfig.Name,
+				rewardConfig.Mutation,
+				rewardConfig.Level or 1,
+				TRANSACTION_TYPES.Onboarding,
+				`GroupRewardItem:{rewardConfig.Name}`,
+				{
+					feature = "group_reward",
+					content_id = rewardConfig.Name,
+					context = "onboarding",
+					rarity = rarity,
+					mutation = rewardConfig.Mutation,
+				}
+			)
+		end
 
 		-- 3. Play Visual Effects
 		local Events = ReplicatedStorage:FindFirstChild("Events")
@@ -58,6 +78,7 @@ function GroupRewardController:ProcessRewardRequest(player: Player)
 
 		return {Success = true}
 	else
+		AnalyticsFunnelsService:HandleGroupRewardRejected(player)
 		return {Success = false, Msg = "You must join the group first!"}
 	end
 end

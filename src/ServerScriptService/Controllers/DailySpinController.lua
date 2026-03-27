@@ -8,11 +8,14 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local Config = require(ReplicatedStorage.Modules.DailySpinConfiguration)
 local NumberFormatter = require(ReplicatedStorage.Modules.NumberFormatter)
 local ItemConfigurations = require(ReplicatedStorage.Modules.ItemConfigurations)
+local AnalyticsFunnelsService = require(ServerScriptService.Modules.AnalyticsFunnelsService)
+local AnalyticsEconomyService = require(ServerScriptService.Modules.AnalyticsEconomyService)
 
 local DailySpinController = {}
 local RandomObj = Random.new()
 local ONE_DAY = 86400
 local isProcessingSpin = {}
+local TRANSACTION_TYPES = AnalyticsEconomyService:GetTransactionTypes()
 
 -- Lazy loaded dependencies
 local PlayerController
@@ -36,15 +39,23 @@ function DailySpinController:HandleSpin(player: Player)
 
 		player:SetAttribute("SpinNumber", profile.Data.SpinNumber)
 		player:SetAttribute("LastDailySpin", profile.Data.LastDailySpin)
+		AnalyticsEconomyService:LogSpinSource(player, 1, TRANSACTION_TYPES.TimedReward, "DailySpinFree", {
+			feature = "daily_spin",
+			content_id = "DailySpinFree",
+			context = "daily_spin",
+		})
+		AnalyticsFunnelsService:HandleDailySpinAvailable(player)
 	end
 
 	-- 2. CHECK BALANCE
 	if profile.Data.SpinNumber <= 0 then 
+		AnalyticsFunnelsService:HandleDailySpinNoSpins(player)
 		return {success = false} 
 	end
 
 	-- 3. START TRANSACTION LOCK
 	isProcessingSpin[player.UserId] = true
+	AnalyticsFunnelsService:HandleDailySpinAttempt(player)
 
 	-- 4. ROLL REWARD
 	local totalWeight = Config.GetTotalWeight()
@@ -61,6 +72,11 @@ function DailySpinController:HandleSpin(player: Player)
 	-- 5. DEDUCT SPIN IMMEDIATELY (Prevents spamming/exploits)
 	profile.Data.SpinNumber -= 1
 	player:SetAttribute("SpinNumber", profile.Data.SpinNumber)
+	AnalyticsEconomyService:LogSpinSink(player, 1, TRANSACTION_TYPES.Gameplay, "WheelSpin", {
+		feature = "daily_spin",
+		content_id = "WheelSpin",
+		context = "wheel",
+	})
 
 	-- 6. DELAY REWARDS & VISUALS TO MATCH THE WHEEL ANIMATION
 	-- The client tween takes exactly 6.0 seconds.
@@ -74,14 +90,42 @@ function DailySpinController:HandleSpin(player: Player)
 
 		-- APPLY REWARDS
 		if rewardData.Type == "Cash" then
+			AnalyticsEconomyService:FlushBombIncome(player)
 			PlayerController:AddMoney(player, rewardData.Amount)
+			AnalyticsEconomyService:LogCashSource(player, rewardData.Amount, TRANSACTION_TYPES.Gameplay, "WheelReward:Cash", {
+				feature = "daily_spin",
+				content_id = "WheelRewardCash",
+				context = "wheel",
+			})
 		elseif rewardData.Type == "Spins" then
 			currentProfile.Data.SpinNumber += rewardData.Amount
 			player:SetAttribute("SpinNumber", currentProfile.Data.SpinNumber)
+			AnalyticsEconomyService:LogSpinSource(player, rewardData.Amount, TRANSACTION_TYPES.Gameplay, "WheelReward:Spins", {
+				feature = "daily_spin",
+				content_id = "WheelRewardSpins",
+				context = "wheel",
+			})
 		elseif rewardData.Type == "Item" then
 			local itemData = ItemConfigurations.GetItemData(rewardData.Name)
 			local rarity = itemData and itemData.Rarity or "Common"
-			ItemManager.GiveItemToPlayer(player, rewardData.Name, "Normal", rarity, 1)
+			local tool = ItemManager.GiveItemToPlayer(player, rewardData.Name, "Normal", rarity, 1)
+			if tool then
+				AnalyticsEconomyService:LogItemValueSourceForItem(
+					player,
+					rewardData.Name,
+					"Normal",
+					1,
+					TRANSACTION_TYPES.Gameplay,
+					`Item:{rewardData.Name}`,
+					{
+						feature = "daily_spin",
+						content_id = rewardData.Name,
+						context = "wheel",
+						rarity = rarity,
+						mutation = "Normal",
+					}
+				)
+			end
 		end
 
 		-- TRIGGER VISUALS & NOTIFICATIONS
@@ -99,6 +143,8 @@ function DailySpinController:HandleSpin(player: Player)
 		elseif rewardData.Type == "Item" then
 			if showNotif then showNotif:FireClient(player, "You got a " .. rewardData.Name .. "!", "Success") end
 		end
+
+		AnalyticsFunnelsService:HandleDailySpinRewardGranted(player, rewardData)
 	end)
 
 	return {success = true, Index = index}
@@ -113,6 +159,24 @@ function DailySpinController:Init(controllers)
 	remote.Name = "RequestSpin"
 
 	remote.OnServerInvoke = function(player) return self:HandleSpin(player) end
+
+	Players.PlayerAdded:Connect(function(player)
+		task.spawn(function()
+			repeat task.wait() until not player.Parent or PlayerController:GetProfile(player)
+			if player.Parent then
+				AnalyticsFunnelsService:HandleDailySpinAvailable(player)
+			end
+		end)
+	end)
+
+	for _, player in ipairs(Players:GetPlayers()) do
+		task.spawn(function()
+			repeat task.wait() until not player.Parent or PlayerController:GetProfile(player)
+			if player.Parent then
+				AnalyticsFunnelsService:HandleDailySpinAvailable(player)
+			end
+		end)
+	end
 
 	-- Cleanup lock if a player leaves mid-spin
 	Players.PlayerRemoving:Connect(function(player)

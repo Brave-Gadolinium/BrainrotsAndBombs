@@ -32,6 +32,7 @@ local playtimeRewardsRemotes = ReplicatedStorage:WaitForChild("Remotes"):WaitFor
 local getStatusRemote = playtimeRewardsRemotes:WaitForChild("GetStatus") :: RemoteFunction
 local claimRewardRemote = playtimeRewardsRemotes:WaitForChild("ClaimReward") :: RemoteFunction
 local statusUpdatedRemote = playtimeRewardsRemotes:WaitForChild("StatusUpdated") :: RemoteEvent
+local reportAnalyticsIntent = ReplicatedStorage:WaitForChild("Events"):WaitForChild("ReportAnalyticsIntent") :: RemoteEvent
 
 local rewardButtons: { [number]: ImageButton } = {}
 local rewardCountdowns: { [number]: number } = {}
@@ -278,6 +279,12 @@ end)
 
 player:GetAttributeChangedSignal("PlaytimeRewardHasSpeedX2"):Connect(updateSpeedButtons)
 player:GetAttributeChangedSignal("PlaytimeRewardHasSpeedX5"):Connect(updateSpeedButtons)
+
+playtimeRewardsFrame:GetPropertyChangedSignal("Visible"):Connect(function()
+	if playtimeRewardsFrame.Visible then
+		reportAnalyticsIntent:FireServer("PlaytimeRewardsOpened")
+	end
+end)
 
 task.spawn(function()
 	while true do

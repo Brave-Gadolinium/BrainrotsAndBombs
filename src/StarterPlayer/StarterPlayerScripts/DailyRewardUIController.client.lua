@@ -31,6 +31,7 @@ local dailyRewardsRemotes = ReplicatedStorage:WaitForChild("Remotes"):WaitForChi
 local getStatusRemote = dailyRewardsRemotes:WaitForChild("GetStatus") :: RemoteFunction
 local claimRewardRemote = dailyRewardsRemotes:WaitForChild("ClaimReward") :: RemoteFunction
 local statusUpdatedRemote = dailyRewardsRemotes:WaitForChild("StatusUpdated") :: RemoteEvent
+local reportAnalyticsIntent = ReplicatedStorage:WaitForChild("Events"):WaitForChild("ReportAnalyticsIntent") :: RemoteEvent
 
 local rewardButtons: { [number]: ImageButton } = {}
 local currentStatus = nil
@@ -210,4 +211,10 @@ updateAlert(nil)
 requestInitialStatus()
 statusUpdatedRemote.OnClientEvent:Connect(function(status)
 	renderRewards(status)
+end)
+
+dailyRewardsFrame:GetPropertyChangedSignal("Visible"):Connect(function()
+	if dailyRewardsFrame.Visible then
+		reportAnalyticsIntent:FireServer("DailyRewardsOpened")
+	end
 end)

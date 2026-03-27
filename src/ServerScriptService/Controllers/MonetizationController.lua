@@ -12,11 +12,29 @@ local MonetizationController = {}
 local ProductConfigurations = require(ReplicatedStorage.Modules.ProductConfigurations)
 local UpgradesConfiguration = require(ReplicatedStorage.Modules.UpgradesConfigurations)
 local ItemConfigurations = require(ReplicatedStorage.Modules.ItemConfigurations)
+local AnalyticsFunnelsService = require(ServerScriptService.Modules.AnalyticsFunnelsService)
+local AnalyticsEconomyService = require(ServerScriptService.Modules.AnalyticsEconomyService)
 local RebirthSystem
 local ItemManager
 local PlayerController
 local PlaytimeRewardController
 local DailyRewardController
+local TRANSACTION_TYPES = AnalyticsEconomyService:GetTransactionTypes()
+
+local function getUpgradeCashEquivalent(config: any, currentValue: number): number
+	local baseCost = config.BaseCost or 5000
+	local priceMultiplier = config.PriceMultiplier or 1.5
+	local amount = config.Amount or 1
+	local totalPrice = 0
+	local tempValue = currentValue
+
+	for _ = 1, amount do
+		totalPrice += baseCost * (priceMultiplier ^ tempValue)
+		tempValue += 1
+	end
+
+	return math.floor(totalPrice)
+end
 
 local function playPurchaseEffects(player: Player)
 	local Events = ReplicatedStorage:FindFirstChild("Events")
@@ -70,6 +88,11 @@ function MonetizationController.ProcessReceipt(receiptInfo)
 
 			profile.Data[statId] = currentVal + upgradeAmount
 			player:SetAttribute(statId, profile.Data[statId])
+			AnalyticsEconomyService:LogEntitlementGranted(player, "RobuxUpgrade", targetUpgradeConfig.Id, getUpgradeCashEquivalent(targetUpgradeConfig, currentVal), {
+				feature = "robux_upgrade",
+				content_id = targetUpgradeConfig.Id,
+				context = "shop",
+			})
 
 			if statId == "BonusSpeed" then
 				local char = player.Character
@@ -91,7 +114,16 @@ function MonetizationController.ProcessReceipt(receiptInfo)
 
 	if productName == "SkipRebirth" then
 		if not RebirthSystem then RebirthSystem = require(ServerScriptService.Modules.RebirthSystem) end
+		local rebirthCost = 0
+		if RebirthSystem.GetInfo then
+			rebirthCost = select(1, RebirthSystem.GetInfo(player))
+		end
 		RebirthSystem.ForceRebirth(player)
+		AnalyticsEconomyService:LogEntitlementGranted(player, "SkipRebirth", "SkipRebirth", rebirthCost, {
+			feature = "skip_rebirth",
+			content_id = "SkipRebirth",
+			context = "shop",
+		})
 		playPurchaseEffects(player)
 		return Enum.ProductPurchaseDecision.PurchaseGranted
 	end
@@ -103,6 +135,11 @@ function MonetizationController.ProcessReceipt(receiptInfo)
 
 		local success = PlaytimeRewardController:HandleSkipAll(player)
 		if success then
+			AnalyticsEconomyService:LogEntitlementGranted(player, "PlaytimeRewardsSkipAll", productName, nil, {
+				feature = "playtime_rewards",
+				content_id = productName,
+				context = "shop",
+			})
 			playPurchaseEffects(player)
 			return Enum.ProductPurchaseDecision.PurchaseGranted
 		end
@@ -116,6 +153,11 @@ function MonetizationController.ProcessReceipt(receiptInfo)
 
 		local success = PlaytimeRewardController:HandleSpeedProduct(player, productName)
 		if success then
+			AnalyticsEconomyService:LogEntitlementGranted(player, "PlaytimeRewardSpeed", productName, nil, {
+				feature = "playtime_rewards",
+				content_id = productName,
+				context = "shop",
+			})
 			playPurchaseEffects(player)
 			return Enum.ProductPurchaseDecision.PurchaseGranted
 		end
@@ -135,6 +177,11 @@ function MonetizationController.ProcessReceipt(receiptInfo)
 		end
 
 		if success then
+			AnalyticsEconomyService:LogEntitlementGranted(player, "DailyRewardSkip", productName, nil, {
+				feature = "daily_reward",
+				content_id = productName,
+				context = "shop",
+			})
 			playPurchaseEffects(player)
 			return Enum.ProductPurchaseDecision.PurchaseGranted
 		end
@@ -148,7 +195,24 @@ function MonetizationController.ProcessReceipt(receiptInfo)
 		local itemConf = ItemConfigurations.GetItemData(itemReward.Name)
 		local rarity = itemConf and itemConf.Rarity or "Common"
 
-		ItemManager.GiveItemToPlayer(player, itemReward.Name, itemReward.Mutation, rarity, itemReward.Level)
+		local tool = ItemManager.GiveItemToPlayer(player, itemReward.Name, itemReward.Mutation, rarity, itemReward.Level)
+		if tool then
+			AnalyticsEconomyService:LogItemValueSourceForItem(
+				player,
+				itemReward.Name,
+				itemReward.Mutation,
+				itemReward.Level,
+				TRANSACTION_TYPES.IAP,
+				`ItemIAP:{productName}`,
+				{
+					feature = "iap_item",
+					content_id = itemReward.Name,
+					context = "shop",
+					rarity = rarity,
+					mutation = itemReward.Mutation,
+				}
+			)
+		end
 
 		if notif then notif:FireClient(player, itemReward.Name .. " Purchased!", "Success") end
 		playPurchaseEffects(player)
@@ -158,7 +222,13 @@ function MonetizationController.ProcessReceipt(receiptInfo)
 	local cashAmount = ProductConfigurations.CashProductRewards[productName]
 	if cashAmount then
 		if not PlayerController then PlayerController = require(ServerScriptService.Controllers.PlayerController) end
+		AnalyticsEconomyService:FlushBombIncome(player)
 		PlayerController:AddMoney(player, cashAmount)
+		AnalyticsEconomyService:LogCashSource(player, cashAmount, TRANSACTION_TYPES.IAP, `CashProduct:{productName}`, {
+			feature = "iap_cash",
+			content_id = productName,
+			context = "shop",
+		})
 		local NumberFormatter = require(ReplicatedStorage.Modules.NumberFormatter)
 		if notif then notif:FireClient(player, "$" .. NumberFormatter.Format(cashAmount) .. " Purchased!", "Success") end
 		playPurchaseEffects(player)
@@ -177,7 +247,24 @@ function MonetizationController.ProcessReceipt(receiptInfo)
 
 		if #validItems > 0 then
 			local chosenItem = validItems[math.random(1, #validItems)]
-			ItemManager.GiveItemToPlayer(player, chosenItem.Name, "Normal", chosenItem.Rarity, 1)
+			local tool = ItemManager.GiveItemToPlayer(player, chosenItem.Name, "Normal", chosenItem.Rarity, 1)
+			if tool then
+				AnalyticsEconomyService:LogItemValueSourceForItem(
+					player,
+					chosenItem.Name,
+					"Normal",
+					1,
+					TRANSACTION_TYPES.IAP,
+					`ItemIAP:{productName}`,
+					{
+						feature = "iap_random_item",
+						content_id = chosenItem.Name,
+						context = "shop",
+						rarity = chosenItem.Rarity,
+						mutation = "Normal",
+					}
+				)
+			end
 
 			if notif then
 				notif:FireClient(player, "You unboxed a " .. chosenItem.Rarity .. " " .. chosenItem.Name .. "!", "Success")
@@ -196,6 +283,12 @@ function MonetizationController.ProcessReceipt(receiptInfo)
 			local spinAmount = (productName == "SpinsX3") and 3 or 9
 			profile.Data.SpinNumber = (profile.Data.SpinNumber or 0) + spinAmount
 			player:SetAttribute("SpinNumber", profile.Data.SpinNumber)
+			AnalyticsEconomyService:LogSpinSource(player, spinAmount, TRANSACTION_TYPES.IAP, `SpinPack:{productName}`, {
+				feature = "iap_spins",
+				content_id = productName,
+				context = "shop",
+			})
+			AnalyticsFunnelsService:HandleDailySpinAvailable(player)
 
 			if notif then notif:FireClient(player, "+" .. spinAmount .. " Spins Purchased!", "Success") end
 			playPurchaseEffects(player)

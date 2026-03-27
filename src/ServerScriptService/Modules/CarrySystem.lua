@@ -15,8 +15,11 @@ local ItemConfigurations = require(ReplicatedStorage.Modules.ItemConfigurations)
 local PlayerController = require(ServerScriptService.Controllers.PlayerController) 
 local BadgeManager = require(ServerScriptService.Modules.BadgeManager)
 local TutorialService = require(ServerScriptService.Modules.TutorialService)
+local AnalyticsFunnelsService = require(ServerScriptService.Modules.AnalyticsFunnelsService)
+local AnalyticsEconomyService = require(ServerScriptService.Modules.AnalyticsEconomyService)
 local ItemManager -- Lazy Loaded
 local PickaxeController -- ## ADDED ##
+local TRANSACTION_TYPES = AnalyticsEconomyService:GetTransactionTypes()
 
 -- [ ASSETS ]
 local CollectionZones = Workspace:WaitForChild("Zones")
@@ -155,6 +158,9 @@ function CarrySystem.AddItemToCarry(player: Player, name: string, mutation: stri
 		lastLimitNotif[player] = currentTime
 		local notif = Events:FindFirstChild("ShowNotification")
 		if notif then notif:FireClient(player, "Carry limit reached!", "Error") end
+		AnalyticsFunnelsService:LogFailure(player, "carry_limit_reached", {
+			zone = "mine",
+		})
 	end
 
 	return false
@@ -237,15 +243,19 @@ local function processZoneExit(player: Player)
 	local items = carryingData[player]
 	local character = player.Character
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	local hadItems = items and #items > 0 or false
 
 	local isDead = not humanoid or humanoid.Health <= 0 or humanoid:GetState() == Enum.HumanoidStateType.Dead
 	local isAlive = not isDead
 
+	AnalyticsEconomyService:FlushBombIncome(player)
+
 	if isAlive then
 		TutorialService:HandleMineZoneExited(player)
+		AnalyticsFunnelsService:HandleMineZoneExited(player, hadItems)
 	end
 
-	if items and #items > 0 then
+	if hadItems then
 		if isAlive then
 			local lastGivenTool = nil
 			local profile = PlayerController:GetProfile(player)
@@ -255,6 +265,23 @@ local function processZoneExit(player: Player)
 				-- Capture the returned tool
 				local newTool = ItemManager.GiveItemToPlayer(player, itemData.Name, itemData.Mutation, itemData.Rarity, 1, false)
 				if newTool then lastGivenTool = newTool end
+				if newTool then
+					AnalyticsEconomyService:LogItemValueSourceForItem(
+						player,
+						itemData.Name,
+						itemData.Mutation,
+						1,
+						TRANSACTION_TYPES.Gameplay,
+						`Item:{itemData.Name}`,
+						{
+							feature = "mine_exit",
+							content_id = itemData.Name,
+							context = "mine",
+							rarity = itemData.Rarity,
+							mutation = itemData.Mutation,
+						}
+					)
+				end
 				totalCollected += 1
 				BadgeManager:EvaluateBrainrotMilestones(player, itemData.Rarity, totalCollected)
 			end
@@ -266,6 +293,9 @@ local function processZoneExit(player: Player)
 			-- Auto-Equip the newly received item
 			if lastGivenTool and humanoid then
 				humanoid:EquipTool(lastGivenTool)
+			end
+			if lastGivenTool then
+				AnalyticsFunnelsService:HandleMineExitToolGranted(player)
 			end
 
 			local successSound = GlobalSounds:FindFirstChild("Success")
@@ -297,6 +327,7 @@ end
 local function processZoneEnter(player: Player)
 	if not carryingData[player] then carryingData[player] = {} end
 	TutorialService:HandleMineZoneEntered(player)
+	AnalyticsFunnelsService:HandleMineZoneEntered(player)
 
 	local character = player.Character
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")

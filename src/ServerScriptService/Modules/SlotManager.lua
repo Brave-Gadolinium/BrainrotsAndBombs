@@ -14,9 +14,13 @@ local ItemConfigurations = require(ReplicatedStorage.Modules.ItemConfigurations)
 local LuckyBlockConfiguration = require(ReplicatedStorage.Modules.LuckyBlockConfiguration)
 local NumberFormatter = require(ReplicatedStorage.Modules.NumberFormatter)
 local TutorialService = require(ServerScriptService.Modules.TutorialService)
+local AnalyticsFunnelsService = require(ServerScriptService.Modules.AnalyticsFunnelsService)
+local AnalyticsEconomyService = require(ServerScriptService.Modules.AnalyticsEconomyService)
+local EconomyValueUtils = require(ServerScriptService.Modules.EconomyValueUtils)
 local PlayerController -- Lazy load
 local ItemManager -- Lazy load
 local LuckyBlockManager -- Lazy load
+local TRANSACTION_TYPES = AnalyticsEconomyService:GetTransactionTypes()
 
 -- [ ASSETS ]
 local Templates = ReplicatedStorage:WaitForChild("Templates")
@@ -234,6 +238,37 @@ local function startLuckyBlockOpening(player: Player, floorName: string, slotNam
 		IsOpening = false,
 	}
 
+	local finalItemValueBalance = AnalyticsEconomyService:EstimateItemValueBalance(player)
+	local rewardItemValue = EconomyValueUtils.GetItemReferencePrice(rolledReward.ItemName, "Normal", 1)
+	AnalyticsEconomyService:LogItemValueSinkForLuckyBlock(
+		player,
+		luckyBlockId,
+		TRANSACTION_TYPES.Gameplay,
+		`LuckyBlock:{luckyBlockId}`,
+		{
+			feature = "lucky_block",
+			content_id = luckyBlockId,
+			context = "lucky_block_open",
+		},
+		math.max(0, finalItemValueBalance - rewardItemValue)
+	)
+	AnalyticsEconomyService:LogItemValueSourceForItem(
+		player,
+		rolledReward.ItemName,
+		"Normal",
+		1,
+		TRANSACTION_TYPES.Gameplay,
+		`Item:{rolledReward.ItemName}`,
+		{
+			feature = "lucky_block",
+			content_id = rolledReward.ItemName,
+			context = "lucky_block_open",
+			rarity = rolledReward.ItemData.Rarity,
+			mutation = "Normal",
+		},
+		finalItemValueBalance
+	)
+
 	local isVip = PlayerController:IsVIP(player)
 	updateSlotVisuals(slotModel, latestFloorData[slotName], latestProfile.Data.Rebirths or 0, isVip)
 
@@ -296,7 +331,14 @@ function SlotManager.HandleInteraction(player: Player, floorName: string, slotNa
 	if isOccupied then
 		if currentContentType == "Item" then
 			if currentSlotData.Stored > 0 then
-				PlayerController:AddMoney(player, math.floor(currentSlotData.Stored))
+				local storedAmount = math.floor(currentSlotData.Stored)
+				AnalyticsEconomyService:FlushBombIncome(player)
+				PlayerController:AddMoney(player, storedAmount)
+				AnalyticsEconomyService:LogCashSource(player, storedAmount, TRANSACTION_TYPES.Gameplay, `SlotCollect:{floorName}_{slotName}`, {
+					feature = "slot_collect",
+					content_id = slotName,
+					context = "slot_interaction",
+				})
 				currentSlotData.Stored = 0
 			end
 
@@ -370,6 +412,7 @@ function SlotManager.HandleInteraction(player: Player, floorName: string, slotNa
 				}
 				heldTool:Destroy()
 				TutorialService:HandleBrainrotPlaced(player)
+				AnalyticsFunnelsService:HandlePlaceBrainrot(player)
 			elseif heldLuckyBlockId then
 				floorData[slotName] = {
 					ContentType = "LuckyBlock",
@@ -426,9 +469,17 @@ function SlotManager.UpgradeItem(player: Player, floorName: string, slotName: st
 	local itemConf = ItemConfigurations.GetItemData(slotData.Item.Name)
 	local baseIncome = itemConf and itemConf.Income or 10
 	local cost = getUpgradeCost(baseIncome, slotData.Level)
+	local upgradeId = floorName .. "_" .. slotName
 
+	AnalyticsEconomyService:FlushBombIncome(player)
 	if PlayerController:DeductMoney(player, cost) then
 		slotData.Level += 1
+		AnalyticsEconomyService:LogCashSink(player, cost, TRANSACTION_TYPES.Shop, `SlotUpgrade:{upgradeId}`, {
+			feature = "slot_upgrade",
+			content_id = upgradeId,
+			context = "base",
+		})
+		AnalyticsFunnelsService:HandleSlotUpgraded(player, floorName, slotName, upgradeId)
 		local plot = Workspace:FindFirstChild("Plot_" .. player.Name)
 		if plot then
 			local floor = plot:FindFirstChild(floorName)
@@ -449,6 +500,11 @@ function SlotManager.UpgradeItem(player: Player, floorName: string, slotName: st
 		if notif then
 			notif:FireClient(player, "Not enough money!", "Error")
 		end
+		AnalyticsFunnelsService:LogFailure(player, "not_enough_money", {
+			zone = "base",
+			funnel = "SlotUpgrade",
+			upgrade_id = upgradeId,
+		})
 	end
 end
 
@@ -464,7 +520,14 @@ function SlotManager.CollectMoney(player: Player, floorName: string, slotName: s
 	local amount = math.floor(slotData.Stored)
 	slotData.Stored = 0
 
+	AnalyticsEconomyService:FlushBombIncome(player)
 	PlayerController:AddMoney(player, amount)
+	AnalyticsEconomyService:LogCashSource(player, amount, TRANSACTION_TYPES.Gameplay, `SlotCollect:{floorName}_{slotName}`, {
+		feature = "slot_collect",
+		content_id = slotName,
+		context = "base",
+	})
+	AnalyticsFunnelsService:HandleManualCollect(player, amount)
 
 	local collectPart = slotModel:FindFirstChild("CollectTouch")
 	if collectPart then

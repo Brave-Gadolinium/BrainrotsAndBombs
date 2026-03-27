@@ -11,7 +11,10 @@ local RebirthSystem = {}
 local PlayerController 
 local NumberFormatter = require(ReplicatedStorage.Modules.NumberFormatter)
 local UpgradesConfiguration = require(ReplicatedStorage.Modules.UpgradesConfigurations)
+local AnalyticsFunnelsService = require(ServerScriptService.Modules.AnalyticsFunnelsService)
+local AnalyticsEconomyService = require(ServerScriptService.Modules.AnalyticsEconomyService)
 local SlotManager 
+local TRANSACTION_TYPES = AnalyticsEconomyService:GetTransactionTypes()
 
 -- [ CONFIG ]
 local BASE_REBIRTH_COST = 1000000 -- Cost for the first Rebirth in Cash
@@ -66,6 +69,8 @@ local function executeRebirth(player: Player, profile: any)
 	if SlotManager then
 		SlotManager.RefreshAllSlots(player)
 	end
+
+	AnalyticsFunnelsService:HandleRebirthSuccess(player, profile.Data.Rebirths)
 end
 
 -- [ PUBLIC API ]
@@ -81,9 +86,17 @@ function RebirthSystem.AttemptRebirth(player: Player)
 	if not profile then return end
 
 	local cost, _, _ = RebirthSystem.GetInfo(player)
+	local targetRebirth = (profile.Data.Rebirths or 0) + 1
+	AnalyticsFunnelsService:HandleRebirthRequested(player)
 
 	-- Check and deduct money
+	AnalyticsEconomyService:FlushBombIncome(player)
 	if PlayerController:DeductMoney(player, cost) then
+		AnalyticsEconomyService:LogCashSink(player, cost, TRANSACTION_TYPES.Gameplay, `Rebirth:{targetRebirth}`, {
+			feature = "rebirth",
+			content_id = tostring(targetRebirth),
+			context = "base",
+		})
 		executeRebirth(player, profile)
 	else
 		local Events = ReplicatedStorage:FindFirstChild("Events")
@@ -91,6 +104,10 @@ function RebirthSystem.AttemptRebirth(player: Player)
 		if notif then 
 			notif:FireClient(player, "Not enough money!", "Error") 
 		end
+		AnalyticsFunnelsService:LogFailure(player, "not_enough_money", {
+			zone = "base",
+			funnel = "RebirthConversion",
+		})
 	end
 end
 

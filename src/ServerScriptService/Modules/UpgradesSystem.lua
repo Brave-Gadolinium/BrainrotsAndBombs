@@ -10,6 +10,9 @@ local UpgradesSystem = {}
 local PlayerController 
 local NumberFormatter = require(ReplicatedStorage.Modules.NumberFormatter)
 local UpgradesConfiguration = require(ReplicatedStorage.Modules.UpgradesConfigurations)
+local AnalyticsFunnelsService = require(ServerScriptService.Modules.AnalyticsFunnelsService)
+local AnalyticsEconomyService = require(ServerScriptService.Modules.AnalyticsEconomyService)
+local TRANSACTION_TYPES = AnalyticsEconomyService:GetTransactionTypes()
 
 local function getUpgradeConfig(upgradeId: string)
 	for _, config in ipairs(UpgradesConfiguration.Upgrades) do
@@ -54,10 +57,17 @@ function UpgradesSystem.PurchaseUpgrade(player: Player, upgradeId: string)
 	end
 
 	local price = getCompoundPrice(config, currentValue)
+	AnalyticsFunnelsService:HandleUpgradePurchaseRequested(player, upgradeId)
+	AnalyticsEconomyService:FlushBombIncome(player)
 
 	if PlayerController:DeductMoney(player, price) then
 		-- Increase the actual stat
 		profile.Data[statId] = currentValue + config.Amount
+		AnalyticsEconomyService:LogCashSink(player, price, TRANSACTION_TYPES.Shop, `Upgrade:{upgradeId}`, {
+			feature = "upgrade",
+			content_id = upgradeId,
+			context = "base",
+		})
 
 		-- Save Attribute so client can read it
 		player:SetAttribute(statId, profile.Data[statId])
@@ -73,6 +83,7 @@ function UpgradesSystem.PurchaseUpgrade(player: Player, upgradeId: string)
 		if Events and Events:FindFirstChild("ShowNotification") then 
 			Events.ShowNotification:FireClient(player, config.DisplayName .. " Upgraded!", "Success") 
 		end
+		AnalyticsFunnelsService:HandleStatUpgradePurchased(player, upgradeId)
 
 		UpgradesSystem.UpdateClientUI(player)
 	else
@@ -80,6 +91,11 @@ function UpgradesSystem.PurchaseUpgrade(player: Player, upgradeId: string)
 		if Events and Events:FindFirstChild("ShowNotification") then 
 			Events.ShowNotification:FireClient(player, "Not enough money!", "Error") 
 		end
+		AnalyticsFunnelsService:LogFailure(player, "not_enough_money", {
+			zone = "base",
+			funnel = "StatUpgradesConversion",
+			upgrade_id = upgradeId,
+		})
 	end
 end
 
