@@ -21,7 +21,7 @@ local PlotTemplate = Templates:WaitForChild("Plot")
 local PlotsFolder = Workspace:WaitForChild("Plots")
 local Events = ReplicatedStorage:WaitForChild("Events")
 
-local COLLECT_ALL_GAMEPASS = 1736841051
+local COLLECT_ALL_GAMEPASS = 3566654191
 local COLLECT_ALL_COOLDOWN = 0.8
 local COLLECT_ALL_BUTTON_NAME = "CollectAll"
 local UPGRADE_SLOTS_BUTTON_NAME = "UpgradeSlotsButton"

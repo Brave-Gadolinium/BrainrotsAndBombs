@@ -33,7 +33,7 @@ UpgradesConfigurations.Upgrades = {
 		DisplayName = "+1 Carry Slot",
 		BaseCost = 50000,
 		PriceMultiplier = 2.5,
-		RobuxProductId = 3555197134,
+		RobuxProductId = 3566653591,
 		ImageId = "rbxassetid://84954813371600"
 	},
 	{
@@ -43,7 +43,7 @@ UpgradesConfigurations.Upgrades = {
 		DisplayName = "+1 Walk Speed",
 		BaseCost = 500,
 		PriceMultiplier = 1.5,
-		RobuxProductId = 3555197217,
+		RobuxProductId = 3566653965,
 		ImageId = "rbxassetid://92215347682288"
 	}
 }

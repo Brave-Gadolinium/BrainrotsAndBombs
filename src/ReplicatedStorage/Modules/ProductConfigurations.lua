@@ -13,32 +13,32 @@ ProductConfigurations.Group = {
 }
 
 ProductConfigurations.Products = {
-	["SkipRebirth"] = 3535477160,
-	["RandomItem"] = 3541134967,
-	["PlaytimeRewardsSkipAll"] = 3555241775,
+	["SkipRebirth"] = 3566500447,
+	["RandomItem"] = 3566503229,
+	["PlaytimeRewardsSkipAll"] = 3566503314,
 	-- TODO Добавить актуальные ID продуктов для ускорения получения наград за время игры
-	["PlaytimeRewardsSpeedX2"] = 3563204131,
-	["PlaytimeRewardsSpeedX5"] = 3563204131,
+	["PlaytimeRewardsSpeedX2"] = 3566508646,
+	["PlaytimeRewardsSpeedX5"] = 3566508747,
 	-- TODO Добавить актуальные ID продуктов для пропуска наград за время игры
-	["DailyRewardsSkipAll"] = 3555241775,
-	["DailyRewardsSkip1"] = 3555241775,
+	["DailyRewardsSkipAll"] = 3566509090,
+	["DailyRewardsSkip1"] = 3566509199,
 
-	["ItemProduct1"] = 3507422194,
-	["ItemProduct2"] = 3507422461,
-	["ItemProduct3"] = 3507422665,
+	["ItemProduct1"] = 3566509625,
+	["ItemProduct2"] = 3566510433,
+	["ItemProduct3"] = 3566510878,
 
-	["CashProduct1"] = 3507413234,
-	["CashProduct2"] = 3507413478,
-	["CashProduct3"] = 3507414088,
+	["CashProduct1"] = 3566511291,
+	["CashProduct2"] = 3566511557,
+	["CashProduct3"] = 3566511657,
 
-	["SpinsX3"] = 3544825393,
-	["SpinsX9"] = 3544825505,
+	["SpinsX3"] = 3566512371,
+	["SpinsX9"] = 3566513791,
 }
 
 ProductConfigurations.GamePasses = {
-	["VIP"] = 1664438543,
-	["StarterPack"] = 1664754284,
-	["ProPack"] = 1664576483,
+	["VIP"] = 1772898056,
+	["StarterPack"] = 1772874155,
+	["ProPack"] = 1772382058,
 }
 
 ProductConfigurations.PackRewards = {

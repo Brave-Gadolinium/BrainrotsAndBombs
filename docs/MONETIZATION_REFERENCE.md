@@ -66,15 +66,15 @@
 | --- | --- | --- | --- | --- | --- | --- |
 | `Range1` | `Upgrade Spark: +1 Range` | Developer Product | `3555196998` | Даёт `+1` к `BonusRange`. `HiddenInUI = true`, то есть сейчас этот продукт не показывается в обычном апгрейд-окне, но сервер умеет его обработать. | `src/ReplicatedStorage/Modules/UpgradesConfigurations.lua` | Выдача: `src/ServerScriptService/Controllers/MonetizationController.lua`; UI-логика: `src/StarterPlayer/StarterPlayerScripts/UpgradesUIController.client.lua` |
 | `Range3` | `Upgrade Burst: +3 Range` | Developer Product | `3555197053` | Даёт `+3` к `BonusRange`. Тоже скрыт в стандартном UI. | `src/ReplicatedStorage/Modules/UpgradesConfigurations.lua` | Выдача: `src/ServerScriptService/Controllers/MonetizationController.lua`; UI-логика: `src/StarterPlayer/StarterPlayerScripts/UpgradesUIController.client.lua` |
-| `Carry1` | `Upgrade Grip: +1 Carry Slot` | Developer Product | `3555197134` | Даёт `+1` к `CarryCapacity`. Видим в UI. | `src/ReplicatedStorage/Modules/UpgradesConfigurations.lua` | Выдача: `src/ServerScriptService/Controllers/MonetizationController.lua`; UI: `src/StarterPlayer/StarterPlayerScripts/UpgradesUIController.client.lua` |
-| `Speed1` | `Upgrade Dash: +1 Walk Speed` | Developer Product | `3555197217` | Даёт `+1` к `BonusSpeed`. Видим в UI. | `src/ReplicatedStorage/Modules/UpgradesConfigurations.lua` | Выдача: `src/ServerScriptService/Controllers/MonetizationController.lua`; UI: `src/StarterPlayer/StarterPlayerScripts/UpgradesUIController.client.lua` |
+| `Carry1` | `Upgrade Grip: +1 Carry Slot` | Developer Product | `3566653591` | Даёт `+1` к `CarryCapacity`. Видим в UI. | `src/ReplicatedStorage/Modules/UpgradesConfigurations.lua` | Выдача: `src/ServerScriptService/Controllers/MonetizationController.lua`; UI: `src/StarterPlayer/StarterPlayerScripts/UpgradesUIController.client.lua` |
+| `Speed1` | `Upgrade Dash: +1 Walk Speed` | Developer Product | `3566653965` | Даёт `+1` к `BonusSpeed`. Видим в UI. | `src/ReplicatedStorage/Modules/UpgradesConfigurations.lua` | Выдача: `src/ServerScriptService/Controllers/MonetizationController.lua`; UI: `src/StarterPlayer/StarterPlayerScripts/UpgradesUIController.client.lua` |
 
 ## Покупки вне центрального конфига
 
 ### 1. `Collect All` gamepass
 
 - Тип: `Game Pass`
-- Current ID: `1736841051`
+- Current ID: `3566654191`
 - Где менять:
 - `src/ServerScriptService/PlotManager.server.lua`
 - `src/ServerScriptService/Controllers/PlayerController.lua`
