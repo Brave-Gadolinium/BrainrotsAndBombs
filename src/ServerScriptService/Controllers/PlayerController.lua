@@ -52,6 +52,7 @@ type FloorData = { [string]: SlotData }
 
 type PlayerData = {
 	Money: number,
+	TotalMoneyEarned: number,
 	Rebirths: number,
 	TimePlayed: number, -- ## ADDED ##
 	BaseLevel: number,
@@ -73,6 +74,7 @@ type PlayerData = {
 -- [ DATA TEMPLATE ]
 local Template: PlayerData = {
 	Money = 0,
+	TotalMoneyEarned = 0,
 	Rebirths = 0,
 	TimePlayed = 0, -- ## ADDED ##
 	BaseLevel = 0,
@@ -428,6 +430,10 @@ function PlayerController:AddMoney(player: Player, amount: number)
 	local profile = profiles[player]
 	if profile then
 		profile.Data.Money += amount
+		if amount > 0 then
+			profile.Data.TotalMoneyEarned = (tonumber(profile.Data.TotalMoneyEarned) or 0) + amount
+			player:SetAttribute("TotalMoneyEarned", profile.Data.TotalMoneyEarned)
+		end
 		player.leaderstats.Money.Value = profile.Data.Money
 		BadgeManager:EvaluateMoneyMilestones(player, profile.Data.Money)
 
@@ -476,6 +482,18 @@ function PlayerController:AddUnlockedSlots(player: Player, amount: number): numb
 	profile.Data.unlocked_slots = updatedSlots
 	player:SetAttribute("UnlockedSlots", updatedSlots)
 	return updatedSlots
+end
+
+function PlayerController:IncrementBrainrotsCollected(player: Player, amount: number?): number
+	local profile = profiles[player]
+	if not profile then
+		return 0
+	end
+
+	local increment = math.max(0, math.floor(tonumber(amount) or 1))
+	profile.Data.TotalBrainrotsCollected = math.max(0, tonumber(profile.Data.TotalBrainrotsCollected) or 0) + increment
+	player:SetAttribute("TotalBrainrotsCollected", profile.Data.TotalBrainrotsCollected)
+	return profile.Data.TotalBrainrotsCollected
 end
 
 function PlayerController:SetupSharedInstances()
@@ -602,6 +620,8 @@ local function createLeaderstats(player: Player, data: PlayerData)
 
 	-- Note: TimePlayed gets set continuously in the Start loop, but we can initialize it here:
 	player:SetAttribute("TimePlayed", data.TimePlayed or 0)
+	player:SetAttribute("TotalMoneyEarned", data.TotalMoneyEarned or 0)
+	player:SetAttribute("TotalBrainrotsCollected", data.TotalBrainrotsCollected or 0)
 
 	for upgradeName, config in pairs(UpgradesConfiguration.Upgrades) do
 		player:SetAttribute(upgradeName, data[upgradeName] or config.DefaultValue)
@@ -663,6 +683,9 @@ local function onPlayerAdded(player: Player)
 	if profile.Data.DiscoveredItems == nil then profile.Data.DiscoveredItems = {} end
 	if profile.Data.ClaimedPacks == nil then profile.Data.ClaimedPacks = {} end
 	if type(profile.Data.TotalBrainrotsCollected) ~= "number" then profile.Data.TotalBrainrotsCollected = 0 end
+	if type(profile.Data.TotalMoneyEarned) ~= "number" then
+		profile.Data.TotalMoneyEarned = math.max(0, tonumber(profile.Data.Money) or 0)
+	end
 
 	profile.OnSessionEnd:Connect(function() 
 		profiles[player] = nil

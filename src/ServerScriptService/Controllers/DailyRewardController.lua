@@ -135,6 +135,7 @@ function DailyRewardController:ApplyReward(player: Player, day: number, reward)
 		if not tool then
 			return false, "ItemGrantFailed"
 		end
+		PlayerController:IncrementBrainrotsCollected(player, 1)
 		AnalyticsEconomyService:LogItemValueSourceForItem(
 			player,
 			itemName,
