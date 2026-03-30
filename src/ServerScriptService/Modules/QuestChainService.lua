@@ -2,10 +2,12 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
 
 local NumberFormatter = require(ReplicatedStorage.Modules.NumberFormatter)
 local SlotUnlockConfigurations = require(ReplicatedStorage.Modules.SlotUnlockConfigurations)
 local QuestChainConfiguration = require(ReplicatedStorage.Modules.QuestChainConfiguration)
+local BombsConfigurations = require(ReplicatedStorage.Modules.BombsConfigurations)
 
 type QuestDefinition = {
 	Id: string,
@@ -81,6 +83,72 @@ local function getProfile(player: Player)
 	return PlayerController and PlayerController:GetProfile(player) or nil
 end
 
+local function getBestBombTier(profile): number
+	local ownedPickaxes = profile.Data.OwnedPickaxes
+	if type(ownedPickaxes) ~= "table" then
+		return 1
+	end
+
+	local bestTier = 1
+
+	for bombName, isOwned in pairs(ownedPickaxes) do
+		if isOwned == true and BombsConfigurations.Bombs[bombName] then
+			local tier = tonumber(string.match(bombName, "(%d+)")) or 1
+			if tier > bestTier then
+				bestTier = tier
+			end
+		end
+	end
+
+	return bestTier
+end
+
+local function getCurrentDepthLevel(player: Player): number
+	local minesFolder = Workspace:FindFirstChild("Mines")
+	if not minesFolder then
+		return 0
+	end
+
+	local character = player.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	if not root or not root:IsA("BasePart") then
+		return 0
+	end
+
+	local highestLevel = 0
+	for _, child in ipairs(minesFolder:GetChildren()) do
+		if child:IsA("BasePart") then
+			local zoneLevel = tonumber(string.match(child.Name, "^Zone(%d+)$"))
+			if zoneLevel then
+				local relativePos = child.CFrame:PointToObjectSpace(root.Position)
+				local halfSize = child.Size * 0.5
+				local inside = math.abs(relativePos.X) <= halfSize.X
+					and math.abs(relativePos.Y) <= halfSize.Y
+					and math.abs(relativePos.Z) <= halfSize.Z
+
+				if inside and zoneLevel > highestLevel then
+					highestLevel = zoneLevel
+				end
+			end
+		end
+	end
+
+	return highestLevel
+end
+
+local function getMaxDepthLevelReached(player: Player, profile): number
+	local storedDepthLevel = math.max(0, tonumber(profile.Data.MaxDepthLevelReached) or 0)
+	local currentDepthLevel = getCurrentDepthLevel(player)
+	local bestDepthLevel = math.max(storedDepthLevel, currentDepthLevel)
+
+	if bestDepthLevel ~= storedDepthLevel then
+		profile.Data.MaxDepthLevelReached = bestDepthLevel
+	end
+
+	player:SetAttribute("MaxDepthLevelReached", bestDepthLevel)
+	return bestDepthLevel
+end
+
 local function getSlotUpgradeProgress(profile): number
 	local unlockedSlots = tonumber(profile.Data.unlocked_slots) or SlotUnlockConfigurations.StartSlots
 	return math.max(
@@ -89,8 +157,12 @@ local function getSlotUpgradeProgress(profile): number
 	)
 end
 
-local function getProgress(profile, questType: string): number
+local function getProgress(player: Player, profile, questType: string): number
 	if questType == "total_money_earned" then
+		return math.max(0, tonumber(profile.Data.TotalMoneyEarned) or tonumber(profile.Data.Money) or 0)
+	end
+
+	if questType == "collect_money_total" then
 		return math.max(0, tonumber(profile.Data.TotalMoneyEarned) or tonumber(profile.Data.Money) or 0)
 	end
 
@@ -102,6 +174,14 @@ local function getProgress(profile, questType: string): number
 		return math.max(0, tonumber(profile.Data.TotalBrainrotsCollected) or 0)
 	end
 
+	if questType == "collect_brainrots_total" then
+		return math.max(0, tonumber(profile.Data.TotalBrainrotsCollected) or 0)
+	end
+
+	if questType == "place_brainrots_total" then
+		return math.max(0, tonumber(profile.Data.TotalBrainrotsCollected) or 0)
+	end
+
 	if questType == "rebirth_count" then
 		return math.max(0, tonumber(profile.Data.Rebirths) or 0)
 	end
@@ -110,12 +190,32 @@ local function getProgress(profile, questType: string): number
 		return math.max(0, tonumber(profile.Data.BonusSpeed) or 0)
 	end
 
+	if questType == "speed_upgrade_count" then
+		return math.max(0, tonumber(profile.Data.BonusSpeed) or 0)
+	end
+
 	if questType == "carry_capacity_upgrade_count" then
+		return math.max(0, tonumber(profile.Data.CarryCapacity) or 0)
+	end
+
+	if questType == "carry_upgrade_count" then
 		return math.max(0, tonumber(profile.Data.CarryCapacity) or 0)
 	end
 
 	if questType == "slot_upgrade_count" then
 		return getSlotUpgradeProgress(profile)
+	end
+
+	if questType == "base_upgrade_count" then
+		return getSlotUpgradeProgress(profile)
+	end
+
+	if questType == "bomb_upgrade_count" then
+		return math.max(0, getBestBombTier(profile) - 1)
+	end
+
+	if questType == "reach_depth" then
+		return getMaxDepthLevelReached(player, profile)
 	end
 
 	return 0
@@ -128,7 +228,7 @@ local function buildQuestState(player: Player, quest: QuestDefinition): QuestSta
 	end
 
 	local questData = ensureQuestData(profile)
-	local rawProgress = getProgress(profile, quest.Type)
+	local rawProgress = getProgress(player, profile, quest.Type)
 	local targetValue = math.max(1, tonumber(quest.Target) or 1)
 
 	return {
@@ -330,6 +430,7 @@ local function bindPlayer(player: Player)
 		"TimePlayed",
 		"TotalMoneyEarned",
 		"TotalBrainrotsCollected",
+		"MaxDepthLevelReached",
 		"Rebirths",
 		"UnlockedSlots",
 		"BonusSpeed",
@@ -414,7 +515,7 @@ function QuestChainService:Start()
 
 	task.spawn(function()
 		while true do
-			task.wait(5)
+			task.wait(1)
 			for _, player in ipairs(Players:GetPlayers()) do
 				if getProfile(player) then
 					self:RefreshPlayer(player)

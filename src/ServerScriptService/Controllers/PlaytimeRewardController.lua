@@ -158,6 +158,26 @@ function PlaytimeRewardController:ApplyReward(player: Player, reward)
 		return true, nil
 	end
 
+	if reward.Type == "Item" then
+		if not reward.ItemName then
+			return false, "MissingItemName"
+		end
+
+		if not ItemManager then
+			ItemManager = require(ServerScriptService.Modules.ItemManager)
+		end
+
+		local rarity = reward.Rarity or "Common"
+		local tool = ItemManager.GiveItemToPlayer(player, reward.ItemName, reward.Mutation or "Normal", rarity, reward.Level or 1)
+		if not tool then
+			return false, "ItemGiveFailed"
+		end
+
+		PlayerController:IncrementBrainrotsCollected(player, 1)
+		showNotification(player, "You got " .. reward.ItemName .. "!", "Success")
+		return true, nil
+	end
+
 	return false, "UnsupportedRewardType"
 end
 

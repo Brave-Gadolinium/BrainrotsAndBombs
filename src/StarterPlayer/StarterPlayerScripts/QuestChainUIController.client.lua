@@ -28,7 +28,7 @@ local function createCorner(parent: Instance, radius: number): UICorner
 end
 
 local function ensureQuestFrame(): Frame
-	local existing = hud:FindFirstChild("Quests")
+	local existing = hud:FindFirstChild("ChainQuests")
 	if existing and existing:IsA("Frame") then
 		return existing
 	end

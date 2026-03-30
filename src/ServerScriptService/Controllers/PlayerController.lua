@@ -484,6 +484,18 @@ function PlayerController:AddUnlockedSlots(player: Player, amount: number): numb
 	return updatedSlots
 end
 
+function PlayerController:IncrementBrainrotsCollected(player: Player, amount: number?): number
+	local profile = profiles[player]
+	if not profile then
+		return 0
+	end
+
+	local increment = math.max(0, math.floor(tonumber(amount) or 1))
+	profile.Data.TotalBrainrotsCollected = math.max(0, tonumber(profile.Data.TotalBrainrotsCollected) or 0) + increment
+	player:SetAttribute("TotalBrainrotsCollected", profile.Data.TotalBrainrotsCollected)
+	return profile.Data.TotalBrainrotsCollected
+end
+
 function PlayerController:SetupSharedInstances()
 	local eventsFolder = ReplicatedStorage:FindFirstChild("Events")
 	if not eventsFolder then 

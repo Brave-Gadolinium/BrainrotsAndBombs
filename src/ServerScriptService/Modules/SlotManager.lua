@@ -237,6 +237,7 @@ local function startLuckyBlockOpening(player: Player, floorName: string, slotNam
 		Stored = 0,
 		IsOpening = false,
 	}
+	PlayerController:IncrementBrainrotsCollected(player, 1)
 
 	local finalItemValueBalance = AnalyticsEconomyService:EstimateItemValueBalance(player)
 	local rewardItemValue = EconomyValueUtils.GetItemReferencePrice(rolledReward.ItemName, "Normal", 1)
