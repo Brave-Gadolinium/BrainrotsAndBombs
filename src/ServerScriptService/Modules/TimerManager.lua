@@ -2,9 +2,11 @@ local TimerManager = {}
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerScriptService = game:GetService("ServerScriptService")
 local Workspace = game:GetService("Workspace")
 
 local Constants = require(ReplicatedStorage.Modules.Constants)
+local SpawnUtils = require(ServerScriptService.Modules.SpawnUtils)
 
 local function ensureTimerFinishEvent(): BindableEvent
 	local remotesFolder = ReplicatedStorage:FindFirstChild("Remotes")
@@ -49,14 +51,9 @@ local function teleportPlayerToBase(player: Player)
 		return
 	end
 
-	local spawnPart = plot:FindFirstChild("Spawn")
-	if spawnPart and spawnPart:IsA("BasePart") then
-		root.CFrame = spawnPart.CFrame + Vector3.new(0, 3, 0)
-		return
-	end
-
-	if plot.PrimaryPart then
-		root.CFrame = plot.PrimaryPart.CFrame + Vector3.new(0, 3, 0)
+	local spawnCFrame = SpawnUtils.GetPlotSpawnCFrame(plot, 3)
+	if spawnCFrame then
+		root.CFrame = spawnCFrame
 	end
 end
 

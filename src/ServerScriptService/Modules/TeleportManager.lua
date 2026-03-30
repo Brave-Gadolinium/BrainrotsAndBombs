@@ -1,7 +1,9 @@
 local TeleportManager = {}
 
 local Workspace = game:GetService("Workspace")
+local ServerScriptService = game:GetService("ServerScriptService")
 local TeleportPlayer = game.ReplicatedStorage.Remotes.Helper.TeleportPlayer
+local SpawnUtils = require(ServerScriptService.Modules.SpawnUtils)
 
 TeleportPlayer.OnServerEvent:Connect(function(player)
 	if not player then return end
@@ -15,10 +17,10 @@ TeleportPlayer.OnServerEvent:Connect(function(player)
 	local plot = Workspace:FindFirstChild("Plot_" .. player.Name)
 	if not plot then return end
 
-	local spawnPart = plot:FindFirstChild("Spawn", true)
-	if not spawnPart or not spawnPart:IsA("BasePart") then return end
+	local spawnCFrame = SpawnUtils.GetPlotSpawnCFrame(plot, 4)
+	if not spawnCFrame then return end
 
-	character:PivotTo(spawnPart.CFrame + Vector3.new(0, 4, 0))
+	character:PivotTo(spawnCFrame)
 end)
 
 return TeleportManager

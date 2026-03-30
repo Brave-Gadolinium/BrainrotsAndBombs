@@ -11,6 +11,7 @@ local MarketplaceService = game:GetService("MarketplaceService")
 local PlayerController = require(ServerScriptService.Controllers.PlayerController)
 local AnalyticsFunnelsService = require(ServerScriptService.Modules.AnalyticsFunnelsService)
 local AnalyticsEconomyService = require(ServerScriptService.Modules.AnalyticsEconomyService)
+local SpawnUtils = require(ServerScriptService.Modules.SpawnUtils)
 local NumberFormatter = require(ReplicatedStorage.Modules.NumberFormatter)
 local SlotUnlockConfigurations = require(ReplicatedStorage.Modules.SlotUnlockConfigurations)
 
@@ -451,8 +452,13 @@ end
 
 local function handleCharacterSpawn(player: Player, character: Model)
 	local plotModel = activePlotModels[player]
-	if plotModel and plotModel.PrimaryPart then
-		character:WaitForChild("HumanoidRootPart").CFrame = plotModel.PrimaryPart.CFrame + Vector3.new(0, 3, 0)
+	if not plotModel then
+		return
+	end
+
+	local spawnCFrame = SpawnUtils.GetPlotSpawnCFrame(plotModel, 3)
+	if spawnCFrame then
+		character:PivotTo(spawnCFrame)
 	end
 end
 
