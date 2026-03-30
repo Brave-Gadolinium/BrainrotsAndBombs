@@ -36,11 +36,11 @@ TutorialConfiguration.Steps = {
 		TargetType = "WorldCollectButton",
 	},
 	[7] = {
-		Text = "Open the bomb shop",
+		Text = "Upgrade your bomb.",
 		TargetType = "GuiShopButton",
 	},
 	[8] = {
-		Text = "Buy the bomb",
+		Text = "Buy Venom Bomb",
 		TargetType = "GuiBuyBombButton",
 	},
 	[9] = {

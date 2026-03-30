@@ -11,6 +11,7 @@ local ItemConfigurations = require(ReplicatedStorage.Modules.ItemConfigurations)
 local RebirthRequirements = require(ReplicatedStorage.Modules.RebirthRequirements)
 local ProductConfigurations = require(ReplicatedStorage.Modules.ProductConfigurations)
 local RarityConfigurations = require(ReplicatedStorage.Modules.RarityConfigurations)
+local FrameManager = require(ReplicatedStorage.Modules.FrameManager)
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -31,6 +32,7 @@ local rebirthButton = buttonContainer:WaitForChild("Soft") :: GuiButton
 local skipButton = buttonContainer:WaitForChild("Robux") :: GuiButton
 local statusLabel = rebirthButton:FindFirstChild("TextLabel", true)
 local robuxPriceLabel = skipButton:FindFirstChild("Price", true)
+local closeButton = rootUI:FindFirstChild("Close", true)
 
 local contentFrame = mainFrame:WaitForChild("Content")
 local youNeedContent = contentFrame:WaitForChild("YouNeed"):WaitForChild("Content")
@@ -110,6 +112,18 @@ local function setupButtonEffects(button: GuiButton)
 		if clickSound and clickSound:IsA("Sound") then
 			clickSound:Play()
 		end
+	end)
+end
+
+local function bindCloseButton(button: Instance?)
+	if not button or not button:IsA("GuiButton") or button:GetAttribute("RebirthCloseBound") == true then
+		return
+	end
+
+	button:SetAttribute("RebirthCloseBound", true)
+	setupButtonEffects(button)
+	button.MouseButton1Click:Connect(function()
+		FrameManager.close("Rebirth")
 	end)
 end
 
@@ -548,9 +562,16 @@ end
 
 setupButtonEffects(rebirthButton)
 setupButtonEffects(skipButton)
+bindCloseButton(closeButton)
 setRobuxPrice()
 bindObservers()
 queueRefresh()
+
+rootUI.DescendantAdded:Connect(function(descendant)
+	if descendant.Name == "Close" then
+		bindCloseButton(descendant)
+	end
+end)
 
 rebirthButton.MouseButton1Click:Connect(function()
 	local state = getClientState()

@@ -163,6 +163,19 @@ local function setCurrentStep(player: Player, profile: any, step: number)
 	end
 end
 
+local function reconcileStepWithCurrentState(player: Player, profile: any): number
+	local currentStep = getCurrentStep(player)
+
+	-- If the player left during step 4, the carried brainrot is gone on next join,
+	-- so we must return them to step 3 to pick one up again.
+	if currentStep == 4 and not hasBrainrotInHandOrInventory(player) then
+		setCurrentStep(player, profile, 3)
+		return 3
+	end
+
+	return currentStep
+end
+
 function TutorialService:GetCurrentStep(player: Player): number
 	return getCurrentStep(player)
 end
@@ -172,7 +185,15 @@ function TutorialService:GetStepDefinition(step: number)
 end
 
 function TutorialService:SyncPlayer(player: Player)
-	local step = getCurrentStep(player)
+	local profile = getProfile(player)
+	if not profile or not profile.Data then
+		local step = getCurrentStep(player)
+		syncStepAttribute(player, step)
+		AnalyticsFunnelsService:SyncTutorial(player, step)
+		return step
+	end
+
+	local step = reconcileStepWithCurrentState(player, profile)
 	syncStepAttribute(player, step)
 	AnalyticsFunnelsService:SyncTutorial(player, step)
 
@@ -201,6 +222,8 @@ function TutorialService:EvaluateCurrentStep(player: Player)
 	if not profile or not profile.Data then
 		return
 	end
+
+	reconcileStepWithCurrentState(player, profile)
 
 	local advanced = true
 	while advanced do

@@ -240,6 +240,25 @@ function PickaxeController.EnsureBombFirstSlot(player: Player)
 	moveBombToFirstSlot(player, bombTool, bombTool.Parent == player.Character)
 end
 
+function PickaxeController.EnsureBombEquipped(player: Player)
+	local profile = PlayerController and PlayerController:GetProfile(player)
+	local equippedPickaxe = profile and profile.Data and profile.Data.EquippedPickaxe or "Bomb 1"
+	local bombTool = deduplicatePickaxes(player, equippedPickaxe) or getCurrentBombTool(player)
+
+	if not bombTool and type(equippedPickaxe) == "string" and BombsConfigurations.Bombs[equippedPickaxe] then
+		PickaxeController.EquipPickaxe(player, equippedPickaxe)
+		return
+	end
+
+	if not bombTool then
+		return
+	end
+
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	moveBombToFirstSlot(player, bombTool, humanoid ~= nil)
+end
+
 function PickaxeController.EquipPickaxe(player: Player, pickaxeName: string)
 	if type(pickaxeName) ~= "string" or not BombsConfigurations.Bombs[pickaxeName] then
 		return

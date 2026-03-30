@@ -9,6 +9,7 @@ local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
 
 local TutorialConfiguration = require(ReplicatedStorage.Modules.TutorialConfiguration)
+local FrameManager = require(ReplicatedStorage.Modules.FrameManager)
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -35,12 +36,16 @@ local worldTarget: BasePart? = nil
 local refreshAccumulator = 0
 local reportDebounce: {[string]: number} = {}
 local finalMessageHideAt = 0
-local tutorialBackOverlayGui: ScreenGui? = nil
-local tutorialBackBlackout: Frame? = nil
-local tutorialBackProxyButton: GuiButton? = nil
-local tutorialBackPulseScale: UIScale? = nil
-local tutorialBackPulseTween: Tween? = nil
-local backOverlaySuppressedUntil = 0
+local tutorialGuiOverlay: ScreenGui? = nil
+local tutorialGuiBlackout: Frame? = nil
+local tutorialGuiProxyButton: GuiButton? = nil
+local tutorialGuiCursor: ImageLabel? = nil
+local tutorialGuiStepLabel: TextLabel? = nil
+local tutorialGuiPulseScale: UIScale? = nil
+local tutorialGuiPulseTween: Tween? = nil
+local tutorialGuiTargetStep: number? = nil
+local guiOverlaySuppressedUntil = 0
+local hiddenHudBackState: {[Instance]: {[string]: any}} = {}
 
 local function getCharacter()
 	return player.Character or player.CharacterAdded:Wait()
@@ -170,13 +175,13 @@ local function reportAction(actionId: string)
 	ReportTutorialAction:FireServer(actionId)
 end
 
-local function ensureBackOverlayGui()
-	if tutorialBackOverlayGui and tutorialBackOverlayGui.Parent then
+local function ensureTutorialGuiOverlay()
+	if tutorialGuiOverlay and tutorialGuiOverlay.Parent then
 		return
 	end
 
 	local overlayGui = Instance.new("ScreenGui")
-	overlayGui.Name = "TutorialBackOverlay"
+	overlayGui.Name = "TutorialGuiOverlay"
 	overlayGui.ResetOnSpawn = false
 	overlayGui.IgnoreGuiInset = true
 	overlayGui.DisplayOrder = 1000
@@ -194,14 +199,14 @@ local function ensureBackOverlayGui()
 	blackout.ZIndex = 1
 	blackout.Parent = overlayGui
 
-	tutorialBackOverlayGui = overlayGui
-	tutorialBackBlackout = blackout
+	tutorialGuiOverlay = overlayGui
+	tutorialGuiBlackout = blackout
 end
 
-local function stopBackPulseTween()
-	if tutorialBackPulseTween then
-		tutorialBackPulseTween:Cancel()
-		tutorialBackPulseTween = nil
+local function stopGuiPulseTween()
+	if tutorialGuiPulseTween then
+		tutorialGuiPulseTween:Cancel()
+		tutorialGuiPulseTween = nil
 	end
 end
 
@@ -225,50 +230,256 @@ local function applyOverlayZIndex(instance: Instance, zIndex: number)
 	end
 end
 
-local function destroyBackProxyButton()
-	stopBackPulseTween()
+local function destroyTutorialGuiProxyButton()
+	stopGuiPulseTween()
 
-	if tutorialBackProxyButton then
-		tutorialBackProxyButton:Destroy()
-		tutorialBackProxyButton = nil
+	if tutorialGuiProxyButton then
+		tutorialGuiProxyButton:Destroy()
+		tutorialGuiProxyButton = nil
 	end
 
-	tutorialBackPulseScale = nil
+	tutorialGuiPulseScale = nil
+	tutorialGuiTargetStep = nil
 end
 
-local function hideBackOverlay()
-	destroyBackProxyButton()
-
-	if tutorialBackOverlayGui then
-		tutorialBackOverlayGui.Enabled = false
+local function destroyTutorialGuiCursor()
+	if tutorialGuiCursor then
+		tutorialGuiCursor:Destroy()
+		tutorialGuiCursor = nil
 	end
 end
 
-local function syncBackProxyLayout(backButton: GuiButton)
-	if not tutorialBackProxyButton then
+local function destroyTutorialGuiLabel()
+	if tutorialGuiStepLabel then
+		tutorialGuiStepLabel:Destroy()
+		tutorialGuiStepLabel = nil
+	end
+end
+
+local function hideTutorialGuiOverlay()
+	destroyTutorialGuiProxyButton()
+	destroyTutorialGuiCursor()
+	destroyTutorialGuiLabel()
+
+	if tutorialGuiOverlay then
+		tutorialGuiOverlay.Enabled = false
+	end
+
+	local backButton = hud:FindFirstChild("Back")
+	if backButton and backButton:IsA("GuiButton") then
+		for instance, originalState in pairs(hiddenHudBackState) do
+			if instance.Parent then
+				if instance:IsA("GuiObject") and originalState.BackgroundTransparency ~= nil then
+					instance.BackgroundTransparency = originalState.BackgroundTransparency
+				end
+				if (instance:IsA("TextLabel") or instance:IsA("TextButton") or instance:IsA("TextBox")) and originalState.TextTransparency ~= nil then
+					instance.TextTransparency = originalState.TextTransparency
+					instance.TextStrokeTransparency = originalState.TextStrokeTransparency
+				end
+				if (instance:IsA("ImageLabel") or instance:IsA("ImageButton")) and originalState.ImageTransparency ~= nil then
+					instance.ImageTransparency = originalState.ImageTransparency
+				end
+				if instance:IsA("UIStroke") and originalState.Transparency ~= nil then
+					instance.Transparency = originalState.Transparency
+				end
+				if instance:IsA("GuiButton") and originalState.Active ~= nil then
+					instance.Active = originalState.Active
+					instance.AutoButtonColor = originalState.AutoButtonColor
+				end
+			end
+		end
+		table.clear(hiddenHudBackState)
+	end
+end
+
+local function setHudBackButtonHidden(backButton: GuiButton, hidden: boolean)
+	if not hidden then
+		for instance, originalState in pairs(hiddenHudBackState) do
+			if instance.Parent then
+				if instance:IsA("GuiObject") and originalState.BackgroundTransparency ~= nil then
+					instance.BackgroundTransparency = originalState.BackgroundTransparency
+				end
+				if (instance:IsA("TextLabel") or instance:IsA("TextButton") or instance:IsA("TextBox")) and originalState.TextTransparency ~= nil then
+					instance.TextTransparency = originalState.TextTransparency
+					instance.TextStrokeTransparency = originalState.TextStrokeTransparency
+				end
+				if (instance:IsA("ImageLabel") or instance:IsA("ImageButton")) and originalState.ImageTransparency ~= nil then
+					instance.ImageTransparency = originalState.ImageTransparency
+				end
+				if instance:IsA("UIStroke") and originalState.Transparency ~= nil then
+					instance.Transparency = originalState.Transparency
+				end
+				if instance:IsA("GuiButton") and originalState.Active ~= nil then
+					instance.Active = originalState.Active
+					instance.AutoButtonColor = originalState.AutoButtonColor
+				end
+			end
+		end
+		table.clear(hiddenHudBackState)
 		return
 	end
 
-	tutorialBackProxyButton.AnchorPoint = Vector2.zero
-	tutorialBackProxyButton.Position = UDim2.fromOffset(backButton.AbsolutePosition.X, backButton.AbsolutePosition.Y)
-	tutorialBackProxyButton.Size = UDim2.fromOffset(backButton.AbsoluteSize.X, backButton.AbsoluteSize.Y)
-	tutorialBackProxyButton.Rotation = backButton.Rotation
+	local function hideInstanceVisual(instance: Instance)
+		if hiddenHudBackState[instance] == nil then
+			local originalState: {[string]: any} = {}
+			if instance:IsA("GuiObject") then
+				originalState.BackgroundTransparency = instance.BackgroundTransparency
+			end
+			if instance:IsA("TextLabel") or instance:IsA("TextButton") or instance:IsA("TextBox") then
+				originalState.TextTransparency = instance.TextTransparency
+				originalState.TextStrokeTransparency = instance.TextStrokeTransparency
+			end
+			if instance:IsA("ImageLabel") or instance:IsA("ImageButton") then
+				originalState.ImageTransparency = instance.ImageTransparency
+			end
+			if instance:IsA("UIStroke") then
+				originalState.Transparency = instance.Transparency
+			end
+			if instance:IsA("GuiButton") then
+				originalState.Active = instance.Active
+				originalState.AutoButtonColor = instance.AutoButtonColor
+			end
+			hiddenHudBackState[instance] = originalState
+		end
+
+		if instance:IsA("GuiObject") then
+			instance.BackgroundTransparency = 1
+		end
+		if instance:IsA("TextLabel") or instance:IsA("TextButton") or instance:IsA("TextBox") then
+			instance.TextTransparency = 1
+			instance.TextStrokeTransparency = 1
+		end
+		if instance:IsA("ImageLabel") or instance:IsA("ImageButton") then
+			instance.ImageTransparency = 1
+		end
+		if instance:IsA("UIStroke") then
+			instance.Transparency = 1
+		end
+		if instance:IsA("GuiButton") then
+			instance.Active = false
+			instance.AutoButtonColor = false
+		end
+	end
+
+	hideInstanceVisual(backButton)
+	for _, descendant in ipairs(backButton:GetDescendants()) do
+		hideInstanceVisual(descendant)
+	end
 end
 
-local function createBackProxyButton(backButton: GuiButton)
-	ensureBackOverlayGui()
-	destroyBackProxyButton()
+local function syncTutorialGuiLayout(targetButton: GuiButton)
+	if tutorialGuiProxyButton then
+		tutorialGuiProxyButton.AnchorPoint = Vector2.zero
+		tutorialGuiProxyButton.Position = UDim2.fromOffset(targetButton.AbsolutePosition.X, targetButton.AbsolutePosition.Y)
+		tutorialGuiProxyButton.Size = UDim2.fromOffset(targetButton.AbsoluteSize.X, targetButton.AbsoluteSize.Y)
+		tutorialGuiProxyButton.Rotation = targetButton.Rotation
+	end
 
-	local proxyButton = backButton:Clone()
+	local centerX = targetButton.AbsolutePosition.X + (targetButton.AbsoluteSize.X * 0.5)
+	local topY = targetButton.AbsolutePosition.Y
+
+	if tutorialGuiCursor then
+		local cursorParent: Instance = targetButton
+		if tutorialGuiProxyButton and (currentStep == 4 or currentStep == 7) then
+			cursorParent = tutorialGuiProxyButton
+		end
+
+		if tutorialGuiCursor.Parent ~= cursorParent then
+			tutorialGuiCursor.Parent = cursorParent
+		end
+
+		tutorialGuiCursor.AnchorPoint = Vector2.zero
+		tutorialGuiCursor.Position = UDim2.new(0.7, 0, 0.3, 0)
+		applyOverlayZIndex(tutorialGuiCursor, 16)
+	end
+
+	if tutorialGuiStepLabel then
+		tutorialGuiStepLabel.AnchorPoint = Vector2.new(0.5, 1)
+		tutorialGuiStepLabel.Position = UDim2.fromOffset(centerX, topY - 56)
+	end
+end
+
+local function createTutorialGuiCursor()
+	if tutorialGuiCursor or not tutorialGuiOverlay then
+		return
+	end
+
+	local cursorTemplate = ReplicatedStorage:FindFirstChild("Cursor", true)
+	if not cursorTemplate or not cursorTemplate:IsA("ImageLabel") then
+		return
+	end
+
+	local cursor = cursorTemplate:Clone()
+	removeScripts(cursor)
+	cursor.Name = "TutorialCursor"
+	cursor.Visible = true
+	cursor.Parent = tutorialGuiOverlay
+	cursor.AnchorPoint = Vector2.zero
+	cursor.Position = UDim2.new(0.7, 0, 0.3, 0)
+	applyOverlayZIndex(cursor, 16)
+	tutorialGuiCursor = cursor
+end
+
+local function createTutorialGuiLabel(text: string)
+	if tutorialGuiStepLabel or not tutorialGuiOverlay then
+		return
+	end
+
+	local label = Instance.new("TextLabel")
+	label.Name = "TutorialStepLabel"
+	label.Size = UDim2.fromOffset(220, 40)
+	label.BackgroundColor3 = Color3.fromRGB(24, 24, 24)
+	label.BackgroundTransparency = 0.15
+	label.BorderSizePixel = 0
+	label.Text = text
+	label.TextColor3 = Color3.fromRGB(255, 255, 255)
+	label.TextSize = 20
+	label.Font = Enum.Font.GothamBold
+	label.TextWrapped = true
+	label.Parent = tutorialGuiOverlay
+	label.ZIndex = 15
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 10)
+	corner.Parent = label
+
+	tutorialGuiStepLabel = label
+end
+
+local function handleTutorialGuiProxyClick()
+	if tutorialGuiTargetStep == 4 then
+		guiOverlaySuppressedUntil = tick() + 1
+		hideTutorialGuiOverlay()
+		reportAction("BackPressed")
+		TeleportPlayer:FireServer()
+	elseif tutorialGuiTargetStep == 7 then
+		guiOverlaySuppressedUntil = tick() + 0.5
+		reportAction("ShopOpened")
+		FrameManager.open("Pickaxes")
+	end
+end
+
+local function createTutorialGuiProxyButton(targetButton: GuiButton)
+	ensureTutorialGuiOverlay()
+	destroyTutorialGuiProxyButton()
+
+	local proxyButton = targetButton:Clone()
 	removeScripts(proxyButton)
-	proxyButton.Name = "TutorialBackProxy"
+	proxyButton.Name = "TutorialGuiProxy"
 	proxyButton.Visible = true
 	proxyButton.Active = true
 	proxyButton.Selectable = true
-	proxyButton.Parent = tutorialBackOverlayGui
-	tutorialBackProxyButton = proxyButton
+	proxyButton.Parent = tutorialGuiOverlay
+	tutorialGuiProxyButton = proxyButton
+	tutorialGuiTargetStep = currentStep
 	applyOverlayZIndex(proxyButton, 10)
-	syncBackProxyLayout(backButton)
+
+	local proxyTextLabel = proxyButton:FindFirstChild("Text", true)
+	if proxyTextLabel and proxyTextLabel:IsA("TextLabel") then
+		proxyTextLabel.ZIndex = 14
+	end
+
+	syncTutorialGuiLayout(targetButton)
 
 	local pulseScale = proxyButton:FindFirstChild("TutorialPulseScale") :: UIScale?
 	if not pulseScale then
@@ -286,46 +497,136 @@ local function createBackProxyButton(backButton: GuiButton)
 	pulseTween:Play()
 
 	proxyButton.MouseButton1Click:Connect(function()
-		backOverlaySuppressedUntil = tick() + 1
-		hideBackOverlay()
-		reportAction("BackPressed")
-		TeleportPlayer:FireServer()
+		handleTutorialGuiProxyClick()
 	end)
 
-	tutorialBackPulseScale = pulseScale
-	tutorialBackPulseTween = pulseTween
+	tutorialGuiPulseScale = pulseScale
+	tutorialGuiPulseTween = pulseTween
 end
 
-local function refreshBackOverlay()
+local function findBombShopButton(): GuiButton?
+	local directButton = hud:FindFirstChild("Pickaxes", true)
+	if directButton and directButton:IsA("GuiButton") then
+		return directButton
+	end
+
+	local fallbackButton = hud:FindFirstChild("PickaxesButton", true)
+	if fallbackButton and fallbackButton:IsA("GuiButton") then
+		return fallbackButton
+	end
+
+	for _, descendant in ipairs(hud:GetDescendants()) do
+		if descendant:IsA("GuiButton") then
+			local mappedFrameName = descendant.Name:gsub("Button", "")
+			if mappedFrameName == "Pickaxes" then
+				return descendant
+			end
+		end
+	end
+
+	return nil
+end
+
+local function findBombBuyButton(): GuiButton?
+	local showcaseFrame = pickaxesFrame:FindFirstChild("Showcase")
+	if not showcaseFrame then
+		return nil
+	end
+
+	local buyButton = showcaseFrame:FindFirstChild("Buy", true)
+	if buyButton and buyButton:IsA("GuiButton") then
+		return buyButton
+	end
+
+	return nil
+end
+
+local function shouldUseTutorialGuiProxy(step: number): boolean
+	return step == 4 or step == 7
+end
+
+local function shouldShowTutorialGuiBlackout(step: number): boolean
+	return step == 4 or step == 7
+end
+
+local function getTutorialGuiTarget(step: number): GuiButton?
+	if step == 4 then
+		local backButton = hud:FindFirstChild("Back")
+		if backButton and backButton:IsA("GuiButton") then
+			return backButton
+		end
+	elseif step == 7 then
+		return findBombShopButton()
+	elseif step == 8 then
+		return findBombBuyButton()
+	end
+
+	return nil
+end
+
+local function refreshTutorialGuiOverlay()
 	local backButton = hud:FindFirstChild("Back")
-	if not backButton or not backButton:IsA("GuiButton") then
-		hideBackOverlay()
+	if backButton and backButton:IsA("GuiButton") and currentStep ~= 4 then
+		setHudBackButtonHidden(backButton, false)
+	end
+
+	local targetButton = getTutorialGuiTarget(currentStep)
+	if not targetButton then
+		hideTutorialGuiOverlay()
 		return
 	end
 
-	local shouldShow = currentStep == 4
-		and backButton.Visible
-		and tick() >= backOverlaySuppressedUntil
+	local shouldShow = tick() >= guiOverlaySuppressedUntil
+		and targetButton.Visible
+		and targetButton.AbsoluteSize.X > 0
+		and targetButton.AbsoluteSize.Y > 0
 
 	if not shouldShow then
-		hideBackOverlay()
+		hideTutorialGuiOverlay()
 		return
 	end
 
-	ensureBackOverlayGui()
-	if tutorialBackOverlayGui then
-		tutorialBackOverlayGui.Enabled = true
+	ensureTutorialGuiOverlay()
+	if tutorialGuiOverlay then
+		tutorialGuiOverlay.Enabled = true
 	end
 
-	if tutorialBackBlackout then
-		tutorialBackBlackout.Visible = true
+	if tutorialGuiBlackout then
+		local showBlackout = shouldShowTutorialGuiBlackout(currentStep)
+		tutorialGuiBlackout.Visible = showBlackout
+		tutorialGuiBlackout.Active = showBlackout
 	end
 
-	if not tutorialBackProxyButton or tutorialBackProxyButton.Parent ~= tutorialBackOverlayGui then
-		createBackProxyButton(backButton)
+	if not tutorialGuiCursor or tutorialGuiCursor.Parent ~= tutorialGuiOverlay then
+		createTutorialGuiCursor()
+	end
+
+	if currentStep == 4 then
+		local stepDefinition = TutorialConfiguration.Steps[currentStep]
+		if not tutorialGuiStepLabel or tutorialGuiStepLabel.Parent ~= tutorialGuiOverlay then
+			createTutorialGuiLabel(stepDefinition and stepDefinition.Text or "")
+		elseif stepDefinition then
+			tutorialGuiStepLabel.Text = stepDefinition.Text
+		end
 	else
-		syncBackProxyLayout(backButton)
+		destroyTutorialGuiLabel()
 	end
+
+	if shouldUseTutorialGuiProxy(currentStep) then
+		if not tutorialGuiProxyButton
+			or tutorialGuiProxyButton.Parent ~= tutorialGuiOverlay
+			or tutorialGuiTargetStep ~= currentStep then
+			createTutorialGuiProxyButton(targetButton)
+		end
+	else
+		destroyTutorialGuiProxyButton()
+	end
+
+	if currentStep == 4 and targetButton:IsA("GuiButton") then
+		setHudBackButtonHidden(targetButton, true)
+	end
+
+	syncTutorialGuiLayout(targetButton)
 end
 
 local function hasEquippedBrainrot(): boolean
@@ -480,6 +781,28 @@ local function findClosestCollectTouch(): BasePart?
 	return closestCollect
 end
 
+local function findClosestTaggedPart(tagName: string): BasePart?
+	local rootPart = getRootPart()
+	if not rootPart then
+		return nil
+	end
+
+	local closestPart: BasePart? = nil
+	local closestDistance = math.huge
+
+	for _, instance in ipairs(CollectionService:GetTagged(tagName)) do
+		if instance:IsA("BasePart") then
+			local distance = (instance.Position - rootPart.Position).Magnitude
+			if distance < closestDistance then
+				closestDistance = distance
+				closestPart = instance
+			end
+		end
+	end
+
+	return closestPart
+end
+
 local function resolveWorldTargetForStep(step: number): Instance?
 	if step == 1 then
 		return findTutorialMiningZonePart()
@@ -492,6 +815,11 @@ local function resolveWorldTargetForStep(step: number): Instance?
 		return nil
 	elseif step == 6 then
 		return findClosestCollectTouch()
+	elseif step == 7 or step == 8 then
+		if not pickaxesFrame.Visible then
+			return findClosestTaggedPart("ShopPart")
+		end
+		return nil
 	end
 
 	return nil
@@ -500,7 +828,7 @@ end
 local function applyStepPresentation()
 	local stepDefinition = TutorialConfiguration.Steps[currentStep]
 	if not stepDefinition then
-		hideBackOverlay()
+		hideTutorialGuiOverlay()
 		clearAllTargets()
 		return
 	end
@@ -508,9 +836,8 @@ local function applyStepPresentation()
 	if currentStep >= TutorialConfiguration.FinalStep then
 		instructionsLabel.Text = stepDefinition.Text
 		instructionsLabel.Visible = tick() < finalMessageHideAt
-		hideBackOverlay()
+		hideTutorialGuiOverlay()
 		clearAllTargets(true)
-		refreshBackOverlay()
 		return
 	end
 
@@ -541,7 +868,7 @@ local function applyStepPresentation()
 		cleanupWorldVisuals()
 	end
 
-	refreshBackOverlay()
+	refreshTutorialGuiOverlay()
 end
 
 local function refreshCurrentStep()
@@ -570,7 +897,7 @@ local function connectUiReporting()
 			reportAction("BackPressed")
 		end)
 		backButton:GetPropertyChangedSignal("Visible"):Connect(function()
-			refreshBackOverlay()
+			refreshTutorialGuiOverlay()
 		end)
 	end
 
@@ -600,21 +927,15 @@ end)
 
 player.CharacterAdded:Connect(function()
 	task.wait(0.5)
-	hideBackOverlay()
+	hideTutorialGuiOverlay()
 	clearAllTargets(true)
-	backOverlaySuppressedUntil = 0
+	guiOverlaySuppressedUntil = 0
 	connectUiReporting()
 	refreshCurrentStep()
 end)
 
 RunService.RenderStepped:Connect(function(deltaTime)
-	refreshBackOverlay()
-	if tutorialBackProxyButton then
-		local backButton = hud:FindFirstChild("Back")
-		if backButton and backButton:IsA("GuiButton") then
-			syncBackProxyLayout(backButton)
-		end
-	end
+	refreshTutorialGuiOverlay()
 
 	refreshAccumulator += deltaTime
 	if refreshAccumulator >= 0.25 then

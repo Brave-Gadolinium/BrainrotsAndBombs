@@ -12,6 +12,7 @@ local CarrySystem = {}
 
 -- [ MODULES ]
 local ItemConfigurations = require(ReplicatedStorage.Modules.ItemConfigurations)
+local BombsConfigurations = require(ReplicatedStorage.Modules.BombsConfigurations)
 local PlayerController = require(ServerScriptService.Controllers.PlayerController) 
 local BadgeManager = require(ServerScriptService.Modules.BadgeManager)
 local TutorialService = require(ServerScriptService.Modules.TutorialService)
@@ -33,6 +34,7 @@ local GlobalSounds = Workspace:WaitForChild("Sounds")
 local carryingData: {[Player]: {any}} = {}
 local playersInZone: {[Player]: boolean} = {}
 local lastLimitNotif: {[Player]: number} = {}
+local lastBombRepairAttempt: {[Player]: number} = {}
 
 -- [ CONFIG ]
 local CHECK_INTERVAL = 0.2 
@@ -337,12 +339,40 @@ local function processZoneEnter(player: Player)
 		humanoid:UnequipTools()
 	end
 
-	-- ## FIXED: Auto-Equip the player's Pickaxe when re-entering the mine! ##
-	local profile = PlayerController:GetProfile(player)
-	if profile and PickaxeController then
-		local equippedPickaxe = profile.Data.EquippedPickaxe or "Bomb 1"
-		PickaxeController.EquipPickaxe(player, equippedPickaxe)
+	-- Restore the preferred bomb without destroying/recreating it on every zone enter.
+	if PickaxeController and PickaxeController.EnsureBombEquipped then
+		PickaxeController.EnsureBombEquipped(player)
 	end
+end
+
+local function hasEquippedBomb(player: Player): boolean
+	local character = player.Character
+	if not character then
+		return false
+	end
+
+	for _, child in ipairs(character:GetChildren()) do
+		if child:IsA("Tool") and BombsConfigurations.Bombs[child.Name] then
+			return true
+		end
+	end
+
+	return false
+end
+
+local function repairMissingBombInZone(player: Player)
+	if not PickaxeController or not PickaxeController.EnsureBombEquipped then
+		return
+	end
+
+	local now = tick()
+	local lastAttempt = lastBombRepairAttempt[player] or 0
+	if now - lastAttempt < 0.75 then
+		return
+	end
+
+	lastBombRepairAttempt[player] = now
+	PickaxeController.EnsureBombEquipped(player)
 end
 
 function CarrySystem:Init()
@@ -396,6 +426,9 @@ function CarrySystem:Start()
 					local rootPart = character:FindFirstChild("HumanoidRootPart") :: BasePart
 					if rootPart and isInsideAnyZone(rootPart.Position) then
 						foundPlayers[player] = true
+						if not hasEquippedBomb(player) then
+							repairMissingBombInZone(player)
+						end
 					end
 				end
 			end
@@ -418,6 +451,7 @@ function CarrySystem:Start()
 		carryingData[player] = nil
 		playersInZone[player] = nil
 		lastLimitNotif[player] = nil
+		lastBombRepairAttempt[player] = nil
 	end)
 end
 

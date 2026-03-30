@@ -8,7 +8,6 @@ local RunService = game:GetService("RunService")
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local OreConfigurations = require(Modules:WaitForChild("OreConfigurations"))
-local PickaxesConfigurations = require(Modules:WaitForChild("PickaxesConfigurations")) -- ## ADDED ##
 
 local MinesFolder = Workspace:WaitForChild("Mines")
 local OresFolder = ReplicatedStorage:WaitForChild("Ores")
@@ -132,24 +131,6 @@ function LocalOreController:Start()
 		if currentlyInZone and not wasInZone then
 			-- Player just ENTERED the zone -> Disable Jumping
 			--humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, false)
-
-			-- ## ADDED: Auto-Equip Pickaxe ##
-			local backpack = player:FindFirstChild("Backpack")
-			if backpack then
-				local pickaxeToEquip = nil
-				for _, item in ipairs(backpack:GetChildren()) do
-					-- Verify it is a valid pickaxe by checking the configurations
-					if item:IsA("Tool") and PickaxesConfigurations.Pickaxes[item.Name] then
-						pickaxeToEquip = item
-						break
-					end
-				end
-
-				-- If we found it, force the character to hold it immediately
-				if pickaxeToEquip then
-					humanoid:EquipTool(pickaxeToEquip)
-				end
-			end
 
 		elseif not currentlyInZone and wasInZone then
 			-- Player just LEFT the zone -> Enable Jumping

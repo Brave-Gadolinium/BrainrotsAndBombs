@@ -16,6 +16,12 @@ local AnalyticsEconomyService = require(ServerScriptService.Modules.AnalyticsEco
 local SlotManager
 local TRANSACTION_TYPES = AnalyticsEconomyService:GetTransactionTypes()
 local connected = false
+local PROTECTED_REBIRTH_RARITIES = {
+	Mythic = true,
+	Mythical = true,
+	Secret = true,
+	Brainrotgod = true,
+}
 
 export type RebirthEvaluation = {
 	targetLevel: number,
@@ -83,6 +89,92 @@ local function buildOwnedBrainrotSet(player: Player, profile: any): {[string]: b
 	end
 
 	return owned
+end
+
+local function isProtectedRebirthRarity(rarity: any): boolean
+	return type(rarity) == "string" and PROTECTED_REBIRTH_RARITIES[rarity] == true
+end
+
+local function filterSavedInventory(profile: any)
+	local inventory = profile.Data.Inventory
+	if type(inventory) ~= "table" then
+		profile.Data.Inventory = {}
+		return
+	end
+
+	local keptInventory = {}
+	for _, itemData in ipairs(inventory) do
+		if type(itemData) == "table" and isProtectedRebirthRarity(itemData.Rarity) then
+			table.insert(keptInventory, itemData)
+		end
+	end
+
+	profile.Data.Inventory = keptInventory
+end
+
+local function filterSavedPlots(profile: any)
+	local plots = profile.Data.Plots
+	if type(plots) ~= "table" then
+		return
+	end
+
+	for _, floorData in pairs(plots) do
+		if type(floorData) == "table" then
+			for slotName, slotData in pairs(floorData) do
+				local isLuckyBlockSlot = type(slotData) == "table"
+					and (slotData.ContentType == "LuckyBlock" or slotData.LuckyBlock ~= nil)
+
+				if type(slotData) == "table"
+					and not isLuckyBlockSlot
+					and type(slotData.Item) == "table"
+					and not isProtectedRebirthRarity(slotData.Item.Rarity) then
+					floorData[slotName] = {
+						Item = nil,
+						Level = 1,
+						Stored = 0,
+					}
+				end
+			end
+		end
+	end
+end
+
+local function shouldKeepLiveTool(tool: Tool): boolean
+	if tool:GetAttribute("IsLuckyBlock") == true then
+		return true
+	end
+
+	local originalName = tool:GetAttribute("OriginalName")
+	if type(originalName) ~= "string" or originalName == "" then
+		return true
+	end
+
+	return isProtectedRebirthRarity(tool:GetAttribute("Rarity"))
+end
+
+local function filterLiveInventoryContainer(container: Instance?)
+	if not container then
+		return
+	end
+
+	local toolsToDestroy = {}
+	for _, child in ipairs(container:GetChildren()) do
+		if child:IsA("Tool") and not shouldKeepLiveTool(child) then
+			table.insert(toolsToDestroy, child)
+		end
+	end
+
+	for _, tool in ipairs(toolsToDestroy) do
+		if tool.Parent then
+			tool:Destroy()
+		end
+	end
+end
+
+local function filterLiveInventory(player: Player)
+	filterLiveInventoryContainer(player:FindFirstChild("Backpack"))
+	filterLiveInventoryContainer(player.Character)
+	filterLiveInventoryContainer(player:FindFirstChild("StarterGear"))
 end
 
 function RebirthSystem.EvaluateRequirements(player: Player, targetLevel: number?): RebirthEvaluation
@@ -156,6 +248,10 @@ local function executeRebirth(player: Player, profile: any)
 	if hum then
 		hum.WalkSpeed = 20
 	end
+
+	filterSavedInventory(profile)
+	filterSavedPlots(profile)
+	filterLiveInventory(player)
 
 	fireNotification(player, "Rebirth Successful!", "Success")
 

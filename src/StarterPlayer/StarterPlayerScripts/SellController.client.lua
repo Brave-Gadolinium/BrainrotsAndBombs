@@ -115,6 +115,8 @@ local function setupUI()
 	if SellGUI then
 		SellGUI.Parent = playerGui
 		SellGUI.Enabled = false
+		SellGUI.AlwaysOnTop = true
+		SellGUI.MaxDistance = 0
 
 		-- 3. Get New Buttons
 		local closeBtn = SellGUI:WaitForChild("Close") :: ImageButton
