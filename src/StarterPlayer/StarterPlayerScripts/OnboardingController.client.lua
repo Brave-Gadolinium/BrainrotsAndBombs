@@ -552,7 +552,8 @@ local function refreshCurrentStep()
 
 	local clampedStep = math.clamp(savedStep, 1, TutorialConfiguration.FinalStep)
 	if currentStep ~= clampedStep then
-		if clampedStep >= TutorialConfiguration.FinalStep then
+		local previousStep = currentStep
+		if previousStep > 0 and previousStep < TutorialConfiguration.FinalStep and clampedStep >= TutorialConfiguration.FinalStep then
 			finalMessageHideAt = tick() + 10
 		end
 		currentStep = clampedStep
