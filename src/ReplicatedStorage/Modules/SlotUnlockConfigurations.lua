@@ -20,42 +20,42 @@ SlotUnlockConfigurations.new_slots = {
 	},
 	{
 		lvl = 3,
-		money_req = 300000,
-		new_slots = 2,
-	},
-	{
-		lvl = 4,
 		money_req = 500000,
 		new_slots = 2,
 	},
 	{
-		lvl = 5,
+		lvl = 4,
 		money_req = 1000000,
 		new_slots = 2,
 	},
 	{
+		lvl = 5,
+		money_req = 5000000,
+		new_slots = 2,
+	},
+	{
 		lvl = 6,
-		money_req = 200000,
-		new_slots = 2,
-	},
-	{
-		lvl = 7,
-		money_req = 400000,
-		new_slots = 2,
-	},
-	{
-		lvl = 8,
-		money_req = 7000000,
-		new_slots = 2,
-	},
-	{
-		lvl = 9,
 		money_req = 10000000,
 		new_slots = 2,
 	},
 	{
+		lvl = 7,
+		money_req = 25000000,
+		new_slots = 2,
+	},
+	{
+		lvl = 8,
+		money_req = 50000000,
+		new_slots = 2,
+	},
+	{
+		lvl = 9,
+		money_req = 75000000,
+		new_slots = 2,
+	},
+	{
 		lvl = 10,
-		money_req = 15000000,
+		money_req = 100000000,
 		new_slots = 2,
 	},
 }

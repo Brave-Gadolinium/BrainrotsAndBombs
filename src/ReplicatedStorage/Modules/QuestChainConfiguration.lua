@@ -10,7 +10,7 @@ return {
 			Type = "rebirth_count",
 			Target = 1,
 			Text = "Make 1 rebirth",
-			Reward = 1000,
+			Reward = 5000, -- было 1000
 		},
 		{
 			Id = "money_5k",
@@ -18,7 +18,7 @@ return {
 			Type = "collect_money_total",
 			Target = 5000,
 			Text = "Collect $5K",
-			Reward = 2000,
+			Reward = 500, -- было 2000
 		},
 		{
 			Id = "depth_25",
@@ -26,7 +26,7 @@ return {
 			Type = "reach_depth",
 			Target = 2,
 			Text = "Reach Depth Level 2",
-			Reward = 3500,
+			Reward = 1000, -- было 3500
 		},
 		{
 			Id = "brainrots_3",
@@ -34,7 +34,7 @@ return {
 			Type = "collect_brainrots_total",
 			Target = 3,
 			Text = "Collect 3 brainrots",
-			Reward = 5000,
+			Reward = 500, -- было 5000
 		},
 		{
 			Id = "base_1",
@@ -42,7 +42,7 @@ return {
 			Type = "base_upgrade_count",
 			Target = 1,
 			Text = "Make 1 base upgrade",
-			Reward = 7500,
+			Reward = 5000, -- было 7500
 		},
 		{
 			Id = "play_3m",
@@ -50,7 +50,7 @@ return {
 			Type = "playtime_minutes_total",
 			Target = 3,
 			Text = "Play for 3 minutes",
-			Reward = 10000,
+			Reward = 500, -- было 10 000
 		},
 		{
 			Id = "bomb_1",
@@ -58,7 +58,7 @@ return {
 			Type = "bomb_upgrade_count",
 			Target = 1,
 			Text = "Upgrade bomb 1 time",
-			Reward = 12500,
+			Reward = 500, -- было 12 500
 		},
 		{
 			Id = "speed_1",
@@ -66,7 +66,7 @@ return {
 			Type = "speed_upgrade_count",
 			Target = 1,
 			Text = "Upgrade player speed 1 time",
-			Reward = 15000,
+			Reward = 2500, -- было 15 000
 		},
 		{
 			Id = "carry_1",
@@ -74,7 +74,7 @@ return {
 			Type = "carry_upgrade_count",
 			Target = 1,
 			Text = "Upgrade carry 1 time",
-			Reward = 20000,
+			Reward = 12500, -- было 20000
 		},
 		{
 			Id = "rebirth_2",
@@ -82,7 +82,7 @@ return {
 			Type = "rebirth_count",
 			Target = 2,
 			Text = "Make 2 rebirths",
-			Reward = 30000,
+			Reward = 10000, -- было 30000
 		},
 		{
 			Id = "money_50k",
@@ -90,7 +90,7 @@ return {
 			Type = "collect_money_total",
 			Target = 50000,
 			Text = "Collect $50K",
-			Reward = 40000,
+			Reward = 12500, -- было 40000
 		},
 		{
 			Id = "depth_100",
@@ -98,7 +98,7 @@ return {
 			Type = "reach_depth",
 			Target = 3,
 			Text = "Reach Depth Level 3",
-			Reward = 55000,
+			Reward = 5000, -- было 55000
 		},
 		{
 			Id = "brainrots_8",
@@ -106,7 +106,7 @@ return {
 			Type = "collect_brainrots_total",
 			Target = 8,
 			Text = "Collect 8 brainrots",
-			Reward = 75000,
+			Reward = 1000, -- было 75000
 		},
 		{
 			Id = "base_3",
@@ -114,7 +114,7 @@ return {
 			Type = "base_upgrade_count",
 			Target = 3,
 			Text = "Make 3 base upgrades",
-			Reward = 90000,
+			Reward = 25000, -- было 90000
 		},
 		{
 			Id = "play_10m",
@@ -122,7 +122,7 @@ return {
 			Type = "playtime_minutes_total",
 			Target = 10,
 			Text = "Play for 10 minutes",
-			Reward = 120000,
+			Reward = 10000, -- было 120000
 		},
 		{
 			Id = "bomb_3",
@@ -130,7 +130,7 @@ return {
 			Type = "bomb_upgrade_count",
 			Target = 3,
 			Text = "Upgrade bomb 3 times",
-			Reward = 180000,
+			Reward = 5000, -- было 180000
 		},
 		{
 			Id = "speed_3",
@@ -138,7 +138,7 @@ return {
 			Type = "speed_upgrade_count",
 			Target = 3,
 			Text = "Upgrade player speed 3 times",
-			Reward = 250000,
+			Reward = 5000, -- было 250000
 		},
 		{
 			Id = "carry_2",
@@ -146,7 +146,7 @@ return {
 			Type = "carry_upgrade_count",
 			Target = 2,
 			Text = "Upgrade carry 2 times",
-			Reward = 300000,
+			Reward = 25000, -- было 300000
 		},
 		{
 			Id = "money_250k",
@@ -154,7 +154,7 @@ return {
 			Type = "collect_money_total",
 			Target = 250000,
 			Text = "Collect $250K",
-			Reward = 450000,
+			Reward = 25000, -- было 450000
 		},
 		{
 			Id = "depth_250",
@@ -162,7 +162,7 @@ return {
 			Type = "reach_depth",
 			Target = 4,
 			Text = "Reach Depth Level 4",
-			Reward = 600000,
+			Reward = 15000, -- было 600000
 		},
 		{
 			Id = "brainrots_15",
@@ -170,7 +170,7 @@ return {
 			Type = "collect_brainrots_total",
 			Target = 15,
 			Text = "Collect 15 brainrots",
-			Reward = 800000,
+			Reward = 10000, -- 800000
 		},
 		{
 			Id = "base_5",
@@ -178,7 +178,7 @@ return {
 			Type = "base_upgrade_count",
 			Target = 5,
 			Text = "Make 5 base upgrades",
-			Reward = 1000000,
+			Reward = 50000, -- было 1000000
 		},
 		{
 			Id = "play_20m",
@@ -186,7 +186,7 @@ return {
 			Type = "playtime_minutes_total",
 			Target = 20,
 			Text = "Play for 20 minutes",
-			Reward = 1250000,
+			Reward = 25000, -- было 1250000
 		},
 		{
 			Id = "bomb_5",
@@ -194,7 +194,7 @@ return {
 			Type = "bomb_upgrade_count",
 			Target = 5,
 			Text = "Upgrade bomb 5 times",
-			Reward = 1500000,
+			Reward = 10000, -- было 1500000
 		},
 		{
 			Id = "speed_5",
@@ -202,7 +202,7 @@ return {
 			Type = "speed_upgrade_count",
 			Target = 5,
 			Text = "Upgrade player speed 5 times",
-			Reward = 1800000,
+			Reward = 10000, --было 1800000
 		},
 		{
 			Id = "carry_3",
@@ -210,7 +210,7 @@ return {
 			Type = "carry_upgrade_count",
 			Target = 3,
 			Text = "Upgrade carry 3 times",
-			Reward = 2200000,
+			Reward = 35000, --было 2200000
 		},
 	},
 }

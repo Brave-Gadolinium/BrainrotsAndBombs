@@ -33,7 +33,9 @@ local robuxButton2 = buttons:WaitForChild("RobuxButton2") :: TextButton
 -- [[ CHANGED: HUD Wheel is now in Left.Buttons2 ]]
 local leftButtons2 = hud:WaitForChild("Left"):WaitForChild("Buttons2")
 local hudWheel = leftButtons2:WaitForChild("Wheel") :: TextButton
-local hudWheelText = hudWheel:WaitForChild("Text") :: TextLabel 
+local hudWheelText = hud:WaitForChild("SpinnyWheel"):WaitForChild("WheelHolder"):WaitForChild("Ready") :: TextLabel
+local hudWheelTextCountSpin = hud:WaitForChild("SpinnyWheel"):WaitForChild("WheelHolder"):WaitForChild("CountSpin") :: TextLabel 
+
 local hudWheelNotification = hudWheel:FindFirstChild("Notification") :: Frame 
 
 local RequestSpin = ReplicatedStorage:WaitForChild("Events"):WaitForChild("RequestSpin") :: RemoteFunction
@@ -77,11 +79,15 @@ local function updateSpinButton()
 			hudWheelText.Text = "Spin (" .. currentSpins .. ")"
 			hudWheelText.TextColor3 = Color3.fromRGB(255, 255, 255)
 		end
+
+		hudWheelTextCountSpin.Text = '+' .. tostring(currentSpins)
 	else
+		hudWheelTextCountSpin.Text = ''
+
 		if timeLeft <= 0 then
-			spinLabel.Text = "Spin (1)"
+			spinLabel.Text = "READY!"
 			if hudWheelText then
-				hudWheelText.Text = "Spin (1)"
+				hudWheelText.Text = "READY!"
 				hudWheelText.TextColor3 = Color3.fromRGB(255, 255, 255)
 			end
 		else
