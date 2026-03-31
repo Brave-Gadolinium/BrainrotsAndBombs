@@ -2,7 +2,6 @@ local BombManager = {}
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local RunService = game:GetService("RunService")
 local Terrain = workspace.Terrain
 local Debris = game:GetService("Debris")
 local Workspace = game:GetService("Workspace")
@@ -22,6 +21,12 @@ local soundsFolder = Workspace:FindFirstChild("Sounds")
 
 local playerCooldowns = {}
 local activeBombs = {}
+local SPAWN_FUSE_DELAY = 0.5
+
+local function markBombCooldown(tool: Tool, duration: number)
+	tool:SetAttribute("CooldownDuration", duration)
+	tool:SetAttribute("CooldownEndsAt", Workspace:GetServerTimeNow() + duration)
+end
 
 local function ensureBombRemote(): RemoteEvent
 	local remotesFolder = ReplicatedStorage:FindFirstChild("Remotes")
@@ -186,12 +191,18 @@ local function affectPlayers(owner: Player, explosionPosition: Vector3, blastRad
 end
 
 local function explodeBomb(player: Player, bombPart: BasePart, hitPosition: Vector3, material: Enum.Material, bombData, bombName: string)
-	if not bombPart.Parent then
+	local state = activeBombs[bombPart]
+	if not state then
+		return
+	end
+
+	local bombInstance = state.Instance
+	if not bombInstance or not bombInstance.Parent then
 		return
 	end
 
 	activeBombs[bombPart] = nil
-	bombPart:Destroy()
+	bombInstance:Destroy()
 
 	local terrainRadius = BombsConfigurations.GetBlastRadius(bombData, material)
 	if terrainRadius > 0 then
@@ -221,42 +232,136 @@ local function explodeBomb(player: Player, bombPart: BasePart, hitPosition: Vect
 	end
 end
 
-local function createThrownBomb(player: Player, origin: Vector3, direction: Vector3, bombData, bombName: string)
+local function stripThrownBombInstance(instance: Instance)
+	for _, descendant in ipairs(instance:GetDescendants()) do
+		if descendant:IsA("Script")
+			or descendant:IsA("LocalScript")
+			or descendant:IsA("ModuleScript")
+			or descendant:IsA("TouchTransmitter")
+			or descendant:IsA("Weld")
+			or descendant:IsA("WeldConstraint")
+			or descendant:IsA("ManualWeld")
+			or descendant:IsA("Motor6D")
+			or descendant:IsA("BillboardGui")
+			or descendant:IsA("SurfaceGui")
+			or descendant:IsA("ProximityPrompt") then
+			descendant:Destroy()
+		end
+	end
+end
+
+local function createFallbackBombPart(origin: Vector3): (BasePart, Instance)
 	local bomb = Instance.new("Part")
 	bomb.Shape = Enum.PartType.Ball
 	bomb.Size = Vector3.new(2, 2, 2)
-	bomb.Position = origin
+	bomb.CFrame = CFrame.new(origin)
 	bomb.Color = Color3.fromRGB(0, 0, 0)
 	bomb.Material = Enum.Material.SmoothPlastic
 	bomb.Name = "BombInstance"
-	bomb.CanCollide = false
-	bomb.CanQuery = false
+	bomb.CanCollide = true
+	bomb.CanQuery = true
 	bomb.CanTouch = true
 	bomb.Massless = false
 	bomb.Parent = workspace
-	bomb:SetNetworkOwner(nil)
+	return bomb, bomb
+end
 
+local function createThrownBombVisual(sourceTool: Tool, origin: Vector3): (BasePart, Instance)
+	local sourceHandle = sourceTool:FindFirstChild("Handle")
+	if not sourceHandle or not sourceHandle:IsA("BasePart") then
+		return createFallbackBombPart(origin)
+	end
+
+	local sourceParts = {}
+	for _, descendant in ipairs(sourceTool:GetDescendants()) do
+		if descendant:IsA("BasePart") then
+			table.insert(sourceParts, descendant)
+		end
+	end
+
+	if #sourceParts == 0 then
+		return createFallbackBombPart(origin)
+	end
+
+	local bombModel = Instance.new("Model")
+	bombModel.Name = "BombInstance"
+
+	local rootCFrame = CFrame.fromMatrix(
+		origin,
+		sourceHandle.CFrame.XVector,
+		sourceHandle.CFrame.YVector,
+		sourceHandle.CFrame.ZVector
+	)
+
+	local rootPart: BasePart? = nil
+
+	for _, sourcePart in ipairs(sourceParts) do
+		local clone = sourcePart:Clone()
+		stripThrownBombInstance(clone)
+
+		local relativeCFrame = sourceHandle.CFrame:ToObjectSpace(sourcePart.CFrame)
+		clone.CFrame = rootCFrame * relativeCFrame
+		clone.Anchored = false
+		clone.CanCollide = true
+		clone.CanQuery = true
+		clone.CanTouch = true
+		clone.Massless = sourcePart ~= sourceHandle
+		clone.Parent = bombModel
+
+		if sourcePart == sourceHandle then
+			rootPart = clone
+		end
+	end
+
+	if not rootPart then
+		bombModel:Destroy()
+		return createFallbackBombPart(origin)
+	end
+
+	for _, child in ipairs(bombModel:GetChildren()) do
+		if child:IsA("BasePart") and child ~= rootPart then
+			local weld = Instance.new("WeldConstraint")
+			weld.Part0 = rootPart
+			weld.Part1 = child
+			weld.Parent = rootPart
+		end
+	end
+
+	bombModel.PrimaryPart = rootPart
+	bombModel.Parent = workspace
+
+	return rootPart, bombModel
+end
+
+local function createThrownBomb(player: Player, sourceTool: Tool, origin: Vector3, bombData, bombName: string)
+	local bomb, bombInstance = createThrownBombVisual(sourceTool, origin)
+	bomb:SetNetworkOwner(nil)
 	bomb.AssemblyLinearVelocity = Vector3.zero
 
 	activeBombs[bomb] = {
 		Owner = player,
 		Data = bombData,
 		BombName = bombName,
-		LastPosition = origin,
+		Instance = bombInstance,
 	}
 
-	bomb.Touched:Connect(function(hit)
+	task.delay(SPAWN_FUSE_DELAY, function()
 		local state = activeBombs[bomb]
-		if not state or not hit then
+		if not state then
 			return
 		end
 
-		if hit == Terrain then
-			explodeBomb(state.Owner, bomb, bomb.Position, getMaterialAtPosition(bomb.Position), state.Data, state.BombName)
+		local bombStateInstance = state.Instance
+		if not bombStateInstance or not bombStateInstance.Parent then
+			return
 		end
+
+		local hitPosition = bomb.Position
+		local material = getMaterialAtPosition(hitPosition)
+		explodeBomb(state.Owner, bomb, hitPosition, material, state.Data, state.BombName)
 	end)
 
-	Debris:AddItem(bomb, 8)
+	Debris:AddItem(bombInstance, 8)
 end
 
 local function getThrowOrigin(root: BasePart): Vector3
@@ -295,9 +400,10 @@ local function tryThrowBomb(player: Player)
 	end
 
 	playerCooldowns[player] = now
+	markBombCooldown(bombTool, bombData.Cooldown)
 
 	local origin = getThrowOrigin(root)
-	createThrownBomb(player, origin, root.CFrame.LookVector, bombData, bombName or bombTool.Name)
+	createThrownBomb(player, bombTool, origin, bombData, bombName or bombTool.Name)
 	TutorialService:HandleBombThrown(player)
 	AnalyticsFunnelsService:HandleMineBombThrown(player)
 end
@@ -317,31 +423,6 @@ function BombManager:Init()
 end
 
 function BombManager:Start()
-	RunService.Heartbeat:Connect(function()
-		for bombPart, state in pairs(activeBombs) do
-			if not bombPart.Parent then
-				activeBombs[bombPart] = nil
-				continue
-			end
-
-			local currentPosition = bombPart.Position
-			local travel = currentPosition - state.LastPosition
-			if travel.Magnitude > 0 then
-				local raycastParams = RaycastParams.new()
-				raycastParams.FilterType = Enum.RaycastFilterType.Exclude
-				raycastParams.FilterDescendantsInstances = {bombPart, state.Owner.Character}
-
-				local result = workspace:Raycast(state.LastPosition, travel, raycastParams)
-				if result and result.Instance == Terrain and result.Material ~= Enum.Material.Air then
-					explodeBomb(state.Owner, bombPart, result.Position, result.Material, state.Data, state.BombName)
-					continue
-				end
-			end
-
-			state.LastPosition = currentPosition
-		end
-	end)
-
 	Players.PlayerRemoving:Connect(function(player)
 		playerCooldowns[player] = nil
 	end)
