@@ -8,6 +8,8 @@ local MarketplaceService = game:GetService("MarketplaceService")
 local NumberFormatter = require(ReplicatedStorage.Modules.NumberFormatter)
 local NotificationManager = require(ReplicatedStorage.Modules.NotificationManager)
 local ProductConfigurations = require(ReplicatedStorage.Modules.ProductConfigurations)
+local RarityConfigurations = require(ReplicatedStorage.Modules.RarityConfigurations)
+local LuckyBlockConfiguration = require(ReplicatedStorage.Modules.LuckyBlockConfiguration)
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -21,8 +23,12 @@ local alertLabel = alert:WaitForChild("TimerLabel") :: TextLabel
 
 local dailyRewardsFrame = frames:WaitForChild("DailyRewards") :: Frame
 local mainFrame = dailyRewardsFrame:WaitForChild("MainFrame") :: Frame
-local rewardsGrid = mainFrame:WaitForChild("RewardsGrid") :: ScrollingFrame
-local template = rewardsGrid:WaitForChild("Template") :: ImageButton
+local titleFrame = dailyRewardsFrame:WaitForChild("Title") :: Frame
+local closeButton = titleFrame:WaitForChild("Close") :: ImageButton
+local day1To3Frame = mainFrame:WaitForChild("1-3Days") :: Frame
+local day4To6Frame = mainFrame:WaitForChild("4-6Days") :: Frame
+local day7Frame = mainFrame:WaitForChild("7Day") :: Frame
+local openAllButton = mainFrame:WaitForChild("OpenAll") :: ImageButton
 local buttonsFrame = mainFrame:WaitForChild("Buttons") :: Frame
 local skipAllButton = buttonsFrame:WaitForChild("SkipAll") :: ImageButton
 local skip1Button = buttonsFrame:WaitForChild("Skip1") :: ImageButton
@@ -33,33 +39,13 @@ local claimRewardRemote = dailyRewardsRemotes:WaitForChild("ClaimReward") :: Rem
 local statusUpdatedRemote = dailyRewardsRemotes:WaitForChild("StatusUpdated") :: RemoteEvent
 local reportAnalyticsIntent = ReplicatedStorage:WaitForChild("Events"):WaitForChild("ReportAnalyticsIntent") :: RemoteEvent
 
-local rewardButtons: { [number]: ImageButton } = {}
+type RewardSlot = Frame
+
+local MONEY_IMAGE = "rbxassetid://18209585783"
+
+local rewardSlots: { [number]: RewardSlot } = {}
 local currentStatus = nil
 local isClaiming = false
-
-local STATE_COLORS = {
-	Claim = {
-		Background = Color3.fromRGB(0, 200, 0),
-		Stroke = Color3.fromRGB(25, 120, 25),
-		Text = Color3.fromRGB(255, 255, 255),
-	},
-	Collected = {
-		Background = Color3.fromRGB(100, 100, 100),
-		Stroke = Color3.fromRGB(70, 70, 70),
-		Text = Color3.fromRGB(255, 255, 255),
-	},
-	Locked = {
-		Background = Color3.fromRGB(255, 255, 255),
-		Stroke = Color3.fromRGB(190, 190, 190),
-		Text = Color3.fromRGB(255, 255, 255),
-	},
-}
-
-local STATE_TEXT = {
-	Claim = "Claim!",
-	Collected = "Collected",
-	Locked = "Locked",
-}
 
 local function hasDay(dayMap, day: number): boolean
 	if type(dayMap) ~= "table" then
@@ -87,51 +73,188 @@ local function updateAlert(status)
 	alertLabel.Text = canClaim and "Claim!" or ""
 end
 
+local function getOrderedItems(container: Frame): { Frame }
+	local indexedItems = {}
+
+	for index, child in ipairs(container:GetChildren()) do
+		if child:IsA("Frame") and child.Name == "Item" then
+			table.insert(indexedItems, {
+				Item = child,
+				Index = index,
+			})
+		end
+	end
+
+	table.sort(indexedItems, function(a, b)
+		if a.Item.LayoutOrder == b.Item.LayoutOrder then
+			return a.Index < b.Index
+		end
+
+		return a.Item.LayoutOrder < b.Item.LayoutOrder
+	end)
+
+	local items = {}
+	for _, entry in ipairs(indexedItems) do
+		table.insert(items, entry.Item)
+	end
+
+	return items
+end
+
+local function getRarityStyle(rarity: string?): (string?, Color3?)
+	if type(rarity) ~= "string" or rarity == "" then
+		return nil, nil
+	end
+
+	local rarityKey = rarity
+	if rarityKey == "Mythic" then
+		rarityKey = "Mythical"
+	end
+
+	if rarityKey == "Brainrotgod" then
+		return "Brainrot God", Color3.fromRGB(255, 170, 0)
+	end
+
+	local rarityConfig = (RarityConfigurations :: any)[rarityKey]
+	if rarityConfig then
+		return rarityConfig.DisplayName or rarity, rarityConfig.TextColor
+	end
+
+	return rarity, Color3.fromRGB(255, 255, 255)
+end
+
 local function getRewardDisplay(reward)
 	if reward.Type == "Money" then
-		return "$" .. NumberFormatter.Format(reward.Amount), reward.Image or "", false
+		return {
+			name = "$" .. NumberFormatter.Format(reward.Amount or 0),
+			image = MONEY_IMAGE,
+			rarityText = nil,
+			rarityColor = nil,
+		}
 	end
 
 	if reward.Type == "RandomItemByRarity" then
-		local rarity = reward.Rarity or "Unknown"
-		return rarity .. " Brainrot", reward.Image or "", true
+		local rarityText, rarityColor = getRarityStyle(reward.Rarity)
+		return {
+			name = "Brainrot",
+			image = reward.Image or "",
+			rarityText = rarityText,
+			rarityColor = rarityColor,
+		}
+	end
+
+	if reward.Type == "LuckyBlock" then
+		local blockConfig = reward.LuckyBlockId and LuckyBlockConfiguration.GetBlockConfig(reward.LuckyBlockId) or nil
+		local rarityText, rarityColor = getRarityStyle(blockConfig and blockConfig.Rarity or reward.Rarity)
+		return {
+			name = blockConfig and blockConfig.DisplayName or reward.DisplayName or "Lucky Block",
+			image = reward.Image or (blockConfig and blockConfig.Image) or "",
+			rarityText = rarityText,
+			rarityColor = rarityColor,
+		}
 	end
 
 	if reward.Type == "Pickaxe" then
-		return reward.PickaxeName or "Bomb", reward.Image or "", false
+		return {
+			name = reward.PickaxeName or "Bomb",
+			image = reward.Image or "",
+			rarityText = nil,
+			rarityColor = nil,
+		}
 	end
 
-	return "Unknown", reward.Image or "", false
+	return {
+		name = reward.DisplayName or reward.Type or "Unknown",
+		image = reward.Image or "",
+		rarityText = nil,
+		rarityColor = nil,
+	}
 end
 
-local function updateButtonVisual(button: ImageButton, reward, state: string)
-	local frame = button:WaitForChild("Frame") :: Frame
-	local stroke = frame:FindFirstChild("UIStroke") :: UIStroke?
-	local rewardAmount = frame:WaitForChild("RewardAmount") :: TextLabel
-	local rewardImage = frame:WaitForChild("RewardImage") :: ImageLabel
-	local rewardTime = frame:WaitForChild("RewardTime") :: TextLabel
-	local claimLabel = frame:WaitForChild("Claim") :: TextLabel
-	local checkmark = frame:WaitForChild("Checkmark") :: ImageLabel
-	local questionMark = frame:WaitForChild("QuestionMark") :: ImageLabel
-	local colors = STATE_COLORS[state]
-	local amountText, image, showQuestionMark = getRewardDisplay(reward)
+local function updateRewardVisual(item: RewardSlot, reward, state: string)
+	local dayLabel = item:WaitForChild("DayLabel") :: TextLabel
+	local imageLabel = item:WaitForChild("ImageLabel") :: ImageLabel
+	local rewardName = imageLabel:WaitForChild("Name") :: TextLabel
+	local rareLabel = item:WaitForChild("Rare") :: TextLabel
+	local checkmark = item:WaitForChild("Checkmark") :: Frame
+	local claimmark = item:WaitForChild("Claimmark") :: Frame
+	local readymark = item:WaitForChild("Readymark") :: Frame
+	local display = getRewardDisplay(reward)
 
-	rewardAmount.Text = amountText
-	rewardImage.Image = image
-	rewardTime.Text = "Day " .. tostring(reward.Day)
-	claimLabel.Text = STATE_TEXT[state]
+	dayLabel.Text = "Day " .. tostring(reward.Day)
+	imageLabel.Image = display.image
+	rewardName.Text = display.name
+
 	checkmark.Visible = state == "Collected"
-	questionMark.Visible = showQuestionMark and state ~= "Collected"
-	button.AutoButtonColor = state == "Claim"
+	claimmark.Visible = state == "Claim"
+	readymark.Visible = state == "Locked"
 
-	frame.BackgroundColor3 = colors.Background
-	if stroke then
-		stroke.Color = colors.Stroke
+	if display.rarityText then
+		rareLabel.Visible = true
+		rareLabel.Text = display.rarityText
+		rareLabel.TextColor3 = display.rarityColor or Color3.fromRGB(255, 255, 255)
+	else
+		rareLabel.Visible = false
+	end
+end
+
+local function claimReward(day: number)
+	if isClaiming or not currentStatus then
+		return
 	end
 
-	rewardAmount.TextColor3 = colors.Text
-	rewardTime.TextColor3 = colors.Text
-	claimLabel.TextColor3 = colors.Text
+	if getButtonState(day, currentStatus) ~= "Claim" then
+		return
+	end
+
+	isClaiming = true
+	local result = claimRewardRemote:InvokeServer(day)
+	isClaiming = false
+
+	if result and result.Status then
+		currentStatus = result.Status
+	end
+
+	if result and result.Success and result.Status then
+		return result.Status
+	end
+
+	if result and result.Status then
+		NotificationManager.show("Daily reward is not available right now.", "Error")
+		return result.Status
+	end
+
+	NotificationManager.show("Daily reward is not available right now.", "Error")
+	return nil
+end
+
+local function claimAllAvailableRewards()
+	if not currentStatus or isClaiming then
+		return
+	end
+
+	local availableDays = {}
+	for _, reward in ipairs(currentStatus.Rewards or {}) do
+		if getButtonState(reward.Day, currentStatus) == "Claim" then
+			table.insert(availableDays, reward.Day)
+		end
+	end
+
+	table.sort(availableDays)
+
+	local latestStatus = currentStatus
+	for _, day in ipairs(availableDays) do
+		local status = claimReward(day)
+		if status then
+			latestStatus = status
+		else
+			break
+		end
+	end
+
+	if latestStatus then
+		currentStatus = latestStatus
+	end
 end
 
 local function renderRewards(status)
@@ -142,40 +265,11 @@ local function renderRewards(status)
 	currentStatus = status
 	updateAlert(status)
 
-	for day, reward in ipairs(status.Rewards) do
-		local button = rewardButtons[day]
-		if not button then
-			button = template:Clone()
-			button.Name = tostring(day)
-			button.Visible = true
-			button.Parent = rewardsGrid
-			rewardButtons[day] = button
-
-			button.MouseButton1Click:Connect(function()
-				if isClaiming or not currentStatus then
-					return
-				end
-
-				local state = getButtonState(day, currentStatus)
-				if state ~= "Claim" then
-					return
-				end
-
-				isClaiming = true
-				local result = claimRewardRemote:InvokeServer(day)
-				isClaiming = false
-
-				if result and result.Status then
-					renderRewards(result.Status)
-				end
-
-				if not (result and result.Success) then
-					NotificationManager.show("Daily reward is not available right now.", "Error")
-				end
-			end)
+	for _, reward in ipairs(status.Rewards or {}) do
+		local item = rewardSlots[reward.Day]
+		if item then
+			updateRewardVisual(item, reward, getButtonState(reward.Day, status))
 		end
-
-		updateButtonVisual(button, reward, getButtonState(day, status))
 	end
 end
 
@@ -198,6 +292,44 @@ local function promptDailyRewardProduct(productKey: string, missingMessage: stri
 	MarketplaceService:PromptProductPurchase(player, productId)
 end
 
+local function connectRewardSlot(day: number, item: RewardSlot)
+	rewardSlots[day] = item
+	item.Active = true
+
+	item.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			local status = claimReward(day)
+			if status then
+				renderRewards(status)
+			end
+		end
+	end)
+end
+
+local day1To3Items = getOrderedItems(day1To3Frame)
+for index, item in ipairs(day1To3Items) do
+	connectRewardSlot(index, item)
+end
+
+local day4To6Items = getOrderedItems(day4To6Frame)
+for index, item in ipairs(day4To6Items) do
+	connectRewardSlot(index + 3, item)
+end
+
+local day7Item = day7Frame:WaitForChild("Item") :: Frame
+connectRewardSlot(7, day7Item)
+
+openAllButton.MouseButton1Click:Connect(function()
+	claimAllAvailableRewards()
+	if currentStatus then
+		renderRewards(currentStatus)
+	end
+end)
+
+closeButton.MouseButton1Click:Connect(function()
+	dailyRewardsFrame.Visible = false
+end)
+
 skipAllButton.MouseButton1Click:Connect(function()
 	promptDailyRewardProduct("DailyRewardsSkipAll", "Daily Rewards Skip All product ID is not configured yet.")
 end)
@@ -206,9 +338,9 @@ skip1Button.MouseButton1Click:Connect(function()
 	promptDailyRewardProduct("DailyRewardsSkip1", "Daily Rewards Skip 1 product ID is not configured yet.")
 end)
 
-template.Visible = false
 updateAlert(nil)
 requestInitialStatus()
+
 statusUpdatedRemote.OnClientEvent:Connect(function(status)
 	renderRewards(status)
 end)
