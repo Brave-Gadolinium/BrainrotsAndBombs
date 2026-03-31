@@ -27,17 +27,10 @@ BombsConfigurations.Defaults = {
 }
 
 BombsConfigurations.MaterialResistance = {
-	[Enum.Material.Grass] = 1,
-	[Enum.Material.Ground] = 1,
-	[Enum.Material.Mud] = 1,
-	[Enum.Material.LeafyGrass] = 1,
 	[Enum.Material.Sand] = 2,
-	[Enum.Material.Sandstone] = 2,
-	[Enum.Material.Neon] = 2,
 	[Enum.Material.Slate] = 3,
 	[Enum.Material.Rock] = 3,
 	[Enum.Material.Basalt] = 4,
-	[Enum.Material.Granite] = 4,
 	[Enum.Material.CrackedLava] = 5,
 }
 
