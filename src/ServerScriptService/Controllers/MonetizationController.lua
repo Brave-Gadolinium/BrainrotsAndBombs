@@ -19,6 +19,7 @@ local ItemManager
 local PlayerController
 local PlaytimeRewardController
 local DailyRewardController
+local TutorialService
 local TRANSACTION_TYPES = AnalyticsEconomyService:GetTransactionTypes()
 
 local function getUpgradeCashEquivalent(config: any, currentValue: number): number
@@ -58,6 +59,17 @@ local function playPurchaseEffects(player: Player)
 		end
 		Debris:AddItem(confetti, 3)
 	end
+end
+
+local function getTutorialService()
+	if not TutorialService then
+		local tutorialModule = ServerScriptService.Modules:FindFirstChild("TutorialService")
+		if tutorialModule and tutorialModule:IsA("ModuleScript") then
+			TutorialService = require(tutorialModule)
+		end
+	end
+
+	return TutorialService
 end
 
 function MonetizationController.ProcessReceipt(receiptInfo)
@@ -102,6 +114,13 @@ function MonetizationController.ProcessReceipt(receiptInfo)
 
 			local UpgradesSystem = require(ServerScriptService.Modules.UpgradesSystem)
 			UpgradesSystem.UpdateClientUI(player)
+
+			if targetUpgradeConfig.HiddenInUI ~= true then
+				local tutorialService = getTutorialService()
+				if tutorialService then
+					tutorialService:HandlePostTutorialCharacterUpgradePurchased(player, targetUpgradeConfig.Id)
+				end
+			end
 
 			if notif then notif:FireClient(player, "+" .. upgradeAmount .. " " .. targetUpgradeConfig.DisplayName .. " Purchased!", "Success") end
 			playPurchaseEffects(player)

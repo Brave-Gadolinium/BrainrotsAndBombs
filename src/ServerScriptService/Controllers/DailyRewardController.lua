@@ -95,6 +95,17 @@ function DailyRewardController:PushStatus(player: Player)
 	return status
 end
 
+function DailyRewardController:PushStatusForTesting(player: Player)
+	local status = self:GetStatusForPlayer(player)
+	if status then
+		setPlayerAttributes(player, status)
+		if statusUpdatedRemote then
+			statusUpdatedRemote:FireClient(player, status)
+		end
+	end
+	return status
+end
+
 function DailyRewardController:ApplyReward(player: Player, day: number, reward)
 	if not reward then
 		return false, "MissingReward"

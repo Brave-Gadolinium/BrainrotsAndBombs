@@ -8,6 +8,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local UpgradesSystem = {}
 
 local PlayerController 
+local TutorialService
 local NumberFormatter = require(ReplicatedStorage.Modules.NumberFormatter)
 local UpgradesConfiguration = require(ReplicatedStorage.Modules.UpgradesConfigurations)
 local AnalyticsFunnelsService = require(ServerScriptService.Modules.AnalyticsFunnelsService)
@@ -37,6 +38,17 @@ local function getCompoundPrice(config: any, currentValue: number): number
 	end
 
 	return math.floor(totalPrice)
+end
+
+local function getTutorialService()
+	if not TutorialService then
+		local tutorialModule = ServerScriptService.Modules:FindFirstChild("TutorialService")
+		if tutorialModule and tutorialModule:IsA("ModuleScript") then
+			TutorialService = require(tutorialModule)
+		end
+	end
+
+	return TutorialService
 end
 
 function UpgradesSystem.PurchaseUpgrade(player: Player, upgradeId: string)
@@ -86,6 +98,13 @@ function UpgradesSystem.PurchaseUpgrade(player: Player, upgradeId: string)
 		AnalyticsFunnelsService:HandleStatUpgradePurchased(player, upgradeId)
 
 		UpgradesSystem.UpdateClientUI(player)
+
+		if config.HiddenInUI ~= true then
+			local tutorialService = getTutorialService()
+			if tutorialService then
+				tutorialService:HandlePostTutorialCharacterUpgradePurchased(player, upgradeId)
+			end
+		end
 	else
 		local Events = ReplicatedStorage:FindFirstChild("Events")
 		if Events and Events:FindFirstChild("ShowNotification") then 

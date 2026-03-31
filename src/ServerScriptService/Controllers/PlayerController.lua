@@ -58,6 +58,7 @@ type PlayerData = {
 	BaseLevel: number,
 	unlocked_slots: number,
 	OnboardingStep: number,
+	PostTutorialStage: number,
 	OnboardingFunnelStep: number,
 	AnalyticsFunnels: {[string]: any},
 	LastSaveTime: number,
@@ -80,6 +81,7 @@ local Template: PlayerData = {
 	BaseLevel = 0,
 	unlocked_slots = SlotUnlockConfigurations.StartSlots,
 	OnboardingStep = 1,
+	PostTutorialStage = 0,
 	OnboardingFunnelStep = 0,
 	AnalyticsFunnels = {
 		OneTime = {},
@@ -96,8 +98,11 @@ local Template: PlayerData = {
 	EquippedPickaxe = "Bomb 1",
 }
 
-for upgradeName, config in pairs(UpgradesConfiguration.Upgrades) do
-	Template[upgradeName] = config.DefaultValue
+for _, config in ipairs(UpgradesConfiguration.Upgrades) do
+	local statId = config.StatId
+	if type(statId) == "string" and statId ~= "" then
+		Template[statId] = math.max(0, tonumber(config.DefaultValue) or 0)
+	end
 end
 
 local GameProfileStore = ProfileStoreModule.New(DATA_VERSION, Template)
@@ -109,6 +114,32 @@ local deadPlayers: {[Player]: boolean} = {}
 local loadingInventory: {[Player]: boolean} = {}
 
 PlayerController.isShuttingDown = false
+
+local function deepCopy(value)
+	if type(value) ~= "table" then
+		return value
+	end
+
+	local clone = {}
+	for key, childValue in pairs(value) do
+		clone[deepCopy(key)] = deepCopy(childValue)
+	end
+
+	return clone
+end
+
+local function ensureUpgradeDefaults(data)
+	if type(data) ~= "table" then
+		return
+	end
+
+	for _, config in ipairs(UpgradesConfiguration.Upgrades) do
+		local statId = config.StatId
+		if type(statId) == "string" and statId ~= "" then
+			data[statId] = math.max(0, tonumber(data[statId]) or tonumber(config.DefaultValue) or 0)
+		end
+	end
+end
 
 local function playPurchaseEffects(player: Player)
 	local Events = ReplicatedStorage:FindFirstChild("Events")
@@ -514,6 +545,7 @@ function PlayerController:SetupSharedInstances()
 	createRemote("RemoteEvent", "ReportTutorialAction") 
 	createRemote("RemoteEvent", "ReportAnalyticsIntent")
 	createRemote("RemoteEvent", "TriggerUIEffect") 
+	createRemote("RemoteEvent", "ShowPostTutorialCompletion")
 end
 
 local function toolToData(tool: Tool): ItemData?
@@ -604,28 +636,54 @@ end
 -- ## UPDATED: LEADERSTATS (ONLY MONEY)
 -- =========================================================
 local function createLeaderstats(player: Player, data: PlayerData)
-	local ls = Instance.new("Folder")
-	ls.Name = "leaderstats"
-	ls.Parent = player
+	local ls = player:FindFirstChild("leaderstats")
+	if not ls or not ls:IsA("Folder") then
+		ls = Instance.new("Folder")
+		ls.Name = "leaderstats"
+		ls.Parent = player
+	end
 
-	-- Only Money is shown in leaderstats
-	local moneyVal = Instance.new("NumberValue")
-	moneyVal.Name = "Money"
-	moneyVal.Value = data.Money
-	moneyVal.Parent = ls
-	moneyVal.Changed:Connect(function(newVal) data.Money = newVal end)
+	local moneyVal = ls:FindFirstChild("Money")
+	if not moneyVal or not moneyVal:IsA("NumberValue") then
+		moneyVal = Instance.new("NumberValue")
+		moneyVal.Name = "Money"
+		moneyVal.Parent = ls
+	end
+	moneyVal.Value = tonumber(data.Money) or 0
+
+	if moneyVal:GetAttribute("ProfileBound") ~= true then
+		moneyVal:SetAttribute("ProfileBound", true)
+		moneyVal.Changed:Connect(function(newVal)
+			local profile = profiles[player]
+			if profile and profile.Data then
+				profile.Data.Money = newVal
+			end
+		end)
+	end
 
 	-- Save everything else as Player Attributes!
 	player:SetAttribute("Rebirths", data.Rebirths or 0)
+	player:SetAttribute("OnboardingStep", data.OnboardingStep or 1)
+	player:SetAttribute("PostTutorialStage", data.PostTutorialStage or 0)
+	player:SetAttribute("SpinNumber", data.SpinNumber or 0)
+	player:SetAttribute("LastDailySpin", data.LastDailySpin or 0)
+	player:SetAttribute("UnlockedSlots", SlotUnlockConfigurations.ClampSlots(tonumber(data.unlocked_slots) or SlotUnlockConfigurations.StartSlots))
 
 	-- Note: TimePlayed gets set continuously in the Start loop, but we can initialize it here:
 	player:SetAttribute("TimePlayed", data.TimePlayed or 0)
 	player:SetAttribute("TotalMoneyEarned", data.TotalMoneyEarned or 0)
 	player:SetAttribute("TotalBrainrotsCollected", data.TotalBrainrotsCollected or 0)
 
-	for upgradeName, config in pairs(UpgradesConfiguration.Upgrades) do
-		player:SetAttribute(upgradeName, data[upgradeName] or config.DefaultValue)
+	ensureUpgradeDefaults(data)
+	for _, config in ipairs(UpgradesConfiguration.Upgrades) do
+		local statId = config.StatId
+		if type(statId) == "string" and statId ~= "" then
+			player:SetAttribute(statId, math.max(0, tonumber(data[statId]) or tonumber(config.DefaultValue) or 0))
+		end
 	end
+
+	local claimedPacks = if type(data.ClaimedPacks) == "table" then data.ClaimedPacks else {}
+	player:SetAttribute("GroupRewardClaimed", claimedPacks["GroupItemReward"] == true)
 end
 
 local function onPlayerAdded(player: Player)
@@ -646,6 +704,7 @@ local function onPlayerAdded(player: Player)
 
 	profile:AddUserId(player.UserId)
 	profile:Reconcile() 
+	ensureUpgradeDefaults(profile.Data)
 
 	-- Wipe legacy data
 	if profile.Data.Speed then profile.Data.Speed = nil end
@@ -662,6 +721,7 @@ local function onPlayerAdded(player: Player)
 	end
 
 	player:SetAttribute("OnboardingStep", profile.Data.OnboardingStep or 1)
+	player:SetAttribute("PostTutorialStage", profile.Data.PostTutorialStage or 0)
 	player:SetAttribute("SpinNumber", profile.Data.SpinNumber or 0)
 	player:SetAttribute("LastDailySpin", profile.Data.LastDailySpin or 0)
 	player:SetAttribute("UnlockedSlots", SlotUnlockConfigurations.ClampSlots(profile.Data.unlocked_slots))
@@ -683,6 +743,7 @@ local function onPlayerAdded(player: Player)
 	if profile.Data.DiscoveredItems == nil then profile.Data.DiscoveredItems = {} end
 	if profile.Data.ClaimedPacks == nil then profile.Data.ClaimedPacks = {} end
 	if type(profile.Data.TotalBrainrotsCollected) ~= "number" then profile.Data.TotalBrainrotsCollected = 0 end
+	if type(profile.Data.PostTutorialStage) ~= "number" then profile.Data.PostTutorialStage = 0 end
 	if type(profile.Data.TotalMoneyEarned) ~= "number" then
 		profile.Data.TotalMoneyEarned = math.max(0, tonumber(profile.Data.Money) or 0)
 	end
@@ -774,6 +835,187 @@ function PlayerController:SyncSpinData(player: Player)
 		player:SetAttribute("SpinNumber", profile.Data.SpinNumber)
 		player:SetAttribute("LastDailySpin", profile.Data.LastDailySpin)
 	end
+end
+
+function PlayerController:CreateDefaultData()
+	local data = deepCopy(Template)
+	ensureUpgradeDefaults(data)
+	return data
+end
+
+function PlayerController:SyncPublicState(player: Player): boolean
+	local profile = profiles[player]
+	if not profile or not profile.Data then
+		return false
+	end
+
+	ensureUpgradeDefaults(profile.Data)
+	createLeaderstats(player, profile.Data)
+	return true
+end
+
+function PlayerController:ReloadInventoryFromProfile(player: Player): boolean
+	local profile = profiles[player]
+	if not profile then
+		return false
+	end
+
+	loadInventory(player, profile)
+	return true
+end
+
+function PlayerController:ClearInventoryForTesting(player: Player): boolean
+	local profile = profiles[player]
+	if not profile or not profile.Data then
+		return false
+	end
+
+	profile.Data.Inventory = {}
+
+	local function clearContainer(container: Instance?)
+		if not container then
+			return
+		end
+
+		for _, child in ipairs(container:GetChildren()) do
+			if child:IsA("Tool") and (child:GetAttribute("OriginalName") ~= nil or child:GetAttribute("IsLuckyBlock") == true) then
+				child:Destroy()
+			end
+		end
+	end
+
+	clearContainer(player:FindFirstChild("Backpack"))
+	clearContainer(player.Character)
+	clearContainer(player:FindFirstChild("StarterGear"))
+	syncInventoryData(player)
+
+	local pickaxeController = getPickaxeController()
+	if pickaxeController and pickaxeController.EnsureBombFirstSlot then
+		task.defer(function()
+			if player.Parent then
+				pickaxeController.EnsureBombFirstSlot(player)
+			end
+		end)
+	end
+
+	local events = ReplicatedStorage:FindFirstChild("Events")
+	local refresh = events and events:FindFirstChild("RefreshIndex")
+	if refresh then
+		refresh:FireClient(player)
+	end
+
+	return true
+end
+
+function PlayerController:SetMoneyForTesting(player: Player, amount: number): boolean
+	local profile = profiles[player]
+	if not profile or not profile.Data then
+		return false
+	end
+
+	profile.Data.Money = math.max(0, math.floor(tonumber(amount) or 0))
+	self:SyncPublicState(player)
+
+	return true
+end
+
+function PlayerController:SetTotalMoneyEarnedForTesting(player: Player, amount: number): boolean
+	local profile = profiles[player]
+	if not profile or not profile.Data then
+		return false
+	end
+
+	profile.Data.TotalMoneyEarned = math.max(0, math.floor(tonumber(amount) or 0))
+	player:SetAttribute("TotalMoneyEarned", profile.Data.TotalMoneyEarned)
+	return true
+end
+
+function PlayerController:SetSpinNumberForTesting(player: Player, amount: number): boolean
+	local profile = profiles[player]
+	if not profile or not profile.Data then
+		return false
+	end
+
+	profile.Data.SpinNumber = math.max(0, math.floor(tonumber(amount) or 0))
+	player:SetAttribute("SpinNumber", profile.Data.SpinNumber)
+	return true
+end
+
+function PlayerController:SetTimePlayedForTesting(player: Player, amount: number): boolean
+	local profile = profiles[player]
+	if not profile or not profile.Data then
+		return false
+	end
+
+	profile.Data.TimePlayed = math.max(0, math.floor(tonumber(amount) or 0))
+	player:SetAttribute("TimePlayed", profile.Data.TimePlayed)
+	return true
+end
+
+function PlayerController:SetTotalBrainrotsCollectedForTesting(player: Player, amount: number): boolean
+	local profile = profiles[player]
+	if not profile or not profile.Data then
+		return false
+	end
+
+	profile.Data.TotalBrainrotsCollected = math.max(0, math.floor(tonumber(amount) or 0))
+	player:SetAttribute("TotalBrainrotsCollected", profile.Data.TotalBrainrotsCollected)
+	return true
+end
+
+function PlayerController:SetUnlockedSlotsForTesting(player: Player, amount: number): boolean
+	local profile = profiles[player]
+	if not profile or not profile.Data then
+		return false
+	end
+
+	profile.Data.unlocked_slots = SlotUnlockConfigurations.ClampSlots(math.floor(tonumber(amount) or SlotUnlockConfigurations.StartSlots))
+	player:SetAttribute("UnlockedSlots", profile.Data.unlocked_slots)
+	return true
+end
+
+function PlayerController:SetUpgradeStatForTesting(player: Player, statId: string, value: number): boolean
+	local profile = profiles[player]
+	if not profile or not profile.Data or type(statId) ~= "string" or statId == "" then
+		return false
+	end
+
+	ensureUpgradeDefaults(profile.Data)
+	profile.Data[statId] = math.max(0, math.floor(tonumber(value) or 0))
+	player:SetAttribute(statId, profile.Data[statId])
+
+	if statId == "BonusSpeed" then
+		local character = player.Character
+		local hum = character and character:FindFirstChild("Humanoid")
+		if hum and hum:IsA("Humanoid") then
+			hum.WalkSpeed = 20 + profile.Data[statId]
+		end
+	end
+
+	return true
+end
+
+function PlayerController:ForceSaveProfile(player: Player): boolean
+	local profile = profiles[player]
+	if not profile then
+		return false
+	end
+
+	profile.Data.LastSaveTime = os.time()
+	profile:Save()
+	return true
+end
+
+function PlayerController:ResetProfileToDefaultForTesting(player: Player): boolean
+	local profile = profiles[player]
+	if not profile then
+		return false
+	end
+
+	profile.Data = self:CreateDefaultData()
+	self:SyncPublicState(player)
+	self:ReloadInventoryFromProfile(player)
+	return true
 end
 
 function PlayerController:OnTutorialStepChanged(player: Player, step: number)

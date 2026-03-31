@@ -289,19 +289,30 @@ function SlotManager.RefreshAllSlots(player: Player)
 	local plot = Workspace:FindFirstChild("Plot_" .. player.Name)
 	if not plot then return end
 
-	for floorName, floorSlots in pairs(profile.Data.Plots) do
-		local floorModel = plot:FindFirstChild(floorName)
-		local slotsFolder = floorModel and floorModel:FindFirstChild("Slots")
+	for _, floorModel in ipairs(plot:GetChildren()) do
+		if not floorModel:IsA("Model") then
+			continue
+		end
 
-		if slotsFolder then
-			for slotName, slotData in pairs(floorSlots) do
-				local slotModel = slotsFolder:FindFirstChild(slotName)
-				if slotModel then
-					if type(slotData.Stored) ~= "number" then
-						slotData.Stored = 0
-					end
-					updateSlotVisuals(slotModel, slotData, rebirths, isVip)
+		local floorName = floorModel.Name
+		local slotsFolder = floorModel:FindFirstChild("Slots")
+		if not slotsFolder then
+			continue
+		end
+
+		local floorSlots = profile.Data.Plots[floorName]
+		if type(floorSlots) ~= "table" then
+			floorSlots = {}
+		end
+
+		for _, slotModel in ipairs(slotsFolder:GetChildren()) do
+			if slotModel:IsA("Model") then
+				local slotData = floorSlots[slotModel.Name]
+				if type(slotData) == "table" and type(slotData.Stored) ~= "number" then
+					slotData.Stored = 0
 				end
+
+				updateSlotVisuals(slotModel, slotData, rebirths, isVip)
 			end
 		end
 	end

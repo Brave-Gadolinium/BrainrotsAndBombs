@@ -8,6 +8,7 @@ local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
 
+local PostTutorialConfiguration = require(ReplicatedStorage.Modules.PostTutorialConfiguration)
 local TutorialConfiguration = require(ReplicatedStorage.Modules.TutorialConfiguration)
 local FrameManager = require(ReplicatedStorage.Modules.FrameManager)
 
@@ -18,6 +19,7 @@ local Templates = ReplicatedStorage:WaitForChild("Templates")
 local BeamTemplate = Templates:WaitForChild("OnboardingBeam")
 local Events = ReplicatedStorage:WaitForChild("Events")
 local ReportTutorialAction = Events:WaitForChild("ReportTutorialAction") :: RemoteEvent
+local ShowPostTutorialCompletion = Events:WaitForChild("ShowPostTutorialCompletion") :: RemoteEvent
 local TeleportPlayer = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("Helper"):WaitForChild("TeleportPlayer") :: RemoteEvent
 
 local mainGui = playerGui:WaitForChild("GUI")
@@ -26,8 +28,20 @@ local hud = mainGui:WaitForChild("HUD")
 local notifFrame = frames:WaitForChild("Notifications")
 local instructionsLabel = notifFrame:WaitForChild("Instructions") :: TextLabel
 local pickaxesFrame = frames:WaitForChild("Pickaxes")
+local upgradesFrame = frames:WaitForChild("Upgrades")
+
+type QueuedPostTutorialCompletion = {
+	Text: string,
+	Duration: number,
+}
+
+type ActivePostTutorialCompletion = {
+	Text: string,
+	HideAt: number,
+}
 
 local currentStep = 0
+local currentPostTutorialStage = PostTutorialConfiguration.Stages.WaitingForCharacterMoney
 local activeBeam: Beam? = nil
 local activeAttachment0: Attachment? = nil
 local activeAttachment1: Attachment? = nil
@@ -46,6 +60,8 @@ local tutorialGuiPulseTween: Tween? = nil
 local tutorialGuiTargetStep: number? = nil
 local guiOverlaySuppressedUntil = 0
 local hiddenHudBackState: {[Instance]: {[string]: any}} = {}
+local postTutorialCompletionQueue: {QueuedPostTutorialCompletion} = {}
+local activePostTutorialCompletion: ActivePostTutorialCompletion? = nil
 
 local function getCharacter()
 	return player.Character or player.CharacterAdded:Wait()
@@ -162,6 +178,26 @@ local function clearAllTargets(keepText: boolean?)
 	if not keepText then
 		instructionsLabel.Visible = false
 	end
+end
+
+local function clearExpiredPostTutorialCompletion()
+	if activePostTutorialCompletion and tick() >= activePostTutorialCompletion.HideAt then
+		activePostTutorialCompletion = nil
+	end
+end
+
+local function getActivePostTutorialCompletion(canStartQueued: boolean): ActivePostTutorialCompletion?
+	clearExpiredPostTutorialCompletion()
+
+	if not activePostTutorialCompletion and canStartQueued and #postTutorialCompletionQueue > 0 then
+		local nextCompletion = table.remove(postTutorialCompletionQueue, 1)
+		activePostTutorialCompletion = {
+			Text = nextCompletion.Text,
+			HideAt = tick() + nextCompletion.Duration,
+		}
+	end
+
+	return activePostTutorialCompletion
 end
 
 local function reportAction(actionId: string)
@@ -803,6 +839,28 @@ local function findClosestTaggedPart(tagName: string): BasePart?
 	return closestPart
 end
 
+local function findUpgradeSlotsButtonTarget(): BasePart?
+	local plot = getPlayerPlot()
+	if not plot then
+		return nil
+	end
+
+	local upgradeSlotsButton = plot:FindFirstChild("UpgradeSlotsButton", true)
+	if not upgradeSlotsButton then
+		return nil
+	end
+
+	if upgradeSlotsButton:IsA("BasePart") then
+		return upgradeSlotsButton
+	end
+
+	if upgradeSlotsButton:IsA("Model") then
+		return upgradeSlotsButton.PrimaryPart or upgradeSlotsButton:FindFirstChildWhichIsA("BasePart", true)
+	end
+
+	return upgradeSlotsButton:FindFirstChildWhichIsA("BasePart", true)
+end
+
 local function resolveWorldTargetForStep(step: number): Instance?
 	if step == 1 then
 		return findTutorialMiningZonePart()
@@ -825,6 +883,32 @@ local function resolveWorldTargetForStep(step: number): Instance?
 	return nil
 end
 
+local function resolvePostTutorialWorldTarget(stage: number): BasePart?
+	if stage == PostTutorialConfiguration.Stages.PromptCharacterUpgrade then
+		if upgradesFrame.Visible then
+			return nil
+		end
+
+		return findClosestTaggedPart("UpgradePart")
+	elseif stage == PostTutorialConfiguration.Stages.PromptBaseUpgrade then
+		return findUpgradeSlotsButtonTarget()
+	end
+
+	return nil
+end
+
+local function getActivePostTutorialPromptStage(): number?
+	if currentPostTutorialStage == PostTutorialConfiguration.Stages.PromptCharacterUpgrade then
+		return currentPostTutorialStage
+	end
+
+	if currentPostTutorialStage == PostTutorialConfiguration.Stages.PromptBaseUpgrade then
+		return currentPostTutorialStage
+	end
+
+	return nil
+end
+
 local function applyStepPresentation()
 	local stepDefinition = TutorialConfiguration.Steps[currentStep]
 	if not stepDefinition then
@@ -833,42 +917,73 @@ local function applyStepPresentation()
 		return
 	end
 
-	if currentStep >= TutorialConfiguration.FinalStep then
+	if currentStep < TutorialConfiguration.FinalStep then
 		instructionsLabel.Text = stepDefinition.Text
-		instructionsLabel.Visible = tick() < finalMessageHideAt
-		hideTutorialGuiOverlay()
+		instructionsLabel.Visible = true
+
+		local newWorldTarget = resolveWorldTargetForStep(currentStep)
+		if newWorldTarget then
+			if currentStep == 3 then
+				if newWorldTarget:IsA("Model") then
+					local targetPart = newWorldTarget.PrimaryPart or newWorldTarget:FindFirstChildWhichIsA("BasePart")
+					if targetPart then
+						setupBeam(targetPart)
+					else
+						cleanupBeamVisuals()
+					end
+					setupHighlight(newWorldTarget)
+				else
+					cleanupWorldVisuals()
+				end
+			elseif newWorldTarget:IsA("BasePart") then
+				setupBeam(newWorldTarget)
+				cleanupHighlightVisual()
+			else
+				cleanupWorldVisuals()
+			end
+		else
+			cleanupWorldVisuals()
+		end
+
+		refreshTutorialGuiOverlay()
+		return
+	end
+
+	hideTutorialGuiOverlay()
+	clearExpiredPostTutorialCompletion()
+
+	if tick() < finalMessageHideAt then
+		instructionsLabel.Text = stepDefinition.Text
+		instructionsLabel.Visible = true
 		clearAllTargets(true)
 		return
 	end
 
-	instructionsLabel.Text = stepDefinition.Text
-	instructionsLabel.Visible = true
+	local postTutorialCompletion = getActivePostTutorialCompletion(true)
+	if postTutorialCompletion then
+		instructionsLabel.Text = postTutorialCompletion.Text
+		instructionsLabel.Visible = true
+		clearAllTargets(true)
+		return
+	end
 
-	local newWorldTarget = resolveWorldTargetForStep(currentStep)
-	if newWorldTarget then
-		if currentStep == 3 then
-			if newWorldTarget:IsA("Model") then
-				local targetPart = newWorldTarget.PrimaryPart or newWorldTarget:FindFirstChildWhichIsA("BasePart")
-				if targetPart then
-					setupBeam(targetPart)
-				else
-					cleanupBeamVisuals()
-				end
-				setupHighlight(newWorldTarget)
-			else
-				cleanupWorldVisuals()
-			end
-		elseif newWorldTarget:IsA("BasePart") then
+	local postTutorialPromptStage = getActivePostTutorialPromptStage()
+	if postTutorialPromptStage then
+		instructionsLabel.Text = PostTutorialConfiguration.PromptTexts[postTutorialPromptStage] or ""
+		instructionsLabel.Visible = true
+
+		local newWorldTarget = resolvePostTutorialWorldTarget(postTutorialPromptStage)
+		if newWorldTarget then
 			setupBeam(newWorldTarget)
 			cleanupHighlightVisual()
 		else
 			cleanupWorldVisuals()
 		end
-	else
-		cleanupWorldVisuals()
+
+		return
 	end
 
-	refreshTutorialGuiOverlay()
+	clearAllTargets()
 end
 
 local function refreshCurrentStep()
@@ -884,6 +999,13 @@ local function refreshCurrentStep()
 			finalMessageHideAt = tick() + 10
 		end
 		currentStep = clampedStep
+	end
+
+	local savedPostTutorialStage = player:GetAttribute("PostTutorialStage")
+	if type(savedPostTutorialStage) == "number" then
+		currentPostTutorialStage = PostTutorialConfiguration.ClampStage(savedPostTutorialStage)
+	else
+		currentPostTutorialStage = PostTutorialConfiguration.Stages.WaitingForCharacterMoney
 	end
 
 	applyStepPresentation()
@@ -910,6 +1032,13 @@ local function connectUiReporting()
 			end
 		end)
 	end
+
+	if not upgradesFrame:GetAttribute("TutorialConnected") then
+		upgradesFrame:SetAttribute("TutorialConnected", true)
+		upgradesFrame:GetPropertyChangedSignal("Visible"):Connect(function()
+			task.defer(refreshCurrentStep)
+		end)
+	end
 end
 
 task.spawn(function()
@@ -923,6 +1052,23 @@ end)
 
 player:GetAttributeChangedSignal("OnboardingStep"):Connect(function()
 	refreshCurrentStep()
+end)
+
+player:GetAttributeChangedSignal("PostTutorialStage"):Connect(function()
+	refreshCurrentStep()
+end)
+
+ShowPostTutorialCompletion.OnClientEvent:Connect(function(message: string, duration: number?)
+	if type(message) ~= "string" or message == "" then
+		return
+	end
+
+	table.insert(postTutorialCompletionQueue, {
+		Text = message,
+		Duration = math.max(0, tonumber(duration) or PostTutorialConfiguration.CompletionMessageDuration),
+	})
+
+	task.defer(refreshCurrentStep)
 end)
 
 player.CharacterAdded:Connect(function()

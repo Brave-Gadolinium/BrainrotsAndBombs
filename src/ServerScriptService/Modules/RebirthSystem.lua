@@ -233,7 +233,7 @@ function RebirthSystem.GetInfo(player: Player)
 	return cost, currentMult, nextMult
 end
 
-local function executeRebirth(player: Player, profile: any)
+local function executeRebirth(player: Player, profile: any, suppressAnalytics: boolean?)
 	profile.Data.Rebirths += 1
 	player:SetAttribute("Rebirths", profile.Data.Rebirths)
 
@@ -269,13 +269,44 @@ local function executeRebirth(player: Player, profile: any)
 		SlotManager.RefreshAllSlots(player)
 	end
 
-	AnalyticsFunnelsService:HandleRebirthSuccess(player, profile.Data.Rebirths)
+	if suppressAnalytics ~= true then
+		AnalyticsFunnelsService:HandleRebirthSuccess(player, profile.Data.Rebirths)
+	end
 end
 
 function RebirthSystem.ForceRebirth(player: Player)
 	local profile = PlayerController:GetProfile(player)
 	if profile then
 		executeRebirth(player, profile)
+	end
+end
+
+function RebirthSystem.ForceRebirthForTesting(player: Player): boolean
+	local profile = PlayerController:GetProfile(player)
+	if not profile then
+		return false
+	end
+
+	executeRebirth(player, profile, true)
+	return true
+end
+
+function RebirthSystem.SetRebirthsForTesting(player: Player, amount: number): boolean
+	local profile = PlayerController:GetProfile(player)
+	if not profile then
+		return false
+	end
+
+	profile.Data.Rebirths = math.max(0, math.floor(tonumber(amount) or 0))
+	player:SetAttribute("Rebirths", profile.Data.Rebirths)
+	RebirthSystem.RefreshUIForTesting(player)
+	return true
+end
+
+function RebirthSystem.RefreshUIForTesting(player: Player)
+	local updateEvent = getEventsFolder():FindFirstChild("UpdateRebirthUI")
+	if updateEvent and updateEvent:IsA("RemoteEvent") then
+		updateEvent:FireClient(player)
 	end
 end
 

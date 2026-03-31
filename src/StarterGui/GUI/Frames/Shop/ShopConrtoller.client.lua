@@ -13,6 +13,24 @@ local ShopFrame = script.Parent
 local MainFrame = ShopFrame:WaitForChild('MainFrame')
 local Content = MainFrame:WaitForChild("Content")
 
+local function waitForAnyChild(parent, childNames)
+	for _, childName in ipairs(childNames) do
+		local child = parent:FindFirstChild(childName)
+		if child then
+			return child
+		end
+	end
+
+	for _, childName in ipairs(childNames) do
+		local child = parent:WaitForChild(childName, 1)
+		if child then
+			return child
+		end
+	end
+
+	error(string.format("[ShopController] None of the expected children were found under %s: %s", parent:GetFullName(), table.concat(childNames, ", ")))
+end
+
 local HL_HackerLuckyblockFrame = Content:WaitForChild('HackerLuckyBlock')
 local HL_HackerButtons = HL_HackerLuckyblockFrame:WaitForChild('Content'):WaitForChild('Buttons')
 local HL_HackerButton1 = HL_HackerButtons:WaitForChild('Buy_1')
@@ -27,7 +45,7 @@ local SP_BuyButton = SP_Buttons:WaitForChild('Buy')
 
 local MP_Content = Content:WaitForChild('Moneys'):WaitForChild('Content')
 local MP_TinyPackFrame = MP_Content:WaitForChild('Tiny Pack')
-local MP_MegaPackFrame = MP_Content:WaitForChild('Mega  Pack')
+local MP_MegaPackFrame = waitForAnyChild(MP_Content, { 'Mega Pack', 'Mega  Pack' })
 local MP_UltimatePackFrame = MP_Content:WaitForChild('Ultimate Pack')
 
 local MP_TinyPackButton = MP_TinyPackFrame:WaitForChild('Button'):WaitForChild('Buy')

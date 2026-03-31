@@ -375,6 +375,80 @@ function PickaxeController.HandlePickaxeAction(player: Player, pickaxeName: stri
 	end
 end
 
+function PickaxeController.RefreshUI(player: Player)
+	local updateUIEvent = Events:FindFirstChild("UpdatePickaxeUI")
+	if updateUIEvent and updateUIEvent:IsA("RemoteEvent") then
+		updateUIEvent:FireClient(player)
+	end
+end
+
+function PickaxeController.UnlockPickaxeForTesting(player: Player, pickaxeName: string, equipAfter: boolean?): boolean
+	local profile = PlayerController:GetProfile(player)
+	if not profile or not BombsConfigurations.Bombs[pickaxeName] then
+		return false
+	end
+
+	if type(profile.Data.OwnedPickaxes) ~= "table" then
+		profile.Data.OwnedPickaxes = { ["Bomb 1"] = true }
+	end
+
+	profile.Data.OwnedPickaxes[pickaxeName] = true
+	if equipAfter == true then
+		profile.Data.EquippedPickaxe = pickaxeName
+		PickaxeController.EquipPickaxe(player, pickaxeName)
+	else
+		PickaxeController.EnsureBombFirstSlot(player)
+	end
+
+	PickaxeController.RefreshUI(player)
+	return true
+end
+
+function PickaxeController.UnlockAllPickaxesForTesting(player: Player, equipHighest: boolean?): boolean
+	local profile = PlayerController:GetProfile(player)
+	if not profile then
+		return false
+	end
+
+	if type(profile.Data.OwnedPickaxes) ~= "table" then
+		profile.Data.OwnedPickaxes = { ["Bomb 1"] = true }
+	end
+
+	local highestPickaxe = "Bomb 1"
+	local highestPrice = -1
+
+	for pickaxeName, config in pairs(BombsConfigurations.Bombs) do
+		profile.Data.OwnedPickaxes[pickaxeName] = true
+		if (config.Price or 0) > highestPrice then
+			highestPrice = config.Price or 0
+			highestPickaxe = pickaxeName
+		end
+	end
+
+	if equipHighest == true then
+		profile.Data.EquippedPickaxe = highestPickaxe
+		PickaxeController.EquipPickaxe(player, highestPickaxe)
+	else
+		PickaxeController.EnsureBombFirstSlot(player)
+	end
+
+	PickaxeController.RefreshUI(player)
+	return true
+end
+
+function PickaxeController.ResetPickaxesForTesting(player: Player): boolean
+	local profile = PlayerController:GetProfile(player)
+	if not profile then
+		return false
+	end
+
+	profile.Data.OwnedPickaxes = { ["Bomb 1"] = true }
+	profile.Data.EquippedPickaxe = "Bomb 1"
+	PickaxeController.EquipPickaxe(player, "Bomb 1")
+	PickaxeController.RefreshUI(player)
+	return true
+end
+
 -- [ INITIALIZATION ]
 function PickaxeController:Init(controllers)
 	PlayerController = controllers.PlayerController

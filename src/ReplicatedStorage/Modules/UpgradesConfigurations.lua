@@ -1,8 +1,6 @@
 --!strict
 -- LOCATION: ReplicatedStorage/Modules/UpgradesConfigurations
-
 local UpgradesConfigurations = {}
-
 UpgradesConfigurations.Upgrades = {
 	{
 		Id = "Range1",
@@ -41,11 +39,10 @@ UpgradesConfigurations.Upgrades = {
 		StatId = "BonusSpeed",
 		Amount = 1,
 		DisplayName = "+1 Walk Speed",
-		BaseCost = 500,
+		BaseCost = 10000,
 		PriceMultiplier = 1.5,
 		RobuxProductId = 3566653965,
 		ImageId = "rbxassetid://92215347682288"
 	}
 }
-
 return UpgradesConfigurations

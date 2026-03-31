@@ -23,6 +23,9 @@ local soundsFolder = Workspace:FindFirstChild("Sounds")
 local playerCooldowns = {}
 local activeBombs = {}
 local SPAWN_FUSE_DELAY = 0.5
+local BOMB_SPAWN_BACK_OFFSET = 1.25
+local BOMB_SPAWN_UP_OFFSET = 2
+local BOMB_SURFACE_CLEARANCE = 1.75
 
 local function markBombCooldown(tool: Tool, duration: number)
 	tool:SetAttribute("CooldownDuration", duration)
@@ -399,7 +402,27 @@ local function getThrowOrigin(root: BasePart): Vector3
 	local character = root.Parent
 	local rightHand = character and (character:FindFirstChild("RightHand") or character:FindFirstChild("Right Arm"))
 	local handPart = if rightHand and rightHand:IsA("BasePart") then rightHand else root
-	return handPart.Position + root.CFrame.LookVector
+	local lookVector = root.CFrame.LookVector
+	local desiredOrigin = handPart.Position - (lookVector * BOMB_SPAWN_BACK_OFFSET) + Vector3.new(0, BOMB_SPAWN_UP_OFFSET, 0)
+
+	local raycastParams = RaycastParams.new()
+	raycastParams.FilterType = Enum.RaycastFilterType.Exclude
+	raycastParams.FilterDescendantsInstances = { character }
+
+	local surfaceResult = Workspace:Raycast(
+		desiredOrigin + Vector3.new(0, 6, 0),
+		Vector3.new(0, -14, 0),
+		raycastParams
+	)
+
+	if surfaceResult then
+		local minAllowedY = surfaceResult.Position.Y + BOMB_SURFACE_CLEARANCE
+		if desiredOrigin.Y < minAllowedY then
+			desiredOrigin = Vector3.new(desiredOrigin.X, minAllowedY, desiredOrigin.Z)
+		end
+	end
+
+	return desiredOrigin
 end
 
 local function tryThrowBomb(player: Player)

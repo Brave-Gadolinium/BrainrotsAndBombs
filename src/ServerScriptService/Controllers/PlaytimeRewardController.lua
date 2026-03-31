@@ -74,6 +74,17 @@ function PlaytimeRewardController:PushStatus(player: Player)
 	return status
 end
 
+function PlaytimeRewardController:PushStatusForTesting(player: Player)
+	local status = self:GetStatusForPlayer(player)
+	if status then
+		setPlayerAttributes(player, status)
+	end
+	if status and statusUpdatedRemote then
+		statusUpdatedRemote:FireClient(player, status)
+	end
+	return status
+end
+
 function PlaytimeRewardController:HandleSkipAll(player: Player)
 	local profile = getProfile(player)
 	if not profile then

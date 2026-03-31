@@ -12,6 +12,8 @@ local PlayerController = require(ServerScriptService.Controllers.PlayerControlle
 local AnalyticsFunnelsService = require(ServerScriptService.Modules.AnalyticsFunnelsService)
 local AnalyticsEconomyService = require(ServerScriptService.Modules.AnalyticsEconomyService)
 local SpawnUtils = require(ServerScriptService.Modules.SpawnUtils)
+local PlotRuntimeBridge = require(ServerScriptService.Modules.PlotRuntimeBridge)
+local TutorialService = require(ServerScriptService.Modules.TutorialService)
 local NumberFormatter = require(ReplicatedStorage.Modules.NumberFormatter)
 local SlotUnlockConfigurations = require(ReplicatedStorage.Modules.SlotUnlockConfigurations)
 
@@ -362,6 +364,14 @@ local function updatePlotVisuals(player: Player)
 	updateUpgradeSlotsButton(player, plotModel)
 end
 
+function PlotManager.RefreshPlayerPlot(player: Player)
+	updatePlotVisuals(player)
+end
+
+PlotRuntimeBridge.SetRefreshHandler(function(player: Player)
+	PlotManager.RefreshPlayerPlot(player)
+end)
+
 local function purchaseSlotUpgrade(player: Player)
 	local profile = PlayerController:GetProfile(player)
 	if not profile then
@@ -402,6 +412,7 @@ local function purchaseSlotUpgrade(player: Player)
 		)
 		AnalyticsFunnelsService:HandleExtraSlotsBought(player, newUnlockedSlots)
 		updatePlotVisuals(player)
+		TutorialService:HandlePostTutorialBaseUpgradePurchased(player)
 
 		if notif then
 			notif:FireClient(player, "Unlocked slots: " .. tostring(newUnlockedSlots), "Success")
