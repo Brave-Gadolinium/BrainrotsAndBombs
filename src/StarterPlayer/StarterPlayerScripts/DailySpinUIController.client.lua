@@ -41,7 +41,9 @@ local hudWheelNotification = hudWheel:FindFirstChild("Notification") :: Frame
 local RequestSpin = ReplicatedStorage:WaitForChild("Events"):WaitForChild("RequestSpin") :: RemoteFunction
 local ReportAnalyticsIntent = ReplicatedStorage:WaitForChild("Events"):WaitForChild("ReportAnalyticsIntent") :: RemoteEvent
 local isSpinning = false
-local ONE_DAY_SECONDS = 86400
+local FREE_SPIN_COOLDOWN_SECONDS = math.max(0, tonumber(Config.FreeSpinCooldownSeconds) or (15 * 60))
+local DEFAULT_REWARD_IMAGE_COLOR = Color3.new(1, 1, 1)
+local ITEM_REWARD_IMAGE_COLOR = Color3.new(0, 0, 0)
 
 -- [ FORMATTING ]
 local function formatTime(seconds: number, showSeconds: boolean): string
@@ -60,7 +62,7 @@ end
 local function updateSpinButton()
 	local currentSpins = player:GetAttribute("SpinNumber") or 0
 	local lastFreeSpin = player:GetAttribute("LastDailySpin") or 0
-	local timeLeft = ONE_DAY_SECONDS - (os.time() - lastFreeSpin)
+	local timeLeft = FREE_SPIN_COOLDOWN_SECONDS - (os.time() - lastFreeSpin)
 
 	if hudWheelNotification then
 		if currentSpins > 0 or timeLeft <= 0 then
@@ -97,6 +99,23 @@ local function updateSpinButton()
 				hudWheelText.TextColor3 = Color3.fromRGB(255, 170, 0)
 			end
 		end
+	end
+end
+
+local function promptSpinProduct(productKey: string, missingMessage: string)
+	local productId = ProductConfigs.Products[productKey]
+	if type(productId) ~= "number" or productId <= 0 then
+		NotificationManager.show(missingMessage, "Error")
+		return
+	end
+
+	local success, err = pcall(function()
+		MarketplaceService:PromptProductPurchase(player, productId)
+	end)
+
+	if not success then
+		warn(`[DailySpinUIController] Failed to prompt {productKey}: {err}`)
+		NotificationManager.show("Purchase prompt is unavailable right now.", "Error")
 	end
 end
 
@@ -177,28 +196,42 @@ local function updateProductLabels()
 		local s1, p1 = pcall(function() return MarketplaceService:GetProductInfo(ProductConfigs.Products["SpinsX3"], Enum.InfoType.Product) end)
 		local s2, p2 = pcall(function() return MarketplaceService:GetProductInfo(ProductConfigs.Products["SpinsX9"], Enum.InfoType.Product) end)
 
+
+		print("Product Info - SpinsX3:", s1, p1)
+		print("Product Info - SpinsX9:", s2, p2)
+		
 		if s1 and robuxButton1 then
 			local btnText = robuxButton1:FindFirstChild("Text") :: TextLabel
 			local btnPrice = robuxButton1:FindFirstChild("Price") :: TextLabel
 			if btnText then btnText.Text = "+3 Spins!" end
-			if btnPrice then btnPrice.Text = "" .. p1.PriceInRobux end
+			if btnPrice then btnPrice.Text = "R$" .. p1.PriceInRobux end
 		end
 
 		if s2 and robuxButton2 then
 			local btnText = robuxButton2:FindFirstChild("Text") :: TextLabel
 			local btnPrice = robuxButton2:FindFirstChild("Price") :: TextLabel
 			if btnText then btnText.Text = "+9 Spins!" end
-			if btnPrice then btnPrice.Text = "" .. p2.PriceInRobux end
+			if btnPrice then btnPrice.Text = "R$" .. p2.PriceInRobux end
 		end
 	end)
 end
 
-if ProductConfigs.Products["SpinsX3"] then
-	robuxButton1.MouseButton1Click:Connect(function() MarketplaceService:PromptProductPurchase(player, ProductConfigs.Products["SpinsX3"]) end)
+if robuxButton1 then
+	robuxButton1.Active = true
+	robuxButton1.Selectable = true
 end
-if ProductConfigs.Products["SpinsX9"] then
-	robuxButton2.MouseButton1Click:Connect(function() MarketplaceService:PromptProductPurchase(player, ProductConfigs.Products["SpinsX9"]) end)
+if robuxButton2 then
+	robuxButton2.Active = true
+	robuxButton2.Selectable = true
 end
+
+robuxButton1.Activated:Connect(function()
+	promptSpinProduct("SpinsX3", "Spin x3 product ID is not configured yet.")
+end)
+
+robuxButton2.Activated:Connect(function()
+	promptSpinProduct("SpinsX9", "Spin x9 product ID is not configured yet.")
+end)
 
 -- [ INIT ]
 updateProductLabels()
@@ -232,7 +265,10 @@ for i = 1, 6 do
 			local itemData = ItemConfigs.GetItemData(data.Name)
 			if itemData then displayImage = itemData.ImageId end
 		end
-		if img then img.Image = displayImage or "" end
+		if img then
+			img.Image = displayImage or ""
+			img.ImageColor3 = if data.Type == "Item" then ITEM_REWARD_IMAGE_COLOR else DEFAULT_REWARD_IMAGE_COLOR
+		end
 
 		local chanceLabel = img and img:FindFirstChild("Chance") :: TextLabel
 		if chanceLabel and totalWeight > 0 then

@@ -13,7 +13,7 @@ local AnalyticsEconomyService = require(ServerScriptService.Modules.AnalyticsEco
 
 local DailySpinController = {}
 local RandomObj = Random.new()
-local ONE_DAY = 86400
+local FREE_SPIN_COOLDOWN_SECONDS = math.max(0, tonumber(Config.FreeSpinCooldownSeconds) or (15 * 60))
 local isProcessingSpin = {}
 local TRANSACTION_TYPES = AnalyticsEconomyService:GetTransactionTypes()
 
@@ -33,7 +33,7 @@ function DailySpinController:HandleSpin(player: Player)
 	local lastSpinTime = profile.Data.LastDailySpin or 0
 
 	-- 1. AUTO-INJECT FREE SPIN
-	if (currentTime - lastSpinTime) >= ONE_DAY then
+	if (currentTime - lastSpinTime) >= FREE_SPIN_COOLDOWN_SECONDS then
 		profile.Data.SpinNumber = (profile.Data.SpinNumber or 0) + 1
 		profile.Data.LastDailySpin = currentTime
 

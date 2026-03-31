@@ -16,6 +16,7 @@ local CarrySystem
 local remote: RemoteEvent
 local notificationEvent: RemoteEvent?
 local cashPopupEvent: RemoteEvent?
+local triggerUIEffectEvent: RemoteEvent?
 local zonesFolder = workspace:WaitForChild("Zones")
 local soundsFolder = Workspace:FindFirstChild("Sounds")
 
@@ -53,7 +54,7 @@ local function ensureBombRemote(): RemoteEvent
 	return placeBombRemote :: RemoteEvent
 end
 
-local function isInsideBombZone(position: Vector3): boolean
+local function getBombZonePart(position: Vector3): BasePart?
 	for _, zonePart in ipairs(zonesFolder:GetChildren()) do
 		if zonePart:IsA("BasePart") and zonePart.Name == "ZonePart" then
 			local relativePos = zonePart.CFrame:PointToObjectSpace(position)
@@ -64,12 +65,38 @@ local function isInsideBombZone(position: Vector3): boolean
 				and math.abs(relativePos.Z) <= size.Z / 2
 
 			if inside then
-				return true
+				return zonePart
 			end
 		end
 	end
 
-	return false
+	return nil
+end
+
+local function getTriggerUIEffectEvent(): RemoteEvent?
+	if triggerUIEffectEvent and triggerUIEffectEvent.Parent then
+		return triggerUIEffectEvent
+	end
+
+	local events = ReplicatedStorage:FindFirstChild("Events")
+	if not events then
+		return nil
+	end
+
+	local effectEvent = events:FindFirstChild("TriggerUIEffect")
+	if effectEvent and effectEvent:IsA("RemoteEvent") then
+		triggerUIEffectEvent = effectEvent
+		return effectEvent
+	end
+
+	return nil
+end
+
+local function fireOwnerCameraEffect(player: Player, effectName: string, ...)
+	local effectEvent = getTriggerUIEffectEvent()
+	if effectEvent then
+		effectEvent:FireClient(player, effectName, ...)
+	end
 end
 
 local function getEquippedBomb(player: Player)
@@ -201,10 +228,13 @@ local function explodeBomb(player: Player, bombPart: BasePart, hitPosition: Vect
 		return
 	end
 
+	local terrainRadius = BombsConfigurations.GetBlastRadius(bombData, material)
+	local playerBlastRadius = math.max(bombData.ExplosionRadius, terrainRadius, 4)
+	fireOwnerCameraEffect(player, "BombCameraBlast", hitPosition, playerBlastRadius)
+
 	activeBombs[bombPart] = nil
 	bombInstance:Destroy()
 
-	local terrainRadius = BombsConfigurations.GetBlastRadius(bombData, material)
 	if terrainRadius > 0 then
 		Terrain:FillBall(hitPosition, terrainRadius, Enum.Material.Air)
 	end
@@ -217,7 +247,6 @@ local function explodeBomb(player: Player, bombPart: BasePart, hitPosition: Vect
 
 	playExplosionSound(hitPosition)
 
-	local playerBlastRadius = math.max(bombData.ExplosionRadius, terrainRadius, 4)
 	affectPlayers(player, hitPosition, playerBlastRadius * 2, bombData.KnockbackForce)
 
 	if not PlayerController then
@@ -333,7 +362,7 @@ local function createThrownBombVisual(sourceTool: Tool, origin: Vector3): (BaseP
 	return rootPart, bombModel
 end
 
-local function createThrownBomb(player: Player, sourceTool: Tool, origin: Vector3, bombData, bombName: string)
+local function createThrownBomb(player: Player, sourceTool: Tool, origin: Vector3, bombData, bombName: string, zonePart: BasePart?)
 	local bomb, bombInstance = createThrownBombVisual(sourceTool, origin)
 	bomb:SetNetworkOwner(nil)
 	bomb.AssemblyLinearVelocity = Vector3.zero
@@ -344,6 +373,8 @@ local function createThrownBomb(player: Player, sourceTool: Tool, origin: Vector
 		BombName = bombName,
 		Instance = bombInstance,
 	}
+
+	fireOwnerCameraEffect(player, "BombCameraStart", bomb, zonePart, SPAWN_FUSE_DELAY)
 
 	task.delay(SPAWN_FUSE_DELAY, function()
 		local state = activeBombs[bomb]
@@ -382,7 +413,8 @@ local function tryThrowBomb(player: Player)
 		return
 	end
 
-	if not isInsideBombZone(root.Position) then
+	local zonePart = getBombZonePart(root.Position)
+	if not zonePart then
 		notifyPlayer(player, "You can throw bombs only inside the zone")
 		return
 	end
@@ -403,7 +435,7 @@ local function tryThrowBomb(player: Player)
 	markBombCooldown(bombTool, bombData.Cooldown)
 
 	local origin = getThrowOrigin(root)
-	createThrownBomb(player, bombTool, origin, bombData, bombName or bombTool.Name)
+	createThrownBomb(player, bombTool, origin, bombData, bombName or bombTool.Name, zonePart)
 	TutorialService:HandleBombThrown(player)
 	AnalyticsFunnelsService:HandleMineBombThrown(player)
 end
@@ -415,6 +447,7 @@ function BombManager:Init()
 	if events then
 		notificationEvent = events:FindFirstChild("ShowNotification") :: RemoteEvent
 		cashPopupEvent = events:FindFirstChild("ShowCashPopUp") :: RemoteEvent
+		triggerUIEffectEvent = events:FindFirstChild("TriggerUIEffect") :: RemoteEvent
 	end
 
 	remote.OnServerEvent:Connect(function(player)

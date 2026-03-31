@@ -7,6 +7,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local DailyRewardManager = require(script.Parent.DailyRewardManager)
 local PlaytimeRewardManager = require(script.Parent.PlaytimeRewardManager)
+local DailySpinConfiguration = require(ReplicatedStorage.Modules.DailySpinConfiguration)
 local TutorialConfiguration = require(ReplicatedStorage.Modules.TutorialConfiguration)
 local RebirthRequirements = require(ReplicatedStorage.Modules.RebirthRequirements)
 
@@ -23,7 +24,8 @@ local activeSessions: {[Player]: {[string]: SessionState}} = {}
 local initialized = false
 
 local TUTORIAL_VERSION = "ftue_v2"
-local ONE_DAY_SECONDS = 86400
+local SECONDS_PER_DAY = 86400
+local FREE_SPIN_COOLDOWN_SECONDS = math.max(0, tonumber(DailySpinConfiguration.FreeSpinCooldownSeconds) or (15 * 60))
 local OneTimeFunnels = {
 	TutorialFTUE = {
 		Kind = "Standard",
@@ -455,11 +457,11 @@ local function hasSpinAvailable(profile: any): boolean
 	end
 
 	local lastFreeSpin = tonumber(profile.Data.LastDailySpin) or 0
-	return (os.time() - lastFreeSpin) >= ONE_DAY_SECONDS
+	return (os.time() - lastFreeSpin) >= FREE_SPIN_COOLDOWN_SECONDS
 end
 
 local function getCurrentDayKey(): number
-	return math.floor(os.time() / ONE_DAY_SECONDS)
+	return math.floor(os.time() / SECONDS_PER_DAY)
 end
 
 local function getDailyRewardSessionId(player: Player): string
