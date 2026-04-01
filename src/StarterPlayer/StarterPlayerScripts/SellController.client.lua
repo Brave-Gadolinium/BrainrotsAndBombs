@@ -33,6 +33,48 @@ local isMenuOpen = false
 local SellGUI: BillboardGui? = nil -- Variable to hold the current GUI
 local activeSellPart: BasePart? = nil
 local lastInteraction = 0
+local OWN_BASE_INTERACTION_RADIUS = 100
+
+local function getPlayerPlot(): Model?
+	local plot = Workspace:FindFirstChild("Plot_" .. player.Name)
+	if plot and plot:IsA("Model") then
+		return plot
+	end
+
+	return nil
+end
+
+local function getPlotCenter(plot: Model): Vector3?
+	if plot.Parent then
+		return plot:GetPivot().Position
+	end
+
+	local spawnPart = plot:FindFirstChild("Spawn", true)
+	if spawnPart and spawnPart:IsA("BasePart") then
+		return spawnPart.Position
+	end
+
+	local primaryPart = plot.PrimaryPart or plot:FindFirstChildWhichIsA("BasePart", true)
+	if primaryPart then
+		return primaryPart.Position
+	end
+
+	return nil
+end
+
+local function isWithinOwnBaseInteractionRange(position: Vector3): boolean
+	local playerPlot = getPlayerPlot()
+	if not playerPlot then
+		return false
+	end
+
+	local plotCenter = getPlotCenter(playerPlot)
+	if not plotCenter then
+		return false
+	end
+
+	return (position - plotCenter).Magnitude <= OWN_BASE_INTERACTION_RADIUS
+end
 
 -- [ HELPER: Button Animation ]
 local function setupButtonAnimation(button: GuiButton)
@@ -164,7 +206,16 @@ local function connectSellPart(instance: Instance)
 		end
 
 		local humanoid = character:FindFirstChild("Humanoid")
+		local root = character:FindFirstChild("HumanoidRootPart")
 		if not humanoid or humanoid.Health <= 0 then
+			return
+		end
+
+		if not root or not root:IsA("BasePart") then
+			return
+		end
+
+		if not isWithinOwnBaseInteractionRange(root.Position) then
 			return
 		end
 

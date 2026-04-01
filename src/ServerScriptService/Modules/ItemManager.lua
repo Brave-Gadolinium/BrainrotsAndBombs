@@ -31,14 +31,40 @@ local Templates = ReplicatedStorage:WaitForChild("Templates")
 local InfoGUI_Template = Templates:WaitForChild("InfoGUI")
 local CollectionZones = Workspace:WaitForChild("Zones")
 
+local function ensureTimerFinishEvent(): BindableEvent
+	local remotesFolder = ReplicatedStorage:FindFirstChild("Remotes")
+	if not remotesFolder then
+		remotesFolder = Instance.new("Folder")
+		remotesFolder.Name = "Remotes"
+		remotesFolder.Parent = ReplicatedStorage
+	end
+
+	local timerFolder = remotesFolder:FindFirstChild("Timer")
+	if not timerFolder then
+		timerFolder = Instance.new("Folder")
+		timerFolder.Name = "Timer"
+		timerFolder.Parent = remotesFolder
+	end
+
+	local finishTime = timerFolder:FindFirstChild("FinishTime")
+	if not finishTime then
+		finishTime = Instance.new("BindableEvent")
+		finishTime.Name = "FinishTime"
+		finishTime.Parent = timerFolder
+	end
+
+	return finishTime :: BindableEvent
+end
+
 -- [ CONFIGURATION ]
 local INCOME_SCALING = Constants.INCOME_SCALING
-local RECYCLE_MIN_TIME = Constants.RECYCLE_MIN_TIME
-local RECYCLE_MAX_TIME = Constants.RECYCLE_MIN_TIME
 local RESPAWN_TIME = Constants.RESPAWN_TIME
-local DROPPED_LIFETIME = Constants.DROPPED_LIFETIME
+local SESSION_DURATION = Constants.SESSION_DURATION
+local SESSION_END_MESSAGE_DURATION = Constants.SESSION_END_MESSAGE_DURATION
 local MAX_ITEMS_PER_MINE = Constants.MAX_ITEMS_PER_MINE 
 local MIN_ITEM_SPACING = Constants.MIN_ITEM_SPACING
+local ZONE_ITEM_CAP_MULTIPLIERS = Constants.ZONE_ITEM_CAP_MULTIPLIERS or {}
+local FinishTime = ensureTimerFinishEvent()
 
 local SPAWNER_TIERS = Constants.SPAWNER_TIERS
 
@@ -49,6 +75,39 @@ local MUTATIONS = Constants.MUTATIONS
 local MUTATION_MULTIPLIERS = Constants.MUTATION_MULTIPLIERS
 
 local ItemManager = {}
+
+local function getRemainingSessionLifetime(): number
+	local remaining = tonumber(Workspace:GetAttribute("SessionTimeRemaining"))
+	if remaining and remaining > 0 then
+		return remaining
+	end
+
+	return SESSION_DURATION
+end
+
+local function isSpawnedWorldItem(instance: Instance): boolean
+	return instance:IsA("Model")
+		and instance.Name == "SpawnedItem"
+		and instance:GetAttribute("IsSpawnedItem") == true
+end
+
+local function clearSessionWorldItems()
+	for _, mineZonePart in ipairs(MinesFolder:GetChildren()) do
+		if mineZonePart:IsA("BasePart") then
+			for _, child in ipairs(mineZonePart:GetChildren()) do
+				if isSpawnedWorldItem(child) then
+					child:Destroy()
+				end
+			end
+		end
+	end
+
+	for _, child in ipairs(Workspace:GetChildren()) do
+		if isSpawnedWorldItem(child) then
+			child:Destroy()
+		end
+	end
+end
 
 -- [ HELPERS ]
 local function isInsideAnyZone(position: Vector3): boolean
@@ -94,6 +153,11 @@ local function getRarityFromTier(tierName: string): string
 		if roll <= current then return rarity end
 	end
 	return "Common"
+end
+
+local function getTargetItemCountForMine(mineZonePart: BasePart): number
+	local multiplier = tonumber(ZONE_ITEM_CAP_MULTIPLIERS[mineZonePart.Name]) or 1
+	return math.max(0, math.floor(MAX_ITEMS_PER_MINE * multiplier))
 end
 
 -- [ VISUALS & GUI ]
@@ -382,8 +446,8 @@ function ItemManager.SpawnInMine(mineZonePart: BasePart)
 		end
 	end
 
-	-- ## Calculates exactly how many are missing to hit MAX_ITEMS_PER_MINE ##
-	local itemsToSpawn = MAX_ITEMS_PER_MINE - currentItems
+	local targetItemCount = getTargetItemCountForMine(mineZonePart)
+	local itemsToSpawn = targetItemCount - currentItems
 	if itemsToSpawn <= 0 then return end
 
 	local tier = mineZonePart.Name 
@@ -417,7 +481,7 @@ function ItemManager.SpawnInMine(mineZonePart: BasePart)
 		newItem:SetAttribute("Mutation", mutationName)
 		newItem:SetAttribute("Level", 1)
 
-		newItem:SetAttribute("ExpiresAt", Workspace:GetServerTimeNow() + math.random(RECYCLE_MIN_TIME, RECYCLE_MAX_TIME))
+		newItem:SetAttribute("ExpiresAt", Workspace:GetServerTimeNow() + getRemainingSessionLifetime())
 
 		for _, part in ipairs(newItem:GetDescendants()) do
 			if part:IsA("BasePart") then
@@ -480,15 +544,6 @@ function ItemManager.SpawnInMine(mineZonePart: BasePart)
 				prompt.Triggered:Connect(function(player) onItemPickedUp(player, newItem) end)
 			end
 
-			local expireTime = newItem:GetAttribute("ExpiresAt")
-			local lifetime = expireTime - Workspace:GetServerTimeNow()
-
-			task.delay(lifetime, function()
-				if newItem and newItem.Parent then
-					newItem:Destroy()
-					ItemManager.SpawnInMine(mineZonePart)
-				end
-			end)
 		end
 	end
 end
@@ -510,7 +565,7 @@ function ItemManager.SpawnDroppedItem(itemName: string, mutation: string, rarity
 	newItem:SetAttribute("Rarity", rarity)
 	newItem:SetAttribute("Level", 1)
 
-	newItem:SetAttribute("ExpiresAt", Workspace:GetServerTimeNow() + DROPPED_LIFETIME)
+	newItem:SetAttribute("ExpiresAt", Workspace:GetServerTimeNow() + getRemainingSessionLifetime())
 
 	for _, part in ipairs(newItem:GetDescendants()) do
 		if part:IsA("BasePart") then
@@ -576,7 +631,7 @@ function ItemManager.SpawnDroppedItem(itemName: string, mutation: string, rarity
 		prompt.Triggered:Connect(function(player) onItemPickedUp(player, newItem) end)
 	end
 
-	local lifetime = DROPPED_LIFETIME
+	local lifetime = getRemainingSessionLifetime() + 0.1
 	task.delay(lifetime, function()
 		if newItem and newItem.Parent then newItem:Destroy() end
 	end)
@@ -593,6 +648,18 @@ function ItemManager.SpawnAllItems()
 end
 
 Players.PlayerAdded:Connect(function(player) if not RunService:IsRunning() then return end ItemManager.SpawnAllItems() end)
+
+FinishTime.Event:Connect(function()
+	clearSessionWorldItems()
+
+	task.delay(SESSION_END_MESSAGE_DURATION + 0.1, function()
+		if not RunService:IsRunning() then
+			return
+		end
+
+		ItemManager.SpawnAllItems()
+	end)
+end)
 
 -- =========================================================================
 -- ## GOLD EVENT GLOBAL LOOP ##

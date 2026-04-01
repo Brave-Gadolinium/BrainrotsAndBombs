@@ -31,6 +31,48 @@ local framesContainer = mainGui:WaitForChild("Frames")
 local hudGui = mainGui:WaitForChild("HUD") 
 
 local lastInteraction = 0
+local OWN_BASE_INTERACTION_RADIUS = 100
+
+local function getPlayerPlot(): Model?
+	local plot = Workspace:FindFirstChild("Plot_" .. player.Name)
+	if plot and plot:IsA("Model") then
+		return plot
+	end
+
+	return nil
+end
+
+local function getPlotCenter(plot: Model): Vector3?
+	if plot.Parent then
+		return plot:GetPivot().Position
+	end
+
+	local spawnPart = plot:FindFirstChild("Spawn", true)
+	if spawnPart and spawnPart:IsA("BasePart") then
+		return spawnPart.Position
+	end
+
+	local primaryPart = plot.PrimaryPart or plot:FindFirstChildWhichIsA("BasePart", true)
+	if primaryPart then
+		return primaryPart.Position
+	end
+
+	return nil
+end
+
+local function isWithinOwnBaseInteractionRange(position: Vector3): boolean
+	local playerPlot = getPlayerPlot()
+	if not playerPlot then
+		return false
+	end
+
+	local plotCenter = getPlotCenter(playerPlot)
+	if not plotCenter then
+		return false
+	end
+
+	return (position - plotCenter).Magnitude <= OWN_BASE_INTERACTION_RADIUS
+end
 
 -- [ HELPER: BUTTON ANIMATIONS ]
 local function setupButtonAnimation(button: GuiButton)
@@ -99,7 +141,8 @@ local function setupTaggedTouchTrigger(tagName: string, frameName: string)
 			local char = hit.Parent
 			if char == player.Character then
 				local hum = char:FindFirstChild("Humanoid")
-				if hum and hum.Health > 0 then
+				local root = char:FindFirstChild("HumanoidRootPart")
+				if hum and hum.Health > 0 and root and root:IsA("BasePart") and isWithinOwnBaseInteractionRange(root.Position) then
 					lastInteraction = now
 					openedByTouch = true
 					activeTouchPart = touchPart

@@ -566,10 +566,20 @@ end
 local function findBombBuyButton(): GuiButton?
 	local showcaseFrame = pickaxesFrame:FindFirstChild("Showcase")
 	if not showcaseFrame then
+		local scrollingFrame = pickaxesFrame:FindFirstChild("ScrollingFrame") or pickaxesFrame:FindFirstChild("Scrolling")
+		if scrollingFrame then
+			showcaseFrame = scrollingFrame:FindFirstChild("Showcase")
+		end
+	end
+	if not showcaseFrame then
 		return nil
 	end
 
-	local buyButton = showcaseFrame:FindFirstChild("Buy", true)
+	local buttonsFrame = showcaseFrame:FindFirstChild("Buttons")
+	local buyButton = buttonsFrame and buttonsFrame:FindFirstChild("Buy")
+	if not buyButton then
+		buyButton = showcaseFrame:FindFirstChild("Buy", true)
+	end
 	if buyButton and buyButton:IsA("GuiButton") then
 		return buyButton
 	end
@@ -823,11 +833,96 @@ local function findClosestTaggedPart(tagName: string): BasePart?
 		return nil
 	end
 
+	local PLOT_OWNERSHIP_FALLBACK_DISTANCE = 90
+
+	local function getOwningPlot(instance: Instance?): Model?
+		local current = instance
+		while current and current ~= Workspace do
+			if current:IsA("Model") and string.match(current.Name, "^Plot_.+") ~= nil then
+				return current
+			end
+			current = current.Parent
+		end
+
+		return nil
+	end
+
+	local function getPlotOwnerUserId(plot: Model): number?
+		local ownerUserId = tonumber(plot:GetAttribute("OwnerUserId"))
+		if ownerUserId ~= nil then
+			return ownerUserId
+		end
+
+		if plot.Name == ("Plot_" .. player.Name) then
+			return player.UserId
+		end
+
+		return nil
+	end
+
+	local function getPlotAnchorPosition(plot: Model): Vector3?
+		local spawnPart = plot:FindFirstChild("Spawn", true)
+		if spawnPart and spawnPart:IsA("BasePart") then
+			return spawnPart.Position
+		end
+
+		local primaryPart = plot.PrimaryPart or plot:FindFirstChildWhichIsA("BasePart", true)
+		if primaryPart then
+			return primaryPart.Position
+		end
+
+		return nil
+	end
+
+	local function getNearestPlotOwnerUserId(position: Vector3): number?
+		local closestOwnerUserId: number? = nil
+		local closestDistance = math.huge
+
+		for _, child in ipairs(Workspace:GetChildren()) do
+			if child:IsA("Model") and string.match(child.Name, "^Plot_.+") ~= nil then
+				local anchorPosition = getPlotAnchorPosition(child)
+				if anchorPosition then
+					local distance = (anchorPosition - position).Magnitude
+					if distance < closestDistance then
+						closestDistance = distance
+						closestOwnerUserId = getPlotOwnerUserId(child)
+					end
+				end
+			end
+		end
+
+		if closestDistance <= PLOT_OWNERSHIP_FALLBACK_DISTANCE then
+			return closestOwnerUserId
+		end
+
+		return nil
+	end
+
+	local function isOwnPlotPart(instance: Instance): boolean
+		local plot = getOwningPlot(instance)
+		if not plot then
+			if instance:IsA("BasePart") then
+				local nearestOwnerUserId = getNearestPlotOwnerUserId(instance.Position)
+				if nearestOwnerUserId ~= nil then
+					return nearestOwnerUserId == player.UserId
+				end
+			end
+			return true
+		end
+
+		local ownerUserId = getPlotOwnerUserId(plot)
+		if ownerUserId ~= nil then
+			return ownerUserId == player.UserId
+		end
+
+		return plot.Name == ("Plot_" .. player.Name)
+	end
+
 	local closestPart: BasePart? = nil
 	local closestDistance = math.huge
 
 	for _, instance in ipairs(CollectionService:GetTagged(tagName)) do
-		if instance:IsA("BasePart") then
+		if instance:IsA("BasePart") and isOwnPlotPart(instance) then
 			local distance = (instance.Position - rootPart.Position).Magnitude
 			if distance < closestDistance then
 				closestDistance = distance

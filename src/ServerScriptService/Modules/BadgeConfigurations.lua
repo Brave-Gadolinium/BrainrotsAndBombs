@@ -9,23 +9,23 @@ BadgeConfigurations.TutorialCompletionStep = 6
 
 BadgeConfigurations.Badges = {
 	WelcomeToTheMines = {
-		Id = 0,
+		Id = 763034410119939,
 		Name = "Welcome to the Mines!",
 	},
 	FirstBrainrot = {
-		Id = 0,
+		Id = 763034410119939,
 		Name = "First Brainrot!",
 	},
 	FirstProfit = {
-		Id = 0,
+		Id = 1421329464254960,
 		Name = "First Profit",
 	},
 	BombOwner = {
-		Id = 0,
+		Id = 2460613591106822,
 		Name = "Bomb Owner",
 	},
 	TutorialMaster = {
-		Id = 0,
+		Id = 377303429915772,
 		Name = "Tutorial Master",
 	},
 	BrainrotCollector = {

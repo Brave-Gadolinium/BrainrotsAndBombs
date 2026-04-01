@@ -264,6 +264,22 @@ end
 -- ## SCREEN EFFECTS (FOV POP) ##
 --================------------------------------------------------
 local isFovPopping = false
+local bombHitFovToken = 0
+local bombHitBaselineFov: number? = nil
+local activeBombHitTweens: {Tween} = {}
+
+local BOMB_HIT_FOV_BOOST = 16
+local BOMB_HIT_FOV_HOLD_TIME = 0.14
+local BOMB_HIT_FOV_IN_INFO = TweenInfo.new(0.08, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
+local BOMB_HIT_FOV_OUT_INFO = TweenInfo.new(0.42, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+
+local function clearBombHitTweens()
+	for _, tween in ipairs(activeBombHitTweens) do
+		tween:Cancel()
+	end
+
+	table.clear(activeBombHitTweens)
+end
 
 local function FOVPop()
 	local currentCam = Workspace.CurrentCamera
@@ -292,6 +308,66 @@ local function FOVPop()
 	end
 
 	isFovPopping = false
+end
+
+local function BombHitFOV()
+	local currentCam = Workspace.CurrentCamera
+	if not currentCam then
+		return
+	end
+
+	bombHitFovToken += 1
+	local token = bombHitFovToken
+
+	if bombHitBaselineFov == nil then
+		bombHitBaselineFov = currentCam.FieldOfView
+	end
+
+	local baselineFov = bombHitBaselineFov
+	clearBombHitTweens()
+
+	local punchTween = TweenService:Create(
+		currentCam,
+		BOMB_HIT_FOV_IN_INFO,
+		{FieldOfView = math.min(baselineFov + BOMB_HIT_FOV_BOOST, 100)}
+	)
+	table.insert(activeBombHitTweens, punchTween)
+	punchTween:Play()
+
+	task.delay(BOMB_HIT_FOV_HOLD_TIME, function()
+		if bombHitFovToken ~= token then
+			return
+		end
+
+		local cameraForReturn = Workspace.CurrentCamera
+		if not cameraForReturn then
+			clearBombHitTweens()
+			bombHitBaselineFov = nil
+			return
+		end
+
+		local returnTween = TweenService:Create(
+			cameraForReturn,
+			BOMB_HIT_FOV_OUT_INFO,
+			{FieldOfView = baselineFov}
+		)
+		table.insert(activeBombHitTweens, returnTween)
+		returnTween:Play()
+	end)
+
+	task.delay(BOMB_HIT_FOV_HOLD_TIME + BOMB_HIT_FOV_OUT_INFO.Time + 0.05, function()
+		if bombHitFovToken ~= token then
+			return
+		end
+
+		local cameraToRestore = Workspace.CurrentCamera
+		if cameraToRestore then
+			cameraToRestore.FieldOfView = baselineFov
+		end
+
+		clearBombHitTweens()
+		bombHitBaselineFov = nil
+	end)
 end
 
 --================------------------------------------------------
@@ -409,6 +485,8 @@ if triggerEvent then
 	triggerEvent.OnClientEvent:Connect(function(effectName, ...)
 		if effectName == "FOVPop" then
 			task.spawn(FOVPop) -- Spawned to prevent blocking
+		elseif effectName == "BombHitFOV" then
+			task.spawn(BombHitFOV)
 		end
 	end)
 end

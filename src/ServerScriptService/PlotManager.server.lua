@@ -16,6 +16,7 @@ local PlotRuntimeBridge = require(ServerScriptService.Modules.PlotRuntimeBridge)
 local TutorialService = require(ServerScriptService.Modules.TutorialService)
 local NumberFormatter = require(ReplicatedStorage.Modules.NumberFormatter)
 local SlotUnlockConfigurations = require(ReplicatedStorage.Modules.SlotUnlockConfigurations)
+local ProductConfigurations = require(ReplicatedStorage.Modules.ProductConfigurations)
 
 -- Assets
 local Templates = ReplicatedStorage:WaitForChild("Templates")
@@ -23,7 +24,7 @@ local PlotTemplate = Templates:WaitForChild("Plot")
 local PlotsFolder = Workspace:WaitForChild("Plots")
 local Events = ReplicatedStorage:WaitForChild("Events")
 
-local COLLECT_ALL_GAMEPASS = 3566654191
+local COLLECT_ALL_GAMEPASS = ProductConfigurations.GamePasses.CollectAll or 1783037385
 local COLLECT_ALL_COOLDOWN = 0.8
 local COLLECT_ALL_BUTTON_NAME = "CollectAll"
 local UPGRADE_SLOTS_BUTTON_NAME = "UpgradeSlotsButton"
@@ -445,6 +446,9 @@ local function spawnPlot(player: Player)
 
 	local newPlot = PlotTemplate:Clone()
 	newPlot.Name = "Plot_" .. player.Name
+	newPlot:SetAttribute("OwnerUserId", player.UserId)
+	newPlot:SetAttribute("OwnerName", player.Name)
+	newPlot:SetAttribute("OwnerDisplayName", player.DisplayName)
 	newPlot.Parent = Workspace
 	newPlot:SetPrimaryPartCFrame(locator.CFrame)
 

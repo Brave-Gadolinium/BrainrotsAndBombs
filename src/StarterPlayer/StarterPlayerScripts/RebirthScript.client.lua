@@ -411,13 +411,13 @@ local function refreshUI()
 	end
 
 	if state.canRebirth then
-		setStatusText("Rebirth!")
+		--setStatusText("Rebirth!")
 	elseif state.missingMoney > 0 and #state.missingItems > 0 then
-		setStatusText("Need cash + brainrots")
+		--setStatusText("Need cash + brainrots")
 	elseif state.missingMoney > 0 then
-		setStatusText("Need more cash")
+		--setStatusText("Need more cash")
 	else
-		setStatusText("Need brainrots")
+		--setStatusText("Need brainrots")
 	end
 end
 

@@ -10,6 +10,7 @@ local NumberFormatter = require(ReplicatedStorage.Modules.NumberFormatter)
 local ItemConfigurations = require(ReplicatedStorage.Modules.ItemConfigurations)
 local AnalyticsFunnelsService = require(ServerScriptService.Modules.AnalyticsFunnelsService)
 local AnalyticsEconomyService = require(ServerScriptService.Modules.AnalyticsEconomyService)
+local BadgeManager = require(ServerScriptService.Modules.BadgeManager)
 
 local DailySpinController = {}
 local RandomObj = Random.new()
@@ -20,6 +21,39 @@ local TRANSACTION_TYPES = AnalyticsEconomyService:GetTransactionTypes()
 -- Lazy loaded dependencies
 local PlayerController
 local ItemManager
+local PickaxeController
+
+local function cloneRewardData(rewardData)
+	local clone = {}
+	for key, value in pairs(rewardData) do
+		clone[key] = value
+	end
+	return clone
+end
+
+local function resolveRandomItemReward(rewardData)
+	local rarity = rewardData.Rarity
+	if type(rarity) ~= "string" or rarity == "" then
+		return nil
+	end
+
+	local items = ItemConfigurations.GetItemsByRarity(rarity)
+	if #items == 0 then
+		return nil
+	end
+
+	local selectedItemName = items[RandomObj:NextInteger(1, #items)]
+	local selectedItemData = ItemConfigurations.GetItemData(selectedItemName)
+	if not selectedItemData then
+		return nil
+	end
+
+	local resolvedReward = cloneRewardData(rewardData)
+	resolvedReward.Name = selectedItemName
+	resolvedReward.ResolvedDisplayName = selectedItemData.DisplayName or selectedItemName
+	resolvedReward.Image = selectedItemData.ImageId
+	return resolvedReward
+end
 
 function DailySpinController:HandleSpin(player: Player)
 	if isProcessingSpin[player.UserId] then 
@@ -68,6 +102,16 @@ function DailySpinController:HandleSpin(player: Player)
 	end
 
 	local rewardData = Config.Rewards[index]
+	local resolvedRewardData = rewardData
+	if rewardData.Type == "RandomItemByRarity" then
+		local randomReward = resolveRandomItemReward(rewardData)
+		if not randomReward then
+			isProcessingSpin[player.UserId] = nil
+			return {success = false}
+		end
+
+		resolvedRewardData = randomReward
+	end
 
 	-- 5. DEDUCT SPIN IMMEDIATELY (Prevents spamming/exploits)
 	profile.Data.SpinNumber -= 1
@@ -89,42 +133,63 @@ function DailySpinController:HandleSpin(player: Player)
 		if not player.Parent or not currentProfile then return end
 
 		-- APPLY REWARDS
-		if rewardData.Type == "Cash" then
+		if resolvedRewardData.Type == "Cash" then
 			AnalyticsEconomyService:FlushBombIncome(player)
-			PlayerController:AddMoney(player, rewardData.Amount)
-			AnalyticsEconomyService:LogCashSource(player, rewardData.Amount, TRANSACTION_TYPES.Gameplay, "WheelReward:Cash", {
+			PlayerController:AddMoney(player, resolvedRewardData.Amount)
+			AnalyticsEconomyService:LogCashSource(player, resolvedRewardData.Amount, TRANSACTION_TYPES.Gameplay, "WheelReward:Cash", {
 				feature = "daily_spin",
 				content_id = "WheelRewardCash",
 				context = "wheel",
 			})
-		elseif rewardData.Type == "Spins" then
-			currentProfile.Data.SpinNumber += rewardData.Amount
+		elseif resolvedRewardData.Type == "Spins" then
+			currentProfile.Data.SpinNumber += resolvedRewardData.Amount
 			player:SetAttribute("SpinNumber", currentProfile.Data.SpinNumber)
-			AnalyticsEconomyService:LogSpinSource(player, rewardData.Amount, TRANSACTION_TYPES.Gameplay, "WheelReward:Spins", {
+			AnalyticsEconomyService:LogSpinSource(player, resolvedRewardData.Amount, TRANSACTION_TYPES.Gameplay, "WheelReward:Spins", {
 				feature = "daily_spin",
 				content_id = "WheelRewardSpins",
 				context = "wheel",
 			})
-		elseif rewardData.Type == "Item" then
-			local itemData = ItemConfigurations.GetItemData(rewardData.Name)
+		elseif resolvedRewardData.Type == "Item" or resolvedRewardData.Type == "RandomItemByRarity" then
+			local itemData = ItemConfigurations.GetItemData(resolvedRewardData.Name)
 			local rarity = itemData and itemData.Rarity or "Common"
-			local tool = ItemManager.GiveItemToPlayer(player, rewardData.Name, "Normal", rarity, 1)
+			local tool = ItemManager.GiveItemToPlayer(player, resolvedRewardData.Name, "Normal", rarity, 1)
 			if tool then
 				AnalyticsEconomyService:LogItemValueSourceForItem(
 					player,
-					rewardData.Name,
+					resolvedRewardData.Name,
 					"Normal",
 					1,
 					TRANSACTION_TYPES.Gameplay,
-					`Item:{rewardData.Name}`,
+					`Item:{resolvedRewardData.Name}`,
 					{
 						feature = "daily_spin",
-						content_id = rewardData.Name,
+						content_id = resolvedRewardData.Name,
 						context = "wheel",
 						rarity = rarity,
 						mutation = "Normal",
 					}
 				)
+
+				BadgeManager:EvaluateBrainrotMilestones(player, rarity, nil)
+			end
+		elseif resolvedRewardData.Type == "Pickaxe" then
+			local pickaxeName = resolvedRewardData.PickaxeName
+			if type(pickaxeName) == "string" and pickaxeName ~= "" and PickaxeController then
+				if type(currentProfile.Data.OwnedPickaxes) ~= "table" then
+					currentProfile.Data.OwnedPickaxes = { ["Bomb 1"] = true }
+				end
+
+				currentProfile.Data.OwnedPickaxes[pickaxeName] = true
+				currentProfile.Data.EquippedPickaxe = pickaxeName
+				PickaxeController.EquipPickaxe(player, pickaxeName)
+				PickaxeController.RefreshUI(player)
+				BadgeManager:EvaluatePickaxeMilestones(player, pickaxeName)
+
+				AnalyticsEconomyService:LogEntitlementGranted(player, "PickaxeReward", pickaxeName, 0, {
+					feature = "daily_spin",
+					content_id = pickaxeName,
+					context = "wheel",
+				})
 			end
 		end
 
@@ -132,19 +197,24 @@ function DailySpinController:HandleSpin(player: Player)
 		local Events = ReplicatedStorage:FindFirstChild("Events")
 		local showNotif = Events and Events:FindFirstChild("ShowNotification")
 
-		if rewardData.Type == "Cash" then
+		if resolvedRewardData.Type == "Cash" then
 			local popUp = Events and Events:FindFirstChild("ShowCashPopUp")
-			if popUp then popUp:FireClient(player, rewardData.Amount) end
-			if showNotif then showNotif:FireClient(player, "You got $" .. NumberFormatter.Format(rewardData.Amount) .. " cash!", "Success") end
+			if popUp then popUp:FireClient(player, resolvedRewardData.Amount) end
+			if showNotif then showNotif:FireClient(player, "You got $" .. NumberFormatter.Format(resolvedRewardData.Amount) .. " cash!", "Success") end
 
-		elseif rewardData.Type == "Spins" then
-			if showNotif then showNotif:FireClient(player, "You got +" .. rewardData.Amount .. " spins!", "Success") end
+		elseif resolvedRewardData.Type == "Spins" then
+			if showNotif then showNotif:FireClient(player, "You got +" .. resolvedRewardData.Amount .. " spins!", "Success") end
 
-		elseif rewardData.Type == "Item" then
-			if showNotif then showNotif:FireClient(player, "You got a " .. rewardData.Name .. "!", "Success") end
+		elseif resolvedRewardData.Type == "Item" or resolvedRewardData.Type == "RandomItemByRarity" then
+			local itemData = ItemConfigurations.GetItemData(resolvedRewardData.Name)
+			local rewardName = itemData and itemData.DisplayName or resolvedRewardData.ResolvedDisplayName or resolvedRewardData.Name
+			if showNotif then showNotif:FireClient(player, "You got " .. rewardName .. "!", "Success") end
+		elseif resolvedRewardData.Type == "Pickaxe" then
+			local pickaxeName = resolvedRewardData.DisplayName or resolvedRewardData.PickaxeName or "Bomb reward"
+			if showNotif then showNotif:FireClient(player, "You got " .. pickaxeName .. "!", "Success") end
 		end
 
-		AnalyticsFunnelsService:HandleDailySpinRewardGranted(player, rewardData)
+		AnalyticsFunnelsService:HandleDailySpinRewardGranted(player, resolvedRewardData)
 	end)
 
 	return {success = true, Index = index}
@@ -153,6 +223,7 @@ end
 function DailySpinController:Init(controllers)
 	PlayerController = controllers.PlayerController
 	ItemManager = require(ServerScriptService.Modules.ItemManager)
+	PickaxeController = controllers.PickaxeController
 
 	local events = ReplicatedStorage:WaitForChild("Events")
 	local remote = events:FindFirstChild("RequestSpin") or Instance.new("RemoteFunction", events)

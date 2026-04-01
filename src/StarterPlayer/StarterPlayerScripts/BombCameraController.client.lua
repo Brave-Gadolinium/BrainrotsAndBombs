@@ -25,6 +25,7 @@ local MIN_DIRECTION_MAGNITUDE = 0.001
 local OCCLUSION_LIFT_STEP = 4
 local OCCLUSION_ATTEMPTS = 3
 local BLAST_GRACE_TIME = 0.75
+local EARLY_BLAST_REPLICATION_GRACE = 0.2
 
 type CameraBaseline = {
 	CameraType: Enum.CameraType,
@@ -401,9 +402,15 @@ local function bindMonitors(token: number)
 			return
 		end
 
-		if Workspace:GetServerTimeNow() < state.ExpectedBlastAt - 0.1 then
-			forceRestoreImmediate()
-		end
+		task.delay(EARLY_BLAST_REPLICATION_GRACE, function()
+			if token ~= state.Token or not state.IsActive or state.BlastReceived then
+				return
+			end
+
+			if Workspace:GetServerTimeNow() < state.ExpectedBlastAt - 0.1 then
+				forceRestoreImmediate()
+			end
+		end)
 	end)
 
 	state.MonitorConnection = RunService.Heartbeat:Connect(function()

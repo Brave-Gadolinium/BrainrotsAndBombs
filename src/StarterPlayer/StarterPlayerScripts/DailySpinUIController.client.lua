@@ -45,6 +45,10 @@ local FREE_SPIN_COOLDOWN_SECONDS = math.max(0, tonumber(Config.FreeSpinCooldownS
 local DEFAULT_REWARD_IMAGE_COLOR = Color3.new(1, 1, 1)
 local ITEM_REWARD_IMAGE_COLOR = Color3.new(0, 0, 0)
 
+local function isBrainrotReward(data): boolean
+	return data.Type == "Item" or data.Type == "RandomItemByRarity"
+end
+
 -- [ FORMATTING ]
 local function formatTime(seconds: number, showSeconds: boolean): string
 	local h = math.floor(seconds / 3600)
@@ -267,7 +271,7 @@ for i = 1, 6 do
 		end
 		if img then
 			img.Image = displayImage or ""
-			img.ImageColor3 = if data.Type == "Item" then ITEM_REWARD_IMAGE_COLOR else DEFAULT_REWARD_IMAGE_COLOR
+			img.ImageColor3 = if isBrainrotReward(data) then ITEM_REWARD_IMAGE_COLOR else DEFAULT_REWARD_IMAGE_COLOR
 		end
 
 		local chanceLabel = img and img:FindFirstChild("Chance") :: TextLabel
@@ -281,8 +285,12 @@ for i = 1, 6 do
 				slot.Text = "$" .. NumberFormatter.Format(data.Amount)
 			elseif data.Type == "Spins" and data.Amount then
 				slot.Text = "+" .. tostring(data.Amount) .. " Spins"
+			elseif data.Type == "Pickaxe" then
+				slot.Text = data.DisplayName or data.PickaxeName or ""
+			elseif data.Type == "RandomItemByRarity" then
+				slot.Text = data.DisplayName or ("Brainrot " .. tostring(data.Rarity or ""))
 			else
-				slot.Text = data.Name or ""
+				slot.Text = data.DisplayName or data.Name or ""
 			end
 		end
 	end

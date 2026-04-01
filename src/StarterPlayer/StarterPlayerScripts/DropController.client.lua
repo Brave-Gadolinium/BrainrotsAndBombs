@@ -22,6 +22,8 @@ local backButton = hud:WaitForChild("Back") :: GuiButton
 
 print("[DropController] Loaded (Smart Visibility Active)")
 
+backButton.Visible = true
+
 -- [ HELPERS ]
 local function isInsideAnyZone(position: Vector3): boolean
 	for _, zonePart in ipairs(Zones:GetChildren()) do
@@ -51,14 +53,12 @@ RunService.Heartbeat:Connect(function()
 	local char = player.Character
 	if not char then 
 		dropButton.Visible = false
-		backButton.Visible = false
 		return 
 	end
 
 	local root = char:FindFirstChild("HumanoidRootPart")
 	if not root then 
 		dropButton.Visible = false
-		backButton.Visible = false
 		return 
 	end
 
@@ -70,13 +70,4 @@ RunService.Heartbeat:Connect(function()
 	else
 		if dropButton.Visible then dropButton.Visible = false end
 	end
-	
-	if inside then
-		backButton.Visible = true
-	else
-		backButton.Visible = false
-	end
-	
-	
-
 end)

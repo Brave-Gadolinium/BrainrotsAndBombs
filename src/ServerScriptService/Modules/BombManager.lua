@@ -2,14 +2,18 @@ local BombManager = {}
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerScriptService = game:GetService("ServerScriptService")
 local Terrain = workspace.Terrain
 local Debris = game:GetService("Debris")
+local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 
 local BombsConfigurations = require(ReplicatedStorage.Modules.BombsConfigurations)
-local TutorialService = require(game.ServerScriptService.Modules.TutorialService)
-local AnalyticsFunnelsService = require(game.ServerScriptService.Modules.AnalyticsFunnelsService)
-local AnalyticsEconomyService = require(game.ServerScriptService.Modules.AnalyticsEconomyService)
+local TutorialService = require(ServerScriptService.Modules.TutorialService)
+local AnalyticsFunnelsService = require(ServerScriptService.Modules.AnalyticsFunnelsService)
+local AnalyticsEconomyService = require(ServerScriptService.Modules.AnalyticsEconomyService)
+local DepthLevelUtils = require(ServerScriptService.Modules.DepthLevelUtils)
+local Utils = require(ServerScriptService.Modules.Utils)
 
 local PlayerController
 local CarrySystem
@@ -22,10 +26,47 @@ local soundsFolder = Workspace:FindFirstChild("Sounds")
 
 local playerCooldowns = {}
 local activeBombs = {}
-local SPAWN_FUSE_DELAY = 0.5
-local BOMB_SPAWN_BACK_OFFSET = 1.25
+local BOMB_SPAWN_FORWARD_OFFSET = 1.65
 local BOMB_SPAWN_UP_OFFSET = 2
 local BOMB_SURFACE_CLEARANCE = 1.75
+local BOMB_RAGDOLL_DURATION = 1.35
+local BOMB_HIT_EFFECT_NAME = "BombHitFOV"
+local BOMB_THROW_SPEED_SCALE = 0.18
+local BOMB_MIN_THROW_SPEED = 12
+local BOMB_MAX_THROW_SPEED = 18
+local BOMB_MIN_THROW_DOWNWARD = 0.18
+local BOMB_MAX_THROW_DOWNWARD = 0.55
+local BOMB_MAX_FLIGHT_TIME = 5
+local BOMB_STUCK_EXPLODE_DELAY = 0.08
+local BOMB_TERRAIN_STICK_PADDING = 0.05
+local BOMB_TERRAIN_MONITOR_MIN_TRAVEL = 0.05
+local BOMB_TERRAIN_DOWNWARD_PROBE_PADDING = 0.35
+
+local function isFiniteNumber(value: number): boolean
+	return value == value and value > -math.huge and value < math.huge
+end
+
+local function isValidDirection(value: any): boolean
+	return typeof(value) == "Vector3"
+		and isFiniteNumber(value.X)
+		and isFiniteNumber(value.Y)
+		and isFiniteNumber(value.Z)
+		and value.Magnitude > 0.001
+end
+
+local function getHorizontalDirection(direction: Vector3, fallbackDirection: Vector3): Vector3
+	local flatDirection = Vector3.new(direction.X, 0, direction.Z)
+	if flatDirection.Magnitude > 0.001 then
+		return flatDirection.Unit
+	end
+
+	local fallbackFlatDirection = Vector3.new(fallbackDirection.X, 0, fallbackDirection.Z)
+	if fallbackFlatDirection.Magnitude > 0.001 then
+		return fallbackFlatDirection.Unit
+	end
+
+	return Vector3.new(0, 0, -1)
+end
 
 local function markBombCooldown(tool: Tool, duration: number)
 	tool:SetAttribute("CooldownDuration", duration)
@@ -95,7 +136,7 @@ local function getTriggerUIEffectEvent(): RemoteEvent?
 	return nil
 end
 
-local function fireOwnerCameraEffect(player: Player, effectName: string, ...)
+local function firePlayerUIEffect(player: Player, effectName: string, ...)
 	local effectEvent = getTriggerUIEffectEvent()
 	if effectEvent then
 		effectEvent:FireClient(player, effectName, ...)
@@ -185,6 +226,106 @@ local function playExplosionSound(position: Vector3)
 	Debris:AddItem(soundPart, math.max(sound.TimeLength, 2))
 end
 
+local function disconnectTerrainMonitor(state)
+	local monitorConnection = state and state.TerrainMonitorConnection
+	if monitorConnection then
+		monitorConnection:Disconnect()
+		state.TerrainMonitorConnection = nil
+	end
+end
+
+local function disconnectTouchMonitor(state)
+	local touchConnections = state and state.TouchConnections
+	if not touchConnections then
+		return
+	end
+
+	for _, connection in ipairs(touchConnections) do
+		connection:Disconnect()
+	end
+
+	state.TouchConnections = nil
+end
+
+local function setBombAnchored(bombInstance: Instance, anchored: boolean)
+	if bombInstance:IsA("BasePart") then
+		bombInstance.Anchored = anchored
+		return
+	end
+
+	for _, descendant in ipairs(bombInstance:GetDescendants()) do
+		if descendant:IsA("BasePart") then
+			descendant.Anchored = anchored
+		end
+	end
+end
+
+local function getTerrainStickPosition(bomb: BasePart, hitPosition: Vector3, hitNormal: Vector3): Vector3
+	local surfaceOffset = (math.max(bomb.Size.X, bomb.Size.Y, bomb.Size.Z) * 0.5) + BOMB_TERRAIN_STICK_PADDING
+	return hitPosition + (hitNormal * surfaceOffset)
+end
+
+local function isStickableInstance(instance: Instance?): boolean
+	if not instance then
+		return false
+	end
+
+	if instance == Terrain then
+		return true
+	end
+
+	if not instance:IsA("BasePart") then
+		return false
+	end
+
+	if instance:IsDescendantOf(zonesFolder) then
+		return false
+	end
+
+	return instance.Anchored and instance.CanCollide
+end
+
+local function isStickableHit(result: RaycastResult?): boolean
+	if not result then
+		return false
+	end
+
+	if result.Instance == Terrain then
+		return result.Material ~= Enum.Material.Air
+	end
+
+	return isStickableInstance(result.Instance)
+end
+
+local function findTerrainContact(
+	bomb: BasePart,
+	lastPosition: Vector3,
+	currentPosition: Vector3,
+	raycastParams: RaycastParams
+): RaycastResult?
+	local travel = currentPosition - lastPosition
+	if travel.Magnitude >= BOMB_TERRAIN_MONITOR_MIN_TRAVEL then
+		local travelHit = Workspace:Raycast(lastPosition, travel, raycastParams)
+		if isStickableHit(travelHit) then
+			return travelHit
+		end
+	end
+
+	local bombRadius = math.max(bomb.Size.X, bomb.Size.Y, bomb.Size.Z) * 0.5
+	local downwardOrigin = currentPosition + Vector3.new(0, bombRadius * 0.25, 0)
+	local downwardHit = Workspace:Raycast(
+		downwardOrigin,
+		Vector3.new(0, -(bombRadius + BOMB_TERRAIN_DOWNWARD_PROBE_PADDING), 0),
+		raycastParams
+	)
+
+	if isStickableHit(downwardHit) then
+		return downwardHit
+	end
+
+	return nil
+end
+
 local function affectPlayers(owner: Player, explosionPosition: Vector3, blastRadius: number, knockbackForce: number)
 	for _, plr in ipairs(Players:GetPlayers()) do
 		if plr == owner then
@@ -216,6 +357,8 @@ local function affectPlayers(owner: Player, explosionPosition: Vector3, blastRad
 		force.Parent = root
 		Debris:AddItem(force, 0.2)
 
+		Utils.ApplyTemporaryRagdoll(character, BOMB_RAGDOLL_DURATION)
+		firePlayerUIEffect(plr, BOMB_HIT_EFFECT_NAME)
 		dropCarriedBrainrot(plr)
 	end
 end
@@ -231,9 +374,20 @@ local function explodeBomb(player: Player, bombPart: BasePart, hitPosition: Vect
 		return
 	end
 
+	disconnectTerrainMonitor(state)
+	disconnectTouchMonitor(state)
+
 	local terrainRadius = BombsConfigurations.GetBlastRadius(bombData, material)
+	local impactDepthLevel = DepthLevelUtils.GetDepthLevelAtPosition(hitPosition)
+	local maxDepthLevel = tonumber(bombData.MaxDepthLevel) or math.huge
+	local isDepthBlocked = impactDepthLevel > 0 and impactDepthLevel > maxDepthLevel
+	if isDepthBlocked then
+		terrainRadius = 0
+		notifyPlayer(player, "Upgrade your bomb to destroy terrain on this layer")
+	end
+
 	local playerBlastRadius = math.max(bombData.ExplosionRadius, terrainRadius, 4)
-	fireOwnerCameraEffect(player, "BombCameraBlast", hitPosition, playerBlastRadius)
+	firePlayerUIEffect(player, "BombCameraBlast", hitPosition, playerBlastRadius)
 
 	activeBombs[bombPart] = nil
 	bombInstance:Destroy()
@@ -365,25 +519,248 @@ local function createThrownBombVisual(sourceTool: Tool, origin: Vector3): (BaseP
 	return rootPart, bombModel
 end
 
-local function createThrownBomb(player: Player, sourceTool: Tool, origin: Vector3, bombData, bombName: string, zonePart: BasePart?)
+local stickBombToTerrain: (bomb: BasePart, hitPosition: Vector3, hitNormal: Vector3) -> boolean
+
+local function scheduleStuckExplosion(bomb: BasePart)
+	task.delay(BOMB_STUCK_EXPLODE_DELAY, function()
+		local stuckState = activeBombs[bomb]
+		if not stuckState then
+			return
+		end
+
+		local hitPosition = bomb.Position
+		local material = getMaterialAtPosition(hitPosition)
+		explodeBomb(stuckState.Owner, bomb, hitPosition, material, stuckState.Data, stuckState.BombName)
+	end)
+end
+
+local function tryStickBombToSurface(bomb: BasePart, hitPosition: Vector3, hitNormal: Vector3): boolean
+	if not stickBombToTerrain(bomb, hitPosition, hitNormal) then
+		return false
+	end
+
+	scheduleStuckExplosion(bomb)
+	return true
+end
+
+stickBombToTerrain = function(bomb: BasePart, hitPosition: Vector3, hitNormal: Vector3): boolean
+	local state = activeBombs[bomb]
+	if not state or state.Stuck then
+		return false
+	end
+
+	local bombInstance = state.Instance
+	if not bombInstance or not bombInstance.Parent then
+		return false
+	end
+
+	state.Stuck = true
+	disconnectTerrainMonitor(state)
+	disconnectTouchMonitor(state)
+
+	bomb.AssemblyLinearVelocity = Vector3.zero
+	bomb.AssemblyAngularVelocity = Vector3.zero
+	setBombAnchored(bombInstance, true)
+
+	local stuckPosition = getTerrainStickPosition(bomb, hitPosition, hitNormal)
+	local currentCFrame = bomb.CFrame
+	local stuckCFrame = CFrame.fromMatrix(
+		stuckPosition,
+		currentCFrame.XVector,
+		currentCFrame.YVector,
+		currentCFrame.ZVector
+	)
+
+	if bombInstance:IsA("Model") then
+		bombInstance:PivotTo(stuckCFrame)
+	else
+		bombInstance.CFrame = stuckCFrame
+	end
+
+	return true
+end
+
+local function getApproximateSurfaceContact(bomb: BasePart, hitInstance: Instance): (Vector3, Vector3)
+	local bombRadius = math.max(bomb.Size.X, bomb.Size.Y, bomb.Size.Z) * 0.5
+
+	if hitInstance == Terrain then
+		local velocity = bomb.AssemblyLinearVelocity
+		local normal = if velocity.Magnitude > 0.1 then (-velocity.Unit) else Vector3.yAxis
+		if normal.Magnitude <= 0.001 then
+			normal = Vector3.yAxis
+		else
+			normal = normal.Unit
+		end
+
+		return bomb.Position - (normal * bombRadius), normal
+	end
+
+	if hitInstance:IsA("BasePart") then
+		local localPosition = hitInstance.CFrame:PointToObjectSpace(bomb.Position)
+		local halfSize = hitInstance.Size * 0.5
+		local xRatio = math.abs(localPosition.X) / math.max(halfSize.X, 0.001)
+		local yRatio = math.abs(localPosition.Y) / math.max(halfSize.Y, 0.001)
+		local zRatio = math.abs(localPosition.Z) / math.max(halfSize.Z, 0.001)
+
+		local normalLocal: Vector3
+		if yRatio >= xRatio and yRatio >= zRatio then
+			normalLocal = Vector3.new(0, if localPosition.Y >= 0 then 1 else -1, 0)
+		elseif xRatio >= zRatio then
+			normalLocal = Vector3.new(if localPosition.X >= 0 then 1 else -1, 0, 0)
+		else
+			normalLocal = Vector3.new(0, 0, if localPosition.Z >= 0 then 1 else -1)
+		end
+
+		local normalWorld = hitInstance.CFrame:VectorToWorldSpace(normalLocal).Unit
+		local contactPointLocal = Vector3.new(
+			normalLocal.X * halfSize.X,
+			normalLocal.Y * halfSize.Y,
+			normalLocal.Z * halfSize.Z
+		)
+		local hitPosition = hitInstance.CFrame:PointToWorldSpace(contactPointLocal)
+		return hitPosition, normalWorld
+	end
+
+	return bomb.Position - Vector3.new(0, bombRadius, 0), Vector3.yAxis
+end
+
+local function startBombTouchMonitor(bomb: BasePart, ownerCharacter: Model?)
+	local state = activeBombs[bomb]
+	if not state then
+		return
+	end
+
+	disconnectTouchMonitor(state)
+
+	local filterInstances = { state.Instance }
+	if ownerCharacter then
+		table.insert(filterInstances, ownerCharacter)
+	end
+
+	local raycastParams = RaycastParams.new()
+	raycastParams.FilterType = Enum.RaycastFilterType.Exclude
+	raycastParams.FilterDescendantsInstances = filterInstances
+
+	local touchConnections = {}
+	local partsToWatch = {}
+
+	if state.Instance:IsA("BasePart") then
+		table.insert(partsToWatch, state.Instance)
+	else
+		for _, descendant in ipairs(state.Instance:GetDescendants()) do
+			if descendant:IsA("BasePart") then
+				table.insert(partsToWatch, descendant)
+			end
+		end
+	end
+
+	local function handleTouch(hitInstance)
+		local currentState = activeBombs[bomb]
+		if currentState ~= state or currentState.Stuck or not hitInstance then
+			return
+		end
+
+		if not isStickableInstance(hitInstance) then
+			return
+		end
+
+		if currentState.Instance and hitInstance:IsDescendantOf(currentState.Instance) then
+			return
+		end
+
+		local currentPosition = bomb.Position
+		local lastPosition = currentState.LastPosition or currentPosition
+		local hitResult = findTerrainContact(bomb, lastPosition, currentPosition, raycastParams)
+		if hitResult and tryStickBombToSurface(bomb, hitResult.Position, hitResult.Normal) then
+			return
+		end
+
+		local fallbackPosition, fallbackNormal = getApproximateSurfaceContact(bomb, hitInstance)
+		tryStickBombToSurface(bomb, fallbackPosition, fallbackNormal)
+	end
+
+	for _, part in ipairs(partsToWatch) do
+		table.insert(touchConnections, part.Touched:Connect(handleTouch))
+	end
+
+	state.TouchConnections = touchConnections
+end
+
+local function startBombTerrainMonitor(bomb: BasePart, ownerCharacter: Model?)
+	local state = activeBombs[bomb]
+	if not state then
+		return
+	end
+
+	local filterInstances = { state.Instance }
+	if ownerCharacter then
+		table.insert(filterInstances, ownerCharacter)
+	end
+
+	local raycastParams = RaycastParams.new()
+	raycastParams.FilterType = Enum.RaycastFilterType.Exclude
+	raycastParams.FilterDescendantsInstances = filterInstances
+
+	state.LastPosition = bomb.Position
+	state.TerrainMonitorConnection = RunService.Heartbeat:Connect(function()
+		local currentState = activeBombs[bomb]
+		if currentState ~= state then
+			disconnectTerrainMonitor(state)
+			return
+		end
+
+		local bombInstance = currentState.Instance
+		if currentState.Stuck or not bomb.Parent or not bombInstance or not bombInstance.Parent then
+			disconnectTerrainMonitor(currentState)
+			return
+		end
+
+		local currentPosition = bomb.Position
+		local lastPosition = currentState.LastPosition or currentPosition
+
+		local hitResult = findTerrainContact(bomb, lastPosition, currentPosition, raycastParams)
+		if hitResult then
+			tryStickBombToSurface(bomb, hitResult.Position, hitResult.Normal)
+			return
+		end
+
+		currentState.LastPosition = currentPosition
+	end)
+end
+
+local function createThrownBomb(
+	player: Player,
+	sourceTool: Tool,
+	origin: Vector3,
+	throwVelocity: Vector3,
+	bombData,
+	bombName: string,
+	zonePart: BasePart?
+)
 	local bomb, bombInstance = createThrownBombVisual(sourceTool, origin)
 	bomb:SetNetworkOwner(nil)
-	bomb.AssemblyLinearVelocity = Vector3.zero
+	bomb.AssemblyLinearVelocity = throwVelocity
 
 	activeBombs[bomb] = {
 		Owner = player,
 		Data = bombData,
 		BombName = bombName,
 		Instance = bombInstance,
+		Stuck = false,
+		LastPosition = origin,
 	}
 
-	fireOwnerCameraEffect(player, "BombCameraStart", bomb, zonePart, SPAWN_FUSE_DELAY)
+	startBombTerrainMonitor(bomb, player.Character)
+	startBombTouchMonitor(bomb, player.Character)
+	firePlayerUIEffect(player, "BombCameraStart", bomb, zonePart, BOMB_MAX_FLIGHT_TIME)
 
-	task.delay(SPAWN_FUSE_DELAY, function()
+	task.delay(BOMB_MAX_FLIGHT_TIME, function()
 		local state = activeBombs[bomb]
 		if not state then
 			return
 		end
+
+		disconnectTerrainMonitor(state)
 
 		local bombStateInstance = state.Instance
 		if not bombStateInstance or not bombStateInstance.Parent then
@@ -398,12 +775,38 @@ local function createThrownBomb(player: Player, sourceTool: Tool, origin: Vector
 	Debris:AddItem(bombInstance, 8)
 end
 
-local function getThrowOrigin(root: BasePart): Vector3
+local function resolveThrowDirection(root: BasePart, cameraLookVector: Vector3?, bombData): (Vector3, Vector3)
+	local rootLookVector = root.CFrame.LookVector
+	local requestedDirection = if isValidDirection(cameraLookVector) then cameraLookVector.Unit else rootLookVector
+	local horizontalDirection = getHorizontalDirection(requestedDirection, rootLookVector)
+
+	local configuredArc = bombData and bombData.ThrowArc or BombsConfigurations.Defaults.ThrowArc
+	local configuredDownward = math.sin(math.rad(configuredArc))
+	local cameraDownward = math.max(0, -requestedDirection.Y)
+	local downwardAmount = math.clamp(
+		math.max(configuredDownward, cameraDownward),
+		BOMB_MIN_THROW_DOWNWARD,
+		BOMB_MAX_THROW_DOWNWARD
+	)
+
+	local throwDirection = Vector3.new(horizontalDirection.X, -downwardAmount, horizontalDirection.Z).Unit
+	return throwDirection, horizontalDirection
+end
+
+local function getThrowVelocity(root: BasePart, throwDirection: Vector3, bombData): Vector3
+	local configuredThrowSpeed = bombData and bombData.ThrowSpeed or BombsConfigurations.Defaults.ThrowSpeed
+	local throwSpeed = math.clamp(configuredThrowSpeed * BOMB_THROW_SPEED_SCALE, BOMB_MIN_THROW_SPEED, BOMB_MAX_THROW_SPEED)
+	local inheritedVelocity = root.AssemblyLinearVelocity * 0.15
+	return (throwDirection * throwSpeed) + inheritedVelocity
+end
+
+local function getThrowOrigin(root: BasePart, horizontalDirection: Vector3): Vector3
 	local character = root.Parent
 	local rightHand = character and (character:FindFirstChild("RightHand") or character:FindFirstChild("Right Arm"))
 	local handPart = if rightHand and rightHand:IsA("BasePart") then rightHand else root
-	local lookVector = root.CFrame.LookVector
-	local desiredOrigin = handPart.Position - (lookVector * BOMB_SPAWN_BACK_OFFSET) + Vector3.new(0, BOMB_SPAWN_UP_OFFSET, 0)
+	local desiredOrigin = handPart.Position
+		+ (horizontalDirection * BOMB_SPAWN_FORWARD_OFFSET)
+		+ Vector3.new(0, BOMB_SPAWN_UP_OFFSET, 0)
 
 	local raycastParams = RaycastParams.new()
 	raycastParams.FilterType = Enum.RaycastFilterType.Exclude
@@ -425,7 +828,7 @@ local function getThrowOrigin(root: BasePart): Vector3
 	return desiredOrigin
 end
 
-local function tryThrowBomb(player: Player)
+local function tryThrowBomb(player: Player, cameraLookVector: Vector3?)
 	local character = player.Character
 	if not character then
 		return
@@ -457,8 +860,10 @@ local function tryThrowBomb(player: Player)
 	playerCooldowns[player] = now
 	markBombCooldown(bombTool, bombData.Cooldown)
 
-	local origin = getThrowOrigin(root)
-	createThrownBomb(player, bombTool, origin, bombData, bombName or bombTool.Name, zonePart)
+	local throwDirection, horizontalDirection = resolveThrowDirection(root, cameraLookVector, bombData)
+	local origin = getThrowOrigin(root, horizontalDirection)
+	local throwVelocity = getThrowVelocity(root, throwDirection, bombData)
+	createThrownBomb(player, bombTool, origin, throwVelocity, bombData, bombName or bombTool.Name, zonePart)
 	TutorialService:HandleBombThrown(player)
 	AnalyticsFunnelsService:HandleMineBombThrown(player)
 end
@@ -473,8 +878,9 @@ function BombManager:Init()
 		triggerUIEffectEvent = events:FindFirstChild("TriggerUIEffect") :: RemoteEvent
 	end
 
-	remote.OnServerEvent:Connect(function(player)
-		tryThrowBomb(player)
+	remote.OnServerEvent:Connect(function(player, cameraLookVector)
+		local resolvedCameraLookVector = if typeof(cameraLookVector) == "Vector3" then cameraLookVector else nil
+		tryThrowBomb(player, resolvedCameraLookVector)
 	end)
 end
 

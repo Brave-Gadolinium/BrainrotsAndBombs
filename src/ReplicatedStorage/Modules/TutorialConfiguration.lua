@@ -24,7 +24,7 @@ TutorialConfiguration.Steps = {
 		TargetType = "WorldBrainrot",
 	},
 	[4] = {
-		Text = "Go to the surface",
+		Text = "Back to base",
 		TargetType = "GuiBackButton",
 	},
 	[5] = {

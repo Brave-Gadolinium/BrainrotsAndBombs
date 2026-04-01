@@ -200,7 +200,9 @@ function BombToolClient.Bind(tool: Tool)
 			end
 		end)
 
-		remote:FireServer()
+		local camera = Workspace.CurrentCamera
+		local cameraLookVector = if camera then camera.CFrame.LookVector else nil
+		remote:FireServer(cameraLookVector)
 	end)
 
 	tool:GetAttributeChangedSignal("CooldownEndsAt"):Connect(function()

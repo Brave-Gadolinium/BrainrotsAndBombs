@@ -9,6 +9,9 @@ local Constants = {
 	SESSION_WARNING_THRESHOLD = 10,
 	MAX_ITEMS_PER_MINE = 45,
 	MIN_ITEM_SPACING = 4.5,
+	ZONE_ITEM_CAP_MULTIPLIERS = {
+		["Zone1"] = 4,
+	},
 	
 	SPAWNER_TIERS = {
 		["Zone1"] = { Common = 75, Uncommon = 25 },

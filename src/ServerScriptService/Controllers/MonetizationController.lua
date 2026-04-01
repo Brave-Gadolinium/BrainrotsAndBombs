@@ -11,6 +11,7 @@ local MonetizationController = {}
 
 local ProductConfigurations = require(ReplicatedStorage.Modules.ProductConfigurations)
 local UpgradesConfiguration = require(ReplicatedStorage.Modules.UpgradesConfigurations)
+local BombsConfigurations = require(ReplicatedStorage.Modules.BombsConfigurations)
 local ItemConfigurations = require(ReplicatedStorage.Modules.ItemConfigurations)
 local AnalyticsFunnelsService = require(ServerScriptService.Modules.AnalyticsFunnelsService)
 local AnalyticsEconomyService = require(ServerScriptService.Modules.AnalyticsEconomyService)
@@ -20,6 +21,7 @@ local PlayerController
 local PlaytimeRewardController
 local DailyRewardController
 local TutorialService
+local PickaxeController
 local TRANSACTION_TYPES = AnalyticsEconomyService:GetTransactionTypes()
 
 local function getUpgradeCashEquivalent(config: any, currentValue: number): number
@@ -126,6 +128,34 @@ function MonetizationController.ProcessReceipt(receiptInfo)
 			playPurchaseEffects(player)
 			return Enum.ProductPurchaseDecision.PurchaseGranted
 		end
+		return Enum.ProductPurchaseDecision.NotProcessedYet
+	end
+
+	local targetBombName = nil
+	local targetBombConfig = nil
+	for bombName, config in pairs(BombsConfigurations.Bombs) do
+		if config.RobuxProductId == productId then
+			targetBombName = bombName
+			targetBombConfig = config
+			break
+		end
+	end
+
+	if targetBombName and targetBombConfig then
+		if not PickaxeController then PickaxeController = require(ServerScriptService.Controllers.PickaxeController) end
+
+		local success = PickaxeController.GrantPickaxeByRobux(player, targetBombName)
+		if success then
+			AnalyticsEconomyService:LogEntitlementGranted(player, "RobuxBomb", targetBombName, targetBombConfig.Price or 0, {
+				feature = "bomb_shop",
+				content_id = targetBombName,
+				context = "robux_shop",
+				bomb_tier = tonumber(targetBombName:match("(%d+)")) or 0,
+			})
+			playPurchaseEffects(player)
+			return Enum.ProductPurchaseDecision.PurchaseGranted
+		end
+
 		return Enum.ProductPurchaseDecision.NotProcessedYet
 	end
 

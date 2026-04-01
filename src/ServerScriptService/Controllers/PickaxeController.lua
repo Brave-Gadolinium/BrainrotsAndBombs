@@ -24,6 +24,56 @@ local NotificationEvent: RemoteEvent
 local GetDataFunction: RemoteFunction
 local equipStates: {[Player]: {InProgress: boolean, PendingPickaxe: string?}} = {}
 
+local function getSortedPickaxes()
+	local sortedPickaxes = {}
+	for id, data in pairs(BombsConfigurations.Bombs) do
+		table.insert(sortedPickaxes, {Id = id, Price = data.Price or 0})
+	end
+	table.sort(sortedPickaxes, function(a, b)
+		if a.Price == b.Price then
+			return a.Id < b.Id
+		end
+		return a.Price < b.Price
+	end)
+	return sortedPickaxes
+end
+
+local function getBombTier(pickaxeName: string): number
+	return tonumber(pickaxeName:match("(%d+)")) or 0
+end
+
+local function ensureOwnedPickaxes(profile)
+	if type(profile.Data.OwnedPickaxes) ~= "table" then
+		profile.Data.OwnedPickaxes = { ["Bomb 1"] = true }
+	end
+end
+
+local function getNextPickaxeToBuy(profile): string?
+	ensureOwnedPickaxes(profile)
+
+	for _, pickaxe in ipairs(getSortedPickaxes()) do
+		if not profile.Data.OwnedPickaxes[pickaxe.Id] then
+			return pickaxe.Id
+		end
+	end
+
+	return nil
+end
+
+local function unlockPickaxeThroughTier(profile, targetPickaxeName: string)
+	local targetTier = getBombTier(targetPickaxeName)
+	if targetTier <= 0 then
+		return
+	end
+
+	ensureOwnedPickaxes(profile)
+	for pickaxeName in pairs(BombsConfigurations.Bombs) do
+		if getBombTier(pickaxeName) <= targetTier then
+			profile.Data.OwnedPickaxes[pickaxeName] = true
+		end
+	end
+end
+
 -- [ CORE LOGIC ]
 local function clearExistingPickaxes(player: Player)
 	local character = player.Character
@@ -293,9 +343,7 @@ function PickaxeController.HandlePickaxeAction(player: Player, pickaxeName: stri
 	local profile = PlayerController:GetProfile(player)
 	if not profile then return end
 
-	if type(profile.Data.OwnedPickaxes) ~= "table" then
-		profile.Data.OwnedPickaxes = { ["Bomb 1"] = true }
-	end
+	ensureOwnedPickaxes(profile)
 	if not profile.Data.EquippedPickaxe then
 		profile.Data.EquippedPickaxe = "Bomb 1"
 	end
@@ -303,24 +351,19 @@ function PickaxeController.HandlePickaxeAction(player: Player, pickaxeName: stri
 	local config = BombsConfigurations.Bombs[pickaxeName]
 	if not config then return end
 
-	-- Enforce Linear Progression
-	local sortedPickaxes = {}
-	for id, data in pairs(BombsConfigurations.Bombs) do
-		table.insert(sortedPickaxes, {Id = id, Price = data.Price})
-	end
-	table.sort(sortedPickaxes, function(a, b) return a.Price < b.Price end)
-
-	local nextToBuy = nil
-	for _, p in ipairs(sortedPickaxes) do
-		if not profile.Data.OwnedPickaxes[p.Id] then
-			nextToBuy = p.Id
-			break
-		end
-	end
+	local nextToBuy = getNextPickaxeToBuy(profile)
 
 	local isOwned = profile.Data.OwnedPickaxes[pickaxeName]
 
 	if isOwned then
+		if profile.Data.EquippedPickaxe ~= pickaxeName then
+			profile.Data.EquippedPickaxe = pickaxeName
+			PickaxeController.EquipPickaxe(player, pickaxeName)
+			if NotificationEvent then
+				NotificationEvent:FireClient(player, "Equipped " .. config.DisplayName .. "!", "Success")
+			end
+			PickaxeController.RefreshUI(player)
+		end
 		return
 	end
 
@@ -332,7 +375,7 @@ function PickaxeController.HandlePickaxeAction(player: Player, pickaxeName: stri
 		end
 		AnalyticsFunnelsService:LogFailure(player, "locked_by_previous_bomb", {
 			zone = "base",
-			target_bomb_tier = tonumber(pickaxeName:match("(%d+)")) or 0,
+			target_bomb_tier = getBombTier(pickaxeName),
 		})
 		return
 	end
@@ -347,7 +390,7 @@ function PickaxeController.HandlePickaxeAction(player: Player, pickaxeName: stri
 			feature = "bomb_shop",
 			content_id = pickaxeName,
 			context = "shop",
-			bomb_tier = tonumber(pickaxeName:match("(%d+)")) or 0,
+			bomb_tier = getBombTier(pickaxeName),
 		})
 
 		PickaxeController.EquipPickaxe(player, pickaxeName)
@@ -370,9 +413,32 @@ function PickaxeController.HandlePickaxeAction(player: Player, pickaxeName: stri
 		AnalyticsFunnelsService:LogFailure(player, "not_enough_money", {
 			zone = "base",
 			funnel = "BombShopConversion",
-			target_bomb_tier = tonumber(pickaxeName:match("(%d+)")) or 0,
+			target_bomb_tier = getBombTier(pickaxeName),
 		})
 	end
+end
+
+function PickaxeController.GrantPickaxeByRobux(player: Player, pickaxeName: string): boolean
+	local profile = PlayerController:GetProfile(player)
+	local config = BombsConfigurations.Bombs[pickaxeName]
+	if not profile or not config then
+		return false
+	end
+
+	ensureOwnedPickaxes(profile)
+	unlockPickaxeThroughTier(profile, pickaxeName)
+	profile.Data.EquippedPickaxe = pickaxeName
+
+	PickaxeController.EquipPickaxe(player, pickaxeName)
+	BadgeManager:EvaluatePickaxeMilestones(player, pickaxeName)
+	TutorialService:HandleBombPurchased(player)
+	PickaxeController.RefreshUI(player)
+
+	if NotificationEvent then
+		NotificationEvent:FireClient(player, "Purchased " .. config.DisplayName .. "!", "Success")
+	end
+
+	return true
 end
 
 function PickaxeController.RefreshUI(player: Player)
@@ -494,15 +560,20 @@ function PickaxeController:Init(controllers)
 		end
 
 		if profile then
-			-- Guarantee the data table exists just in case
-			if type(profile.Data.OwnedPickaxes) ~= "table" then
-				profile.Data.OwnedPickaxes = { ["Bomb 1"] = true }
-			end
-			return profile.Data.OwnedPickaxes
+			ensureOwnedPickaxes(profile)
+			return {
+				OwnedPickaxes = profile.Data.OwnedPickaxes,
+				EquippedPickaxe = profile.Data.EquippedPickaxe or "Bomb 1",
+				NextPickaxeToBuy = getNextPickaxeToBuy(profile),
+			}
 		end
 
 		-- Ultimate fallback if data utterly fails to load
-		return { ["Bomb 1"] = true }
+		return {
+			OwnedPickaxes = { ["Bomb 1"] = true },
+			EquippedPickaxe = "Bomb 1",
+			NextPickaxeToBuy = "Bomb 2",
+		}
 	end
 
 	print("[PickaxeController] Initialized")

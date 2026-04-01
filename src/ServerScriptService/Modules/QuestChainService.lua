@@ -8,6 +8,8 @@ local NumberFormatter = require(ReplicatedStorage.Modules.NumberFormatter)
 local SlotUnlockConfigurations = require(ReplicatedStorage.Modules.SlotUnlockConfigurations)
 local QuestChainConfiguration = require(ReplicatedStorage.Modules.QuestChainConfiguration)
 local BombsConfigurations = require(ReplicatedStorage.Modules.BombsConfigurations)
+local UpgradesConfigurations = require(ReplicatedStorage.Modules.UpgradesConfigurations)
+local DepthLevelUtils = require(ServerScriptService.Modules.DepthLevelUtils)
 
 type QuestDefinition = {
 	Id: string,
@@ -57,6 +59,21 @@ local function getQuestList(): {QuestDefinition}
 	return quests
 end
 
+local function getUpgradeDefaultValue(statId: string): number
+	for _, config in ipairs(UpgradesConfigurations.Upgrades) do
+		if config.StatId == statId then
+			return math.max(0, tonumber(config.DefaultValue) or 0)
+		end
+	end
+
+	return 0
+end
+
+local function getUpgradeCount(profile, statId: string): number
+	local currentValue = math.max(0, tonumber(profile.Data[statId]) or 0)
+	return math.max(0, currentValue - getUpgradeDefaultValue(statId))
+end
+
 local function getNotificationRemote(): RemoteEvent?
 	local eventsFolder = ReplicatedStorage:FindFirstChild("Events")
 	local remote = eventsFolder and eventsFolder:FindFirstChild("ShowNotification")
@@ -104,36 +121,13 @@ local function getBestBombTier(profile): number
 end
 
 local function getCurrentDepthLevel(player: Player): number
-	local minesFolder = Workspace:FindFirstChild("Mines")
-	if not minesFolder then
-		return 0
-	end
-
 	local character = player.Character
 	local root = character and character:FindFirstChild("HumanoidRootPart")
 	if not root or not root:IsA("BasePart") then
 		return 0
 	end
 
-	local highestLevel = 0
-	for _, child in ipairs(minesFolder:GetChildren()) do
-		if child:IsA("BasePart") then
-			local zoneLevel = tonumber(string.match(child.Name, "^Zone(%d+)$"))
-			if zoneLevel then
-				local relativePos = child.CFrame:PointToObjectSpace(root.Position)
-				local halfSize = child.Size * 0.5
-				local inside = math.abs(relativePos.X) <= halfSize.X
-					and math.abs(relativePos.Y) <= halfSize.Y
-					and math.abs(relativePos.Z) <= halfSize.Z
-
-				if inside and zoneLevel > highestLevel then
-					highestLevel = zoneLevel
-				end
-			end
-		end
-	end
-
-	return highestLevel
+	return DepthLevelUtils.GetDepthLevelAtPosition(root.Position)
 end
 
 local function getMaxDepthLevelReached(player: Player, profile): number
@@ -187,19 +181,19 @@ local function getProgress(player: Player, profile, questType: string): number
 	end
 
 	if questType == "walk_speed_upgrade_count" then
-		return math.max(0, tonumber(profile.Data.BonusSpeed) or 0)
+		return getUpgradeCount(profile, "BonusSpeed")
 	end
 
 	if questType == "speed_upgrade_count" then
-		return math.max(0, tonumber(profile.Data.BonusSpeed) or 0)
+		return getUpgradeCount(profile, "BonusSpeed")
 	end
 
 	if questType == "carry_capacity_upgrade_count" then
-		return math.max(0, tonumber(profile.Data.CarryCapacity) or 0)
+		return getUpgradeCount(profile, "CarryCapacity")
 	end
 
 	if questType == "carry_upgrade_count" then
-		return math.max(0, tonumber(profile.Data.CarryCapacity) or 0)
+		return getUpgradeCount(profile, "CarryCapacity")
 	end
 
 	if questType == "slot_upgrade_count" then

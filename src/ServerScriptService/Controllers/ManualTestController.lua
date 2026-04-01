@@ -1663,7 +1663,7 @@ registerAction({
 	minAccess = "tester",
 	allowOtherTarget = true,
 	inputs = {
-		numberInput("amount", "CarryCapacity", 1, { 0, 1, 2, 3, 5 }, 0, 1000),
+		numberInput("amount", "CarryCapacity", 1, { 0, 1, 2, 3, 4, 5 }, 0, 1000),
 	},
 	handler = function(_executor, target, params)
 		local amount = normalizeInteger(params.amount, 1, 0, 1000)

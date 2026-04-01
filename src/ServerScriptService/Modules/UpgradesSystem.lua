@@ -14,12 +14,17 @@ local UpgradesConfiguration = require(ReplicatedStorage.Modules.UpgradesConfigur
 local AnalyticsFunnelsService = require(ServerScriptService.Modules.AnalyticsFunnelsService)
 local AnalyticsEconomyService = require(ServerScriptService.Modules.AnalyticsEconomyService)
 local TRANSACTION_TYPES = AnalyticsEconomyService:GetTransactionTypes()
+local MAX_CARRY_UPGRADES = 3
 
 local function getUpgradeConfig(upgradeId: string)
 	for _, config in ipairs(UpgradesConfiguration.Upgrades) do
 		if config.Id == upgradeId then return config end
 	end
 	return nil
+end
+
+local function getUpgradeDefaultValue(config): number
+	return math.max(0, tonumber(config.DefaultValue) or 0)
 end
 
 -- Calculates the compound price based on the amount being bought
@@ -29,7 +34,7 @@ local function getCompoundPrice(config: any, currentValue: number): number
 	local amount = config.Amount or 1
 
 	local totalPrice = 0
-	local tempValue = currentValue
+	local tempValue = math.max(0, currentValue - getUpgradeDefaultValue(config))
 
 	for i = 1, amount do
 		local cost = baseCost * (priceMultiplier ^ tempValue)
@@ -60,7 +65,7 @@ function UpgradesSystem.PurchaseUpgrade(player: Player, upgradeId: string)
 	local currentValue = profile.Data[statId] or 0
 
 	-- Enforce Max Carry Limit
-	if statId == "CarryCapacity" and currentValue >= 3 then
+	if statId == "CarryCapacity" and currentValue >= getUpgradeDefaultValue(config) + MAX_CARRY_UPGRADES then
 		local Events = ReplicatedStorage:FindFirstChild("Events")
 		if Events and Events:FindFirstChild("ShowNotification") then 
 			Events.ShowNotification:FireClient(player, "Max Carry Capacity Reached!", "Error") 

@@ -22,6 +22,7 @@ local reportAnalyticsIntent = Events:WaitForChild("ReportAnalyticsIntent") :: Re
 local HOVER_SCALE = 1.05
 local CLICK_SCALE = 0.95
 local TWEEN_INFO = TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+local MAX_CARRY_CAPACITY = 4
 
 local uiReferences = {} 
 
@@ -151,8 +152,8 @@ local function onServerUpdate(data: any)
 	for upgradeId, upgradeData in pairs(data) do
 		local ref = uiReferences[upgradeId]
 		if ref then
-			-- Visual Cap for CarryCapacity (If it's Carry1 and the value is 3 or more)
-			if upgradeId == "Carry1" and upgradeData.Current >= 3 then
+			-- Carry starts at 1, so the visible max capacity is 4 after 3 upgrades.
+			if upgradeId == "Carry1" and upgradeData.Current >= MAX_CARRY_CAPACITY then
 				if ref.MoneyPriceLabel then ref.MoneyPriceLabel.Text = "MAX" end
 				if ref.BeforeLabel then ref.BeforeLabel.Text = tostring(upgradeData.Current) end
 				if ref.AfterLabel then ref.AfterLabel.Text = "MAX" end

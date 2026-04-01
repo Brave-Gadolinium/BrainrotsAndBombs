@@ -33,7 +33,7 @@ local DATA_VERSION = "ProjectData_v90"
 local MAX_OFFLINE_TIME = 8 * 60 * 60
 local INCOME_SCALING = Constants.INCOME_SCALING
 local VIP_TAG = "V.I.P"
-local COLLECT_ALL_GAMEPASS = 3566654191
+local COLLECT_ALL_GAMEPASS = ProductConfigurations.GamePasses.CollectAll or 1783037385
 
 local GROUP_ID = 0 
 
@@ -128,6 +128,15 @@ local function deepCopy(value)
 	return clone
 end
 
+local function getUpgradeDefaultValue(config): number
+	return math.max(0, tonumber(config.DefaultValue) or 0)
+end
+
+local function normalizeUpgradeValue(config, value): number
+	local defaultValue = getUpgradeDefaultValue(config)
+	return math.max(defaultValue, tonumber(value) or defaultValue)
+end
+
 local function ensureUpgradeDefaults(data)
 	if type(data) ~= "table" then
 		return
@@ -136,7 +145,7 @@ local function ensureUpgradeDefaults(data)
 	for _, config in ipairs(UpgradesConfiguration.Upgrades) do
 		local statId = config.StatId
 		if type(statId) == "string" and statId ~= "" then
-			data[statId] = math.max(0, tonumber(data[statId]) or tonumber(config.DefaultValue) or 0)
+			data[statId] = normalizeUpgradeValue(config, data[statId])
 		end
 	end
 end
@@ -678,7 +687,7 @@ local function createLeaderstats(player: Player, data: PlayerData)
 	for _, config in ipairs(UpgradesConfiguration.Upgrades) do
 		local statId = config.StatId
 		if type(statId) == "string" and statId ~= "" then
-			player:SetAttribute(statId, math.max(0, tonumber(data[statId]) or tonumber(config.DefaultValue) or 0))
+			player:SetAttribute(statId, normalizeUpgradeValue(config, data[statId]))
 		end
 	end
 
