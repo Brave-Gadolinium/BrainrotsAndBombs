@@ -34,6 +34,7 @@ local Events = ReplicatedStorage:WaitForChild("Events")
 local UPGRADE_COST_MULTIPLIER = 1.5
 local DEBOUNCE_TIME = 0.5
 local INTERACTION_COOLDOWN = 0.8
+local BRAINROT_SLOT_UPGRADES_VISIBLE = false
 
 -- [ STATE ]
 local lastUpgradeTime = {}
@@ -141,7 +142,15 @@ local function updateSlotVisuals(slotModel: Model, slotData, rebirths: number, i
 		end
 
 		local button = gui:FindFirstChild("UpgradeButton") :: TextButton
-		if itemData and button then
+		if button then
+			button.Visible = BRAINROT_SLOT_UPGRADES_VISIBLE
+			button.Active = BRAINROT_SLOT_UPGRADES_VISIBLE
+			button.AutoButtonColor = BRAINROT_SLOT_UPGRADES_VISIBLE
+		end
+
+		if not BRAINROT_SLOT_UPGRADES_VISIBLE then
+			gui.Enabled = false
+		elseif itemData and button then
 			gui.Enabled = true
 			local levelsLabel = button:FindFirstChild("Levels") :: TextLabel
 			local priceLabel = button:FindFirstChild("Price") :: TextLabel

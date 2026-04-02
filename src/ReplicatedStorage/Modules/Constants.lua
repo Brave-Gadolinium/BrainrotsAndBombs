@@ -11,6 +11,10 @@ local Constants = {
 	MIN_ITEM_SPACING = 4.5,
 	ZONE_ITEM_CAP_MULTIPLIERS = {
 		["Zone1"] = 4,
+		["Zone2"] = 3,
+		["Zone3"] = 3,
+		["Zone4"] = 2,
+		["Zone5"] = 2,
 	},
 	
 	SPAWNER_TIERS = {

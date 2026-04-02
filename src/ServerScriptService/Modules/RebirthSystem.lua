@@ -17,6 +17,7 @@ local SlotManager
 local TRANSACTION_TYPES = AnalyticsEconomyService:GetTransactionTypes()
 local connected = false
 local PROTECTED_REBIRTH_RARITIES = {
+	Legendary = true,
 	Mythic = true,
 	Mythical = true,
 	Secret = true,

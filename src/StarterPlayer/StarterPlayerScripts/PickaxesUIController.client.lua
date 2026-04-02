@@ -27,7 +27,6 @@ local robuxPriceCache: {[number]: string} = {}
 local HOVER_SCALE = 1.05
 local CLICK_SCALE = 0.95
 local TWEEN_INFO = TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-local TEMPLATE_SELECTION_BUTTON_NAME = "SelectionButton"
 
 local function setupButtonAnimation(button: GuiButton)
 	local uiScale = button:FindFirstChildOfClass("UIScale")
@@ -223,44 +222,26 @@ local function resolveAutoSelectedPickaxeId(sortedPickaxes: {{Id: string, Data: 
 	return currentNextAvailableId or sortedPickaxes[#sortedPickaxes].Id
 end
 
-local function getTemplateSelectionButton(template: GuiObject): GuiButton?
-	if template:IsA("GuiButton") then
-		return template
-	end
-
-	local existingButton = template:FindFirstChild(TEMPLATE_SELECTION_BUTTON_NAME)
-	if existingButton and existingButton:IsA("GuiButton") then
-		return existingButton
-	end
-
-	local selectionButton = Instance.new("TextButton")
-	selectionButton.Name = TEMPLATE_SELECTION_BUTTON_NAME
-	selectionButton.BackgroundTransparency = 1
-	selectionButton.BorderSizePixel = 0
-	selectionButton.Text = ""
-	selectionButton.TextTransparency = 1
-	selectionButton.AutoButtonColor = false
-	selectionButton.Size = UDim2.fromScale(1, 1)
-	selectionButton.Position = UDim2.fromScale(0, 0)
-	selectionButton.ZIndex = math.max(0, template.ZIndex - 1)
-	selectionButton.Parent = template
-
-	return selectionButton
-end
-
 local function bindTemplateSelection(template: GuiObject, onSelected: () -> ())
-	local selectionButton = getTemplateSelectionButton(template)
-	if not selectionButton or selectionButton:GetAttribute("SelectionConnectionSet") then
+	if template:GetAttribute("SelectionConnectionSet") then
 		return
 	end
 
-	selectionButton:SetAttribute("SelectionConnectionSet", true)
+	template:SetAttribute("SelectionConnectionSet", true)
 
 	if template:IsA("GuiButton") then
 		setupButtonAnimation(template)
+		template.MouseButton1Click:Connect(onSelected)
+		return
 	end
 
-	selectionButton.MouseButton1Click:Connect(onSelected)
+	template.Active = true
+	template.InputBegan:Connect(function(inputObject)
+		local inputType = inputObject.UserInputType
+		if inputType == Enum.UserInputType.MouseButton1 or inputType == Enum.UserInputType.Touch then
+			onSelected()
+		end
+	end)
 end
 
 local function updateShowcase(pickaxesFrame: Frame, pickaxeId: string, shouldReport: boolean?)
