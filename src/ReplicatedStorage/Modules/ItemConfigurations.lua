@@ -3,6 +3,8 @@
 
 local ItemConfigurations = {}
 
+local RarityUtils = require(script.Parent:WaitForChild("RarityUtils"))
+
 type Item = {
 	Rarity: string,
 	Income: number,
@@ -60,9 +62,10 @@ ItemConfigurations.Items = {
 } :: { [string]: Item }
 
 function ItemConfigurations.GetItemsByRarity(rarity: string): {string}
+	local normalizedRarity = RarityUtils.Normalize(rarity)
 	local foundItems = {}
 	for itemName, data in pairs(ItemConfigurations.Items) do
-		if data.Rarity == rarity then
+		if RarityUtils.Normalize(data.Rarity) == normalizedRarity then
 			table.insert(foundItems, itemName)
 		end
 	end

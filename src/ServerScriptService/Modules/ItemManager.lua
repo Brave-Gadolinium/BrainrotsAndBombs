@@ -11,7 +11,9 @@ local RunService = game:GetService("RunService")
 
 -- [ MODULES ]
 local ItemConfigurations = require(ReplicatedStorage.Modules.ItemConfigurations)
+local BrainrotEventConfiguration = require(ReplicatedStorage.Modules.BrainrotEventConfiguration)
 local RarityConfigurations = require(ReplicatedStorage.Modules.RarityConfigurations)
+local RarityUtils = require(ReplicatedStorage.Modules.RarityUtils)
 local MutationConfigurations = require(ReplicatedStorage.Modules.MutationConfigurations)
 local NumberFormatter = require(ReplicatedStorage.Modules.NumberFormatter)
 local LuckyBlockManager = require(ServerScriptService.Modules.LuckyBlockManager)
@@ -22,6 +24,7 @@ local Constants = require(ReplicatedStorage.Modules.Constants)
 
 -- [ LAZY DEPENDENCIES ]
 local CarrySystem 
+local onItemPickedUp: (player: Player, itemModel: Model) -> ()
 
 -- [ ASSETS ]
 local LuckyBlocksFolder = ReplicatedStorage:WaitForChild("Luckyblocks")
@@ -75,6 +78,7 @@ local MUTATIONS = Constants.MUTATIONS
 local MUTATION_MULTIPLIERS = Constants.MUTATION_MULTIPLIERS
 
 local ItemManager = {}
+local itemAttributes = BrainrotEventConfiguration.ItemAttributes
 
 local function getRemainingSessionLifetime(): number
 	local remaining = tonumber(Workspace:GetAttribute("SessionTimeRemaining"))
@@ -107,6 +111,91 @@ local function clearSessionWorldItems()
 			child:Destroy()
 		end
 	end
+end
+
+local function applyExtraAttributes(instance: Instance, extraAttributes: {[string]: any}?)
+	if type(extraAttributes) ~= "table" then
+		return
+	end
+
+	for attributeName, attributeValue in pairs(extraAttributes) do
+		instance:SetAttribute(attributeName, attributeValue)
+	end
+end
+
+local function extractEventAttributes(instance: Instance?): {[string]: any}?
+	if not instance then
+		return nil
+	end
+
+	if instance:GetAttribute(itemAttributes.IsEventBrainrot) ~= true then
+		return nil
+	end
+
+	local token = instance:GetAttribute(itemAttributes.Token)
+	local rarity = instance:GetAttribute(itemAttributes.Rarity)
+	local itemName = instance:GetAttribute(itemAttributes.ItemName)
+	if type(token) ~= "string" or token == "" then
+		return nil
+	end
+
+	return {
+		[itemAttributes.IsEventBrainrot] = true,
+		[itemAttributes.Token] = token,
+		[itemAttributes.Rarity] = if type(rarity) == "string" then rarity else nil,
+		[itemAttributes.ItemName] = if type(itemName) == "string" then itemName else nil,
+	}
+end
+
+local function createPickupPrompt(itemModel: Model, objectText: string, maxDistance: number)
+	if not itemModel.PrimaryPart then
+		return
+	end
+
+	local prompt = Instance.new("ProximityPrompt")
+	prompt.ObjectText = objectText
+	prompt.ActionText = "Pick Up"
+	prompt.KeyboardKeyCode = Enum.KeyCode.E
+	prompt.RequiresLineOfSight = false
+	prompt.HoldDuration = 0
+	prompt.MaxActivationDistance = maxDistance
+	prompt.Style = Enum.ProximityPromptStyle.Custom
+	prompt.Parent = itemModel.PrimaryPart
+
+	prompt.Triggered:Connect(function(player)
+		onItemPickedUp(player, itemModel)
+	end)
+end
+
+local function createWorldItemModel(itemName: string, mutation: string, rarity: string, level: number?, extraAttributes: {[string]: any}?): Model?
+	local mutationFolder = ItemsFolder:FindFirstChild(mutation) or ItemsFolder.Normal
+	local itemTemplate = mutationFolder:FindFirstChild(itemName) or ItemsFolder.Normal:FindFirstChild(itemName)
+
+	if not itemTemplate or not itemTemplate:IsA("Model") then
+		return nil
+	end
+
+	local newItem = itemTemplate:Clone() :: Model
+	newItem.Name = "SpawnedItem"
+
+	CollectionService:AddTag(newItem, "HelicopterIgnore")
+
+	newItem:SetAttribute("IsSpawnedItem", true)
+	newItem:SetAttribute("OriginalName", itemName)
+	newItem:SetAttribute("Mutation", mutation)
+	newItem:SetAttribute("Rarity", rarity)
+	newItem:SetAttribute("Level", level or 1)
+	newItem:SetAttribute("ExpiresAt", Workspace:GetServerTimeNow() + getRemainingSessionLifetime())
+	applyExtraAttributes(newItem, extraAttributes)
+
+	for _, part in ipairs(newItem:GetDescendants()) do
+		if part:IsA("BasePart") then
+			part.CanCollide = false
+			part.Anchored = true
+		end
+	end
+
+	return newItem
 end
 
 -- [ HELPERS ]
@@ -183,7 +272,7 @@ local function setupItemGUI(target: Instance, level: number?, rebirths: number?,
 	local lblMutation = labelsFrame:WaitForChild("Mutation") :: TextLabel
 --~!
 	local itemName = target:GetAttribute("OriginalName") or "Unknown"
-	local rarityName = target:GetAttribute("Rarity") or "Common"
+	local rarityName = RarityUtils.Normalize(target:GetAttribute("Rarity")) or "Common"
 	local mutationName = target:GetAttribute("Mutation") or "Normal"
 
 	lblName.Text = ConfigItems.Items[target:GetAttribute("OriginalName") or "Unknown"].DisplayName
@@ -226,7 +315,15 @@ local function setupItemGUI(target: Instance, level: number?, rebirths: number?,
 end
 
 -- [ TOOL CREATION ]
-function ItemManager.GiveItemToPlayer(player: Player, itemName: string, mutation: string, rarity: string, level: number?, isTemporary: boolean?)
+function ItemManager.GiveItemToPlayer(
+	player: Player,
+	itemName: string,
+	mutation: string,
+	rarity: string,
+	level: number?,
+	isTemporary: boolean?,
+	extraAttributes: {[string]: any}?
+)
 	if not itemName then return nil end
 
 	local itemConf = ItemConfigurations.GetItemData(itemName)
@@ -246,6 +343,7 @@ function ItemManager.GiveItemToPlayer(player: Player, itemName: string, mutation
 	newTool:SetAttribute("Rarity", rarity)
 	newTool:SetAttribute("Level", level or 1)
 	newTool:SetAttribute("IsSpawnedItem", false) 
+	applyExtraAttributes(newTool, extraAttributes)
 
 	local handle = Instance.new("Part")
 	handle.Name = "Handle"
@@ -262,6 +360,7 @@ function ItemManager.GiveItemToPlayer(player: Player, itemName: string, mutation
 	model:SetAttribute("Rarity", rarity)
 	model:SetAttribute("Level", level or 1)
 	model:SetAttribute("IsSpawnedItem", false)
+	applyExtraAttributes(model, extraAttributes)
 
 	model.Parent = newTool
 	model:PivotTo(handle.CFrame)
@@ -353,7 +452,7 @@ function ItemManager.GiveLuckyBlockToPlayer(player: Player, blockId: string)
 end
 
 -- [ PICKUP LOGIC ]
-local function onItemPickedUp(player: Player, itemModel: Model)
+function onItemPickedUp(player: Player, itemModel: Model)
 	if not CarrySystem then CarrySystem = require(ServerScriptService.Modules.CarrySystem) end
 	if not itemModel or not itemModel.Parent then return end
 
@@ -363,6 +462,7 @@ local function onItemPickedUp(player: Player, itemModel: Model)
 	local mutation = itemModel:GetAttribute("Mutation")
 	local rarity = itemModel:GetAttribute("Rarity")
 	local level = itemModel:GetAttribute("Level") or 1 
+	local eventAttributes = extractEventAttributes(itemModel)
 
 	local char = player.Character
 	local rootPart = char and char:FindFirstChild("HumanoidRootPart")
@@ -375,7 +475,10 @@ local function onItemPickedUp(player: Player, itemModel: Model)
 			local source = if spawnerPart:IsA("BasePart") then spawnerPart else nil
 
 			if CarrySystem.CanCarryMore(player) then
-				local success = CarrySystem.AddItemToCarry(player, name, mutation, rarity, source)
+				local success = CarrySystem.AddItemToCarry(player, name, mutation, rarity, source, {
+					Level = level,
+					EventAttributes = eventAttributes,
+				})
 				if success then pickedUp = true end
 			else
 				local Events = ReplicatedStorage:FindFirstChild("Events")
@@ -386,7 +489,7 @@ local function onItemPickedUp(player: Player, itemModel: Model)
 				})
 			end
 		else
-			ItemManager.GiveItemToPlayer(player, name, mutation, rarity, level, false)
+			ItemManager.GiveItemToPlayer(player, name, mutation, rarity, level, false, eventAttributes)
 			pickedUp = true
 		end
 
@@ -396,7 +499,7 @@ local function onItemPickedUp(player: Player, itemModel: Model)
 			itemModel:Destroy() 
 
 			-- ## FIXED: Queue a replacement immediately when an item is picked up! ##
-			if spawnerPart and spawnerPart:IsA("BasePart") then
+			if spawnerPart and spawnerPart:IsA("BasePart") and not eventAttributes then
 				ItemManager.RespawnItem(spawnerPart)
 			end
 		end
@@ -470,24 +573,9 @@ function ItemManager.SpawnInMine(mineZonePart: BasePart)
 
 		if not itemTemplate then continue end
 
-		local newItem = itemTemplate:Clone() :: Model
-		newItem.Name = "SpawnedItem"
-
-		CollectionService:AddTag(newItem, "HelicopterIgnore")
-
-		newItem:SetAttribute("IsSpawnedItem", true)
-		newItem:SetAttribute("OriginalName", randomItemName)
-		newItem:SetAttribute("Rarity", rarity)
-		newItem:SetAttribute("Mutation", mutationName)
-		newItem:SetAttribute("Level", 1)
-
-		newItem:SetAttribute("ExpiresAt", Workspace:GetServerTimeNow() + getRemainingSessionLifetime())
-
-		for _, part in ipairs(newItem:GetDescendants()) do
-			if part:IsA("BasePart") then
-				part.CanCollide = false
-				part.Anchored = true
-			end
+		local newItem = createWorldItemModel(randomItemName, mutationName, rarity, 1, nil)
+		if not newItem then
+			continue
 		end
 
 		local itemExtents = newItem:GetExtentsSize()
@@ -531,47 +619,29 @@ function ItemManager.SpawnInMine(mineZonePart: BasePart)
 			CollectionService:AddTag(newItem, "FloatingItem")
 
 			if newItem.PrimaryPart then
-				local prompt = Instance.new("ProximityPrompt")
-				prompt.ObjectText = randomItemName
-				prompt.ActionText = "Pick Up"
-				prompt.KeyboardKeyCode = Enum.KeyCode.E
-				prompt.RequiresLineOfSight = false 
-				prompt.HoldDuration = 0
-				prompt.MaxActivationDistance = 8 
-				prompt.Style = Enum.ProximityPromptStyle.Custom
-				prompt.Parent = newItem.PrimaryPart
-
-				prompt.Triggered:Connect(function(player) onItemPickedUp(player, newItem) end)
+				createPickupPrompt(newItem, randomItemName, 8)
 			end
 
 		end
 	end
 end
 
-function ItemManager.SpawnDroppedItem(itemName: string, mutation: string, rarity: string, targetPos: Vector3, originPos: Vector3?)
-	local mutationFolder = ItemsFolder:FindFirstChild(mutation) or ItemsFolder.Normal
-	local itemTemplate = mutationFolder:FindFirstChild(itemName) or ItemsFolder.Normal:FindFirstChild(itemName)
+function ItemManager.SpawnWorldItemAtPosition(
+	itemName: string,
+	mutation: string,
+	rarity: string,
+	targetPos: Vector3,
+	options: {[string]: any}?
+): Model?
+	local level = if type(options) == "table" and type(options.Level) == "number" then options.Level else 1
+	local parentInstance = if type(options) == "table" and typeof(options.Parent) == "Instance" then options.Parent else Workspace
+	local extraAttributes = if type(options) == "table" and type(options.ExtraAttributes) == "table" then options.ExtraAttributes else nil
+	local originPos = if type(options) == "table" and typeof(options.OriginPos) == "Vector3" then options.OriginPos else nil
+	local maxPickupDistance = if type(options) == "table" and type(options.MaxPickupDistance) == "number" then options.MaxPickupDistance else 16
 
-	if not itemTemplate then return end
-
-	local newItem = itemTemplate:Clone() :: Model
-	newItem.Name = "SpawnedItem"
-
-	CollectionService:AddTag(newItem, "HelicopterIgnore")
-
-	newItem:SetAttribute("IsSpawnedItem", true)
-	newItem:SetAttribute("OriginalName", itemName)
-	newItem:SetAttribute("Mutation", mutation)
-	newItem:SetAttribute("Rarity", rarity)
-	newItem:SetAttribute("Level", 1)
-
-	newItem:SetAttribute("ExpiresAt", Workspace:GetServerTimeNow() + getRemainingSessionLifetime())
-
-	for _, part in ipairs(newItem:GetDescendants()) do
-		if part:IsA("BasePart") then
-			part.CanCollide = false
-			part.Anchored = true
-		end
+	local newItem = createWorldItemModel(itemName, mutation, rarity, level, extraAttributes)
+	if not newItem then
+		return nil
 	end
 
 	local rayOrigin = targetPos + Vector3.new(0, 5, 0)
@@ -586,9 +656,9 @@ function ItemManager.SpawnDroppedItem(itemName: string, mutation: string, rarity
 	local itemExtents = newItem:GetExtentsSize()
 	local distToBottom = newItem:GetPivot().Position.Y - (newItem:GetBoundingBox().Position.Y - (itemExtents.Y / 2))
 
-	local finalCFrame = CFrame.new(targetPos.X, floorY + distToBottom, targetPos.Z) * CFrame.Angles(0, math.random(0,360), 0)
+	local finalCFrame = CFrame.new(targetPos.X, floorY + distToBottom, targetPos.Z) * CFrame.Angles(0, math.rad(math.random(0, 360)), 0)
 
-	newItem.Parent = Workspace
+	newItem.Parent = parentInstance
 
 	if originPos then
 		newItem:PivotTo(CFrame.new(originPos))
@@ -614,27 +684,32 @@ function ItemManager.SpawnDroppedItem(itemName: string, mutation: string, rarity
 		CollectionService:AddTag(newItem, "FloatingItem")
 	end
 
-	setupItemGUI(newItem, 1, 0, false)
+	setupItemGUI(newItem, level, 0, false)
 
 	if newItem.PrimaryPart then
-		local prompt = Instance.new("ProximityPrompt")
-		prompt.ObjectText = itemName
-		prompt.ActionText = "Pick Up"
-		prompt.KeyboardKeyCode = Enum.KeyCode.E
-		prompt.RequiresLineOfSight = false 
-		prompt.HoldDuration = 0
-		prompt.MaxActivationDistance = 16 
-
-		prompt.Style = Enum.ProximityPromptStyle.Custom
-		prompt.Parent = newItem.PrimaryPart
-
-		prompt.Triggered:Connect(function(player) onItemPickedUp(player, newItem) end)
+		createPickupPrompt(newItem, itemName, maxPickupDistance)
 	end
 
 	local lifetime = getRemainingSessionLifetime() + 0.1
 	task.delay(lifetime, function()
 		if newItem and newItem.Parent then newItem:Destroy() end
 	end)
+
+	return newItem
+end
+
+function ItemManager.SpawnDroppedItem(
+	itemName: string,
+	mutation: string,
+	rarity: string,
+	targetPos: Vector3,
+	originPos: Vector3?,
+	options: {[string]: any}?
+): Model?
+	local spawnOptions = if type(options) == "table" then options else {}
+	spawnOptions.OriginPos = originPos
+	spawnOptions.MaxPickupDistance = spawnOptions.MaxPickupDistance or 16
+	return ItemManager.SpawnWorldItemAtPosition(itemName, mutation, rarity, targetPos, spawnOptions)
 end
 
 function ItemManager.RespawnItem(mineZonePart: BasePart)

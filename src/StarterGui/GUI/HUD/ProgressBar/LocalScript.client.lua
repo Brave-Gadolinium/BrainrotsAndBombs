@@ -2,8 +2,14 @@
 -- LOCATION: StarterPlayerScripts/HeightBarController
 
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
+
+local BrainrotEventConfiguration = require(ReplicatedStorage.Modules.BrainrotEventConfiguration)
+local ItemConfigurations = require(ReplicatedStorage.Modules.ItemConfigurations)
+local RarityConfigurations = require(ReplicatedStorage.Modules.RarityConfigurations)
 
 local localPlayer = Players.LocalPlayer
 local playerGui = localPlayer:WaitForChild("PlayerGui")
@@ -43,6 +49,12 @@ local BAR_BG_COLOR = Color3.fromRGB(20, 20, 20)
 local SEGMENT_TEXTURE_TILE_SIZE = 24
 
 local REBUILD_INTERVAL = 2
+local EVENT_MARKER_SWAY_DEGREES = 7
+local EVENT_MARKER_SWAY_OFFSET = 4
+local EVENT_MARKER_BOB_OFFSET = 2
+local EVENT_MARKER_SEARCH_INTERVAL = 0.35
+local EVENT_MARKER_PULSE_MIN_DELAY = 2.4
+local EVENT_MARKER_PULSE_MAX_DELAY = 4.8
 
 local rootFrame: Frame
 local markerLayer: Frame
@@ -51,6 +63,14 @@ local maxHeight = 100
 local totalRange = 100
 
 local markerByPlayer: {[Player]: Frame} = {}
+local workspaceAttributes = BrainrotEventConfiguration.WorkspaceAttributes
+local currentEventToken: string? = nil
+local eventMarker: Frame? = nil
+local eventMarkerScale: UIScale? = nil
+local eventMarkerIcon: ImageLabel? = nil
+local eventMarkerPulseLoopId = 0
+local cachedEventWorldItem: Model? = nil
+local nextEventWorldSearchAt = 0
 
 local function roundToTenth(value: number): number
 	return math.floor(value * 10 + 0.5) / 10
@@ -470,6 +490,185 @@ local function removeMarker(player: Player)
 	end
 end
 
+local function getEventMarkerBaseX(): number
+	local barCenterX = rootFrame.AbsoluteSize.X - (BAR_WIDTH * 0.5)
+	return barCenterX + MARKER_GAP + (MARKER_SIZE * 0.5)
+end
+
+local function destroyEventMarker()
+	eventMarkerPulseLoopId += 1
+	if eventMarker then
+		eventMarker:Destroy()
+		eventMarker = nil
+	end
+	eventMarkerScale = nil
+	eventMarkerIcon = nil
+	cachedEventWorldItem = nil
+	nextEventWorldSearchAt = 0
+end
+
+local function startEventMarkerPulseLoop(marker: Frame, scale: UIScale)
+	eventMarkerPulseLoopId += 1
+	local pulseLoopId = eventMarkerPulseLoopId
+
+	task.spawn(function()
+		while eventMarker == marker and eventMarkerScale == scale and pulseLoopId == eventMarkerPulseLoopId and marker.Parent do
+			task.wait(math.random(
+				math.floor(EVENT_MARKER_PULSE_MIN_DELAY * 10),
+				math.floor(EVENT_MARKER_PULSE_MAX_DELAY * 10)
+			) / 10)
+
+			if pulseLoopId ~= eventMarkerPulseLoopId or not marker.Parent or eventMarker ~= marker or eventMarkerScale ~= scale then
+				break
+			end
+
+			local growTween = TweenService:Create(scale, TweenInfo.new(0.18, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Scale = 1.14})
+			local shrinkTween = TweenService:Create(scale, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Scale = 1})
+			growTween:Play()
+			growTween.Completed:Wait()
+
+			if pulseLoopId ~= eventMarkerPulseLoopId or not marker.Parent then
+				break
+			end
+
+			shrinkTween:Play()
+			shrinkTween.Completed:Wait()
+		end
+	end)
+end
+
+local function ensureEventMarker(): Frame?
+	if eventMarker and eventMarker.Parent then
+		return eventMarker
+	end
+
+	local progressBar = hud:FindFirstChild("ProgressBar")
+	local markersContainer = progressBar and progressBar:FindFirstChild("Markers")
+	local markerTemplate = markersContainer and markersContainer:FindFirstChild("PlayerMark")
+	if not markersContainer or not markersContainer:IsA("Frame") or not markerTemplate or not markerTemplate:IsA("Frame") then
+		return nil
+	end
+
+	local marker = markerTemplate:Clone()
+	marker.Name = "EventBrainrotMark"
+	marker.Visible = false
+	marker.BackgroundColor3 = Color3.fromRGB(255, 176, 66)
+	marker.ZIndex = 4
+
+	for _, descendant in ipairs(marker:GetDescendants()) do
+		if descendant:IsA("UIStroke") then
+			descendant:Destroy()
+		elseif descendant:IsA("GuiObject") and string.find(string.lower(descendant.Name), "arrow", 1, true) then
+			descendant:Destroy()
+		end
+	end
+
+	local icon = marker:FindFirstChild("PlayerImage")
+	if not icon or not icon:IsA("ImageLabel") then
+		icon = Instance.new("ImageLabel")
+		icon.Name = "PlayerImage"
+		icon.Parent = marker
+	end
+
+	icon.Name = "Icon"
+	icon.AnchorPoint = Vector2.new(0.5, 0.5)
+	icon.Position = UDim2.fromScale(0.5, 0.5)
+	icon.Size = UDim2.fromScale(0.94, 0.94)
+	icon.BackgroundTransparency = 1
+	icon.Image = ""
+	icon.ImageTransparency = 0
+	icon.ScaleType = Enum.ScaleType.Fit
+	icon.ZIndex = 5
+	eventMarkerIcon = icon
+
+	marker.Parent = markersContainer
+
+	local scale = marker:FindFirstChildOfClass("UIScale")
+	if not scale then
+		scale = Instance.new("UIScale")
+		scale.Parent = marker
+	end
+	scale.Scale = 1
+
+	eventMarker = marker
+	eventMarkerScale = scale
+	startEventMarkerPulseLoop(marker, scale)
+	return marker
+end
+
+local function findActiveEventWorldItem(token: string): Model?
+	if cachedEventWorldItem and cachedEventWorldItem.Parent and cachedEventWorldItem:GetAttribute("EventBrainrotToken") == token then
+		return cachedEventWorldItem
+	end
+
+	local now = tick()
+	if now < nextEventWorldSearchAt then
+		return nil
+	end
+
+	nextEventWorldSearchAt = now + EVENT_MARKER_SEARCH_INTERVAL
+
+	for _, descendant in ipairs(Workspace:GetDescendants()) do
+		if descendant:IsA("Model")
+			and descendant.Name == "SpawnedItem"
+			and descendant:GetAttribute("EventBrainrotToken") == token
+		then
+			cachedEventWorldItem = descendant
+			return descendant
+		end
+	end
+
+	cachedEventWorldItem = nil
+	return nil
+end
+
+local function updateEventMarkerAppearance()
+	if not currentEventToken then
+		return
+	end
+
+	local marker = ensureEventMarker()
+	local icon = eventMarkerIcon
+	if not marker or not icon then
+		return
+	end
+
+	local itemName = Workspace:GetAttribute(workspaceAttributes.ItemName)
+	local itemData = type(itemName) == "string" and ItemConfigurations.GetItemData(itemName) or nil
+	icon.Image = itemData and itemData.ImageId or ""
+
+	local rarity = Workspace:GetAttribute(workspaceAttributes.Rarity)
+	local rarityConfig = type(rarity) == "string" and (RarityConfigurations[rarity] :: any) or nil
+	if rarityConfig then
+		marker.BackgroundColor3 = rarityConfig.TextColor or marker.BackgroundColor3
+	end
+end
+
+local function refreshEventMarkerState()
+	local active = Workspace:GetAttribute(workspaceAttributes.Active) == true
+	local tokenAttribute = Workspace:GetAttribute(workspaceAttributes.Token)
+	local token = if active and type(tokenAttribute) == "string" and tokenAttribute ~= "" then tokenAttribute else nil
+
+	if currentEventToken ~= token then
+		currentEventToken = token
+		cachedEventWorldItem = nil
+		nextEventWorldSearchAt = 0
+
+		if not currentEventToken then
+			destroyEventMarker()
+			return
+		end
+
+		destroyEventMarker()
+	end
+
+	if not currentEventToken then
+		return
+	end
+
+	updateEventMarkerAppearance()
+end
+
 local function getPlayerY(player: Player): number?
 	local character = player.Character
 	if not character then
@@ -495,6 +694,7 @@ local function applyRightEdgeLayout()
 end
 
 buildBarUI()
+refreshEventMarkerState()
 
 Players.PlayerAdded:Connect(function(player)
 	ensureMarker(player)
@@ -506,6 +706,10 @@ end)
 
 for _, player in ipairs(Players:GetPlayers()) do
 	ensureMarker(player)
+end
+
+for _, attributeName in pairs(workspaceAttributes) do
+	Workspace:GetAttributeChangedSignal(attributeName):Connect(refreshEventMarkerState)
 end
 
 local rebuildTimer = 0
@@ -542,5 +746,45 @@ RunService.Heartbeat:Connect(function(dt)
 		local x = markerBaseX - stack * MARKER_STACK_STEP
 		marker.Position = UDim2.new(0, x, 1 - alpha, 0)
 		marker.Visible = true
+	end
+
+	if currentEventToken then
+		local marker = ensureEventMarker()
+		if marker then
+			local carrierUserId = tonumber(Workspace:GetAttribute(workspaceAttributes.CarrierUserId))
+			local targetY: number? = nil
+
+			if carrierUserId then
+				local carrierPlayer = Players:GetPlayerByUserId(carrierUserId)
+				if carrierPlayer then
+					targetY = getPlayerY(carrierPlayer)
+				end
+			end
+
+			if targetY == nil then
+				local worldItem = findActiveEventWorldItem(currentEventToken)
+				if worldItem and worldItem.Parent then
+					targetY = worldItem:GetPivot().Position.Y
+				end
+			end
+
+			if targetY == nil then
+				marker.Visible = false
+			else
+				local alpha = math.clamp((targetY - minHeight) / totalRange, 0, 1)
+				local t = Workspace:GetServerTimeNow()
+				local swayOffset = math.sin(t * 2.2) * EVENT_MARKER_SWAY_OFFSET
+				local bobOffset = math.cos(t * 1.6) * EVENT_MARKER_BOB_OFFSET
+				local baseX = getEventMarkerBaseX()
+
+				marker.Position = UDim2.new(0, baseX + swayOffset, 1 - alpha, bobOffset)
+				marker.Rotation = 0
+				marker.Visible = true
+
+				if eventMarkerIcon then
+					eventMarkerIcon.Rotation = math.sin(t * 2.5) * EVENT_MARKER_SWAY_DEGREES
+				end
+			end
+		end
 	end
 end)

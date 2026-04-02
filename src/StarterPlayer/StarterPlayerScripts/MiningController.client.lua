@@ -10,6 +10,7 @@ local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService") -- ## ADDED ##
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
+local BombToolClient = require(Modules:WaitForChild("BombToolClient"))
 local PickaxesConfigurations = require(Modules:WaitForChild("PickaxesConfigurations"))
 
 -- References for Animation, Sounds & UI
@@ -25,9 +26,326 @@ local MINING_RANGE = 25
 local lastSwingTime = 0
 local activeToolConnection: RBXScriptConnection? = nil
 local currentAnimationTrack: AnimationTrack? = nil 
+local currentTool: Tool? = nil
 
 local activeHighlights: {[BasePart]: SelectionBox} = {}
 local highlightLoop: RBXScriptConnection? = nil
+
+local MOBILE_BOMB_READY_ICON = "rbxassetid://123855876242070"
+local MOBILE_BOMB_COOLDOWN_ICON = "rbxassetid://135164909685622"
+local MOBILE_BOMB_MARGIN_RIGHT = 56
+local MOBILE_BOMB_MARGIN_BOTTOM = 92
+
+local mobileBombButton: ImageButton? = nil
+local mobileBombButtonScale: UIScale? = nil
+local mobileBombButtonIcon: ImageLabel? = nil
+local mobileBombButtonLabel: TextLabel? = nil
+local attemptMine: (tool: Tool) -> ()
+
+local function shouldShowMobileBombButton(): boolean
+	return true
+end
+
+local function getCharacterBombTool(): Tool?
+	local character = player.Character
+	if not character then
+		return nil
+	end
+
+	for _, child in ipairs(character:GetChildren()) do
+		if child:IsA("Tool") and PickaxesConfigurations.Pickaxes[child.Name] then
+			return child
+		end
+	end
+
+	return nil
+end
+
+local function getBackpackBombTool(): Tool?
+	local backpack = player:FindFirstChildOfClass("Backpack")
+	if not backpack then
+		return nil
+	end
+
+	for _, child in ipairs(backpack:GetChildren()) do
+		if child:IsA("Tool") and PickaxesConfigurations.Pickaxes[child.Name] then
+			return child
+		end
+	end
+
+	return nil
+end
+
+local function getAvailableBombTool(): Tool?
+	return getCharacterBombTool() or getBackpackBombTool()
+end
+
+local function getBombCooldownRemaining(tool: Tool?): number
+	if not tool then
+		return 0
+	end
+
+	local cooldownEndsAt = tool:GetAttribute("CooldownEndsAt")
+	if type(cooldownEndsAt) ~= "number" then
+		return 0
+	end
+
+	return math.max(0, cooldownEndsAt - Workspace:GetServerTimeNow())
+end
+
+local function getGuiRoot(): ScreenGui?
+	local playerGui = player:FindFirstChild("PlayerGui")
+	local gui = playerGui and playerGui:FindFirstChild("GUI")
+	if gui and gui:IsA("ScreenGui") then
+		return gui
+	end
+
+	return nil
+end
+
+local function animateMobileBombButtonPress()
+	local scale = mobileBombButtonScale
+	if not scale then
+		return
+	end
+
+	scale.Scale = 1
+	local pressTween = TweenService:Create(scale, TweenInfo.new(0.08, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Scale = 0.92})
+	local releaseTween = TweenService:Create(scale, TweenInfo.new(0.16, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Scale = 1})
+	pressTween:Play()
+	pressTween.Completed:Once(function()
+		releaseTween:Play()
+	end)
+end
+
+local function updateMobileBombButtonState()
+	local button = mobileBombButton
+	local icon = mobileBombButtonIcon
+	local label = mobileBombButtonLabel
+	if not button or not icon or not label then
+		return
+	end
+
+	local tool = currentTool
+	if not tool or not tool.Parent then
+		tool = getAvailableBombTool()
+		currentTool = tool
+	end
+
+	local config = tool and PickaxesConfigurations.Pickaxes[tool.Name] or nil
+	local shouldShow = shouldShowMobileBombButton()
+
+	button.Visible = shouldShow
+	if not shouldShow then
+		return
+	end
+
+	local hasBomb = config ~= nil
+	local remainingCooldown = if hasBomb then getBombCooldownRemaining(tool) else 0
+	local isReady = hasBomb and remainingCooldown <= 0.02
+
+	button.Active = isReady
+	button.BackgroundColor3 = if isReady then Color3.fromRGB(26, 28, 37) else Color3.fromRGB(33, 33, 39)
+	button.BackgroundTransparency = if isReady then 0.08 else 0.16
+	icon.Image = if isReady then MOBILE_BOMB_READY_ICON else MOBILE_BOMB_COOLDOWN_ICON
+	icon.ImageTransparency = if hasBomb then (if isReady then 0 else 0.12) else 0.2
+	label.Text = if not hasBomb then "Bomb" else if isReady then "Bomb" else string.format("%.1fs", remainingCooldown)
+	label.TextColor3 = if isReady then Color3.fromRGB(255, 240, 226) else Color3.fromRGB(217, 217, 217)
+
+	local stroke = button:FindFirstChildOfClass("UIStroke")
+	if stroke then
+		stroke.Color = if isReady then Color3.fromRGB(255, 163, 94) else if hasBomb then Color3.fromRGB(126, 126, 126) else Color3.fromRGB(170, 170, 170)
+	end
+
+	local glow = button:FindFirstChild("Glow")
+	if glow and glow:IsA("Frame") then
+		glow.BackgroundTransparency = if isReady then 0.82 else if hasBomb then 0.9 else 0.93
+	end
+end
+
+local function tryActivateBombFromButton(tool: Tool)
+	currentTool = tool
+	if BombToolClient.TryActivate(tool) then
+		animateMobileBombButtonPress()
+	end
+	updateMobileBombButtonState()
+end
+
+local function ensureMobileBombButton()
+	if mobileBombButton and mobileBombButton.Parent then
+		return mobileBombButton
+	end
+
+	local guiRoot = getGuiRoot()
+	if not guiRoot then
+		return nil
+	end
+
+	local button = Instance.new("ImageButton")
+	button.Name = "MobileBombButton"
+	button.AnchorPoint = Vector2.new(1, 1)
+	button.Position = UDim2.new(1, -MOBILE_BOMB_MARGIN_RIGHT, 1, -MOBILE_BOMB_MARGIN_BOTTOM)
+	button.Size = UDim2.new(0.15, 0, 0.15, 0)
+	button.BackgroundColor3 = Color3.fromRGB(26, 28, 37)
+	button.BackgroundTransparency = 0.08
+	button.AutoButtonColor = false
+	button.BorderSizePixel = 0
+	button.ImageTransparency = 1
+	button.ClipsDescendants = false
+	button.Visible = true
+	button.ZIndex = 45
+	button.Parent = guiRoot
+
+	local sizeConstraint = Instance.new("UISizeConstraint")
+	sizeConstraint.MinSize = Vector2.new(82, 82)
+	sizeConstraint.MaxSize = Vector2.new(112, 112)
+	sizeConstraint.Parent = button
+
+	local aspect = Instance.new("UIAspectRatioConstraint")
+	aspect.AspectRatio = 1
+	aspect.Parent = button
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(1, 0)
+	corner.Parent = button
+
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = Color3.fromRGB(255, 163, 94)
+	stroke.Thickness = 2
+	stroke.Transparency = 0.1
+	stroke.Parent = button
+
+	local gradient = Instance.new("UIGradient")
+	gradient.Rotation = 135
+	gradient.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 136, 77)),
+		ColorSequenceKeypoint.new(0.45, Color3.fromRGB(255, 190, 118)),
+		ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 108, 87)),
+	})
+	gradient.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.55),
+		NumberSequenceKeypoint.new(0.5, 0.76),
+		NumberSequenceKeypoint.new(1, 0.45),
+	})
+	gradient.Parent = button
+
+	local glow = Instance.new("Frame")
+	glow.Name = "Glow"
+	glow.AnchorPoint = Vector2.new(0.5, 0.5)
+	glow.Position = UDim2.fromScale(0.5, 0.5)
+	glow.Size = UDim2.new(1, 20, 1, 20)
+	glow.BackgroundColor3 = Color3.fromRGB(255, 150, 82)
+	glow.BackgroundTransparency = 0.82
+	glow.BorderSizePixel = 0
+	glow.ZIndex = 44
+	glow.Parent = button
+
+	local glowCorner = Instance.new("UICorner")
+	glowCorner.CornerRadius = UDim.new(1, 0)
+	glowCorner.Parent = glow
+
+	local shine = Instance.new("Frame")
+	shine.Name = "Shine"
+	shine.AnchorPoint = Vector2.new(0.5, 0)
+	shine.Position = UDim2.fromScale(0.5, 0.08)
+	shine.Size = UDim2.new(0.72, 0, 0.22, 0)
+	shine.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+	shine.BackgroundTransparency = 0.85
+	shine.BorderSizePixel = 0
+	shine.ZIndex = 46
+	shine.Parent = button
+
+	local shineCorner = Instance.new("UICorner")
+	shineCorner.CornerRadius = UDim.new(1, 0)
+	shineCorner.Parent = shine
+
+	local icon = Instance.new("ImageLabel")
+	icon.Name = "Icon"
+	icon.AnchorPoint = Vector2.new(0.5, 0.5)
+	icon.Position = UDim2.fromScale(0.5, 0.44)
+	icon.Size = UDim2.fromScale(0.52, 0.52)
+	icon.BackgroundTransparency = 1
+	icon.Image = MOBILE_BOMB_READY_ICON
+	icon.ScaleType = Enum.ScaleType.Fit
+	icon.ZIndex = 47
+	icon.Parent = button
+
+	local label = Instance.new("TextLabel")
+	label.Name = "Label"
+	label.AnchorPoint = Vector2.new(0.5, 1)
+	label.Position = UDim2.fromScale(0.5, 0.92)
+	label.Size = UDim2.new(1, -18, 0, 16)
+	label.BackgroundTransparency = 1
+	label.Font = Enum.Font.GothamBold
+	label.Text = "Bomb"
+	label.TextColor3 = Color3.fromRGB(255, 240, 226)
+	label.TextSize = 12
+	label.TextTransparency = 0.08
+	label.TextScaled = true
+	label.ZIndex = 47
+	label.Parent = button
+
+	local labelConstraint = Instance.new("UITextSizeConstraint")
+	labelConstraint.MinTextSize = 10
+	labelConstraint.MaxTextSize = 14
+	labelConstraint.Parent = label
+
+	local scale = Instance.new("UIScale")
+	scale.Scale = 1
+	scale.Parent = button
+
+	button.Activated:Connect(function()
+		local tool = getAvailableBombTool()
+		if not tool then
+			return
+		end
+
+		local config = PickaxesConfigurations.Pickaxes[tool.Name]
+		if not config then
+			return
+		end
+
+		local remainingCooldown = getBombCooldownRemaining(tool)
+		if remainingCooldown > 0.02 then
+			return
+		end
+
+		local character = player.Character
+		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+		if tool.Parent ~= character and humanoid then
+			humanoid:EquipTool(tool)
+			currentTool = tool
+			updateMobileBombButtonState()
+
+			task.spawn(function()
+				local deadline = tick() + 0.35
+				while tick() < deadline do
+					if tool.Parent == character then
+						tryActivateBombFromButton(tool)
+						return
+					end
+					task.wait()
+				end
+
+				local equippedTool = getCharacterBombTool()
+				if equippedTool then
+					tryActivateBombFromButton(equippedTool)
+				end
+			end)
+			return
+		end
+
+		tryActivateBombFromButton(tool)
+	end)
+
+	mobileBombButton = button
+	mobileBombButtonScale = scale
+	mobileBombButtonIcon = icon
+	mobileBombButtonLabel = label
+
+	updateMobileBombButtonState()
+	return button
+end
 
 -- [ JUICE: HIGHLIGHT LOGIC ]
 local function clearHighlights()
@@ -264,7 +582,7 @@ local function applyDamageToOre(orePart: BasePart, damage: number)
 end
 
 -- [ CORE MINING LOGIC ]
-local function attemptMine(tool: Tool)
+function attemptMine(tool: Tool)
 	local config = PickaxesConfigurations.Pickaxes[tool.Name]
 	if not config then return end
 
@@ -358,9 +676,14 @@ end
 local function onCharacterAdded(character: Model)
 	local humanoid = character:WaitForChild("Humanoid") :: Humanoid
 	local animator = humanoid:WaitForChild("Animator") :: Animator
+	currentTool = nil
+	updateMobileBombButtonState()
+	ensureMobileBombButton()
 
-	character.ChildAdded:Connect(function(child)
+	local function handleToolEquipped(child: Instance)
 		if child:IsA("Tool") and PickaxesConfigurations.Pickaxes[child.Name] then
+			currentTool = child
+			updateMobileBombButtonState()
 
 			local handle = child:WaitForChild("Handle", 2) :: BasePart
 			if handle then
@@ -378,9 +701,7 @@ local function onCharacterAdded(character: Model)
 
 			if activeToolConnection then activeToolConnection:Disconnect() end
 
-			-- ## FIXED: Use UserInputService to perfectly detect Mobile Taps, PC Clicks, and Console Triggers ##
 			activeToolConnection = UserInputService.InputBegan:Connect(function(input, gameProcessedEvent)
-				-- Ignore taps that hit UI buttons or the movement thumbstick
 				if gameProcessedEvent then return end 
 
 				if input.UserInputType == Enum.UserInputType.MouseButton1 
@@ -396,10 +717,19 @@ local function onCharacterAdded(character: Model)
 				updateHighlights(child)
 			end)
 		end
+	end
+
+	character.ChildAdded:Connect(function(child)
+		handleToolEquipped(child)
 	end)
 
 	character.ChildRemoved:Connect(function(child)
 		if child:IsA("Tool") then
+			if child == currentTool then
+				currentTool = nil
+				updateMobileBombButtonState()
+			end
+
 			if activeToolConnection then 
 				activeToolConnection:Disconnect() 
 				activeToolConnection = nil 
@@ -417,9 +747,21 @@ local function onCharacterAdded(character: Model)
 			clearHighlights()
 		end
 	end)
+
+	for _, child in ipairs(character:GetChildren()) do
+		handleToolEquipped(child)
+	end
 end
 
 player.CharacterAdded:Connect(onCharacterAdded)
 if player.Character then onCharacterAdded(player.Character) end
+
+RunService.RenderStepped:Connect(function()
+	if shouldShowMobileBombButton() then
+		ensureMobileBombButton()
+	end
+
+	updateMobileBombButtonState()
+end)
 
 print("[MiningController] Juiced Mining + Mobile Tap Support Active!")

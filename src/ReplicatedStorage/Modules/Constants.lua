@@ -21,8 +21,8 @@ local Constants = {
 		["Zone1"] = { Common = 75, Uncommon = 25 },
 		["Zone2"] = { Uncommon = 60, Rare = 30, Epic = 10 },
 		["Zone3"] = { Rare = 40, Epic = 40, Legendary = 20 },
-		["Zone4"] = { Epic = 30, Legendary = 50, Mythical = 20 },
-		["Zone5"] = { Epic = 10, Legendary = 40, Mythical = 50 },
+		["Zone4"] = { Epic = 30, Legendary = 50, Mythic = 20 },
+		["Zone5"] = { Epic = 10, Legendary = 40, Mythic = 50 },
 	},
 	
 	DEFAULT_CHANCE = { Common = 100 },

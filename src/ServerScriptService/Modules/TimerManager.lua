@@ -8,7 +8,7 @@ local Workspace = game:GetService("Workspace")
 local Constants = require(ReplicatedStorage.Modules.Constants)
 local SpawnUtils = require(ServerScriptService.Modules.SpawnUtils)
 
-local function ensureTimerFinishEvent(): BindableEvent
+local function ensureTimerFolder(): Folder
 	local remotesFolder = ReplicatedStorage:FindFirstChild("Remotes")
 	if not remotesFolder then
 		remotesFolder = Instance.new("Folder")
@@ -23,6 +23,11 @@ local function ensureTimerFinishEvent(): BindableEvent
 		timerFolder.Parent = remotesFolder
 	end
 
+	return timerFolder
+end
+
+local function ensureTimerFinishEvent(): BindableEvent
+	local timerFolder = ensureTimerFolder()
 	local finishTime = timerFolder:FindFirstChild("FinishTime")
 	if not finishTime then
 		finishTime = Instance.new("BindableEvent")
@@ -33,7 +38,21 @@ local function ensureTimerFinishEvent(): BindableEvent
 	return finishTime :: BindableEvent
 end
 
+local function ensureRoundStartedEvent(): BindableEvent
+	local timerFolder = ensureTimerFolder()
+	local roundStarted = timerFolder:FindFirstChild("RoundStarted")
+	if not roundStarted then
+		roundStarted = Instance.new("BindableEvent")
+		roundStarted.Name = "RoundStarted"
+		roundStarted.Parent = timerFolder
+	end
+
+	return roundStarted :: BindableEvent
+end
+
 local FinishTime = ensureTimerFinishEvent()
+local RoundStarted = ensureRoundStartedEvent()
+local currentRoundId = 0
 
 local function teleportPlayerToBase(player: Player)
 	local character = player.Character
@@ -60,10 +79,15 @@ end
 function TimerManager:Start()
 	task.spawn(function()
 		while true do
+			currentRoundId += 1
 			local remaining = Constants.SESSION_DURATION
+			local startedAt = Workspace:GetServerTimeNow()
+			Workspace:SetAttribute("SessionRoundId", currentRoundId)
+			Workspace:SetAttribute("SessionRoundStartedAt", startedAt)
 			Workspace:SetAttribute("SessionTimeRemaining", remaining)
 			Workspace:SetAttribute("SessionMessage", "")
 			Workspace:SetAttribute("SessionEnded", false)
+			RoundStarted:Fire(currentRoundId, startedAt, Constants.SESSION_DURATION)
 
 			while remaining > 0 do
 				task.wait(1)

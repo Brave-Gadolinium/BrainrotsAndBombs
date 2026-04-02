@@ -167,42 +167,47 @@ local function playCooldownVisual(tool: Tool)
 	end)
 end
 
+function BombToolClient.TryActivate(tool: Tool): boolean
+	if tool.Parent ~= player.Character then
+		return false
+	end
+
+	local state = getToolState(tool)
+	if state.WaitingForServer then
+		return false
+	end
+
+	local cooldownEndsAt = tool:GetAttribute("CooldownEndsAt")
+	if type(cooldownEndsAt) == "number" and cooldownEndsAt > Workspace:GetServerTimeNow() then
+		return false
+	end
+
+	state.RequestId += 1
+	local requestId = state.RequestId
+	state.WaitingForServer = true
+
+	task.delay(0.35, function()
+		local currentState = toolStates[tool]
+		if not currentState then
+			return
+		end
+
+		if currentState.RequestId == requestId then
+			currentState.WaitingForServer = false
+		end
+	end)
+
+	local camera = Workspace.CurrentCamera
+	local cameraLookVector = if camera then camera.CFrame.LookVector else nil
+	remote:FireServer(cameraLookVector)
+	return true
+end
+
 function BombToolClient.Bind(tool: Tool)
 	ensureTimerGui(tool)
 
 	tool.Activated:Connect(function()
-		if tool.Parent ~= player.Character then
-			return
-		end
-
-		local state = getToolState(tool)
-		if state.WaitingForServer then
-			return
-		end
-
-		local cooldownEndsAt = tool:GetAttribute("CooldownEndsAt")
-		if type(cooldownEndsAt) == "number" and cooldownEndsAt > Workspace:GetServerTimeNow() then
-			return
-		end
-
-		state.RequestId += 1
-		local requestId = state.RequestId
-		state.WaitingForServer = true
-
-		task.delay(0.35, function()
-			local currentState = toolStates[tool]
-			if not currentState then
-				return
-			end
-
-			if currentState.RequestId == requestId then
-				currentState.WaitingForServer = false
-			end
-		end)
-
-		local camera = Workspace.CurrentCamera
-		local cameraLookVector = if camera then camera.CFrame.LookVector else nil
-		remote:FireServer(cameraLookVector)
+		BombToolClient.TryActivate(tool)
 	end)
 
 	tool:GetAttributeChangedSignal("CooldownEndsAt"):Connect(function()

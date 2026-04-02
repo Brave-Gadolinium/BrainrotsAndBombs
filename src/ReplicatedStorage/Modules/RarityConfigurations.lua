@@ -1,4 +1,27 @@
 --!strict
+
+local mythicConfiguration = {
+	DisplayName = "Mythic",
+	TextColor = Color3.fromRGB(255, 255, 255),
+	StrokeColor = Color3.fromRGB(100, 33, 50),
+	StrokeThickness = 3,
+	GradientColor = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 0, 127)),
+		ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 170, 127)),
+	}),
+}
+
+local brainrotGodConfiguration = {
+	DisplayName = "Brainrot God",
+	TextColor = Color3.fromRGB(255, 245, 200),
+	StrokeColor = Color3.fromRGB(156, 92, 16),
+	StrokeThickness = 3,
+	GradientColor = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 170, 0)),
+		ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 245, 120)),
+	}),
+}
+
 local RarityConfigurations = {
 	Common = {
 		DisplayName = "Common",
@@ -50,16 +73,9 @@ local RarityConfigurations = {
 			ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 255, 0)),
 		})
 	},
-	Mythical = {
-		DisplayName = "Mythical",
-		TextColor = Color3.fromRGB(255, 255, 255),
-		StrokeColor = Color3.fromRGB(100, 33, 50),
-		StrokeThickness = 3,
-		GradientColor = ColorSequence.new({
-			ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 0, 127)),
-			ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 170, 127)),
-		})
-	},
+	Mythic = mythicConfiguration,
+	Mythical = mythicConfiguration,
+	Brainrotgod = brainrotGodConfiguration,
 }
 
 return RarityConfigurations

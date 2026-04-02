@@ -20,7 +20,9 @@ local RebirthSystem = require(ServerScriptService.Modules.RebirthSystem)
 local PlotRuntimeBridge = require(ServerScriptService.Modules.PlotRuntimeBridge)
 local SpawnUtils = require(ServerScriptService.Modules.SpawnUtils)
 local TutorialService = require(ServerScriptService.Modules.TutorialService)
+local RoundBrainrotEventManager = require(ServerScriptService.Modules.RoundBrainrotEventManager)
 
+local BrainrotEventConfiguration = require(ReplicatedStorage.Modules.BrainrotEventConfiguration)
 local ProductConfigurations = require(ReplicatedStorage.Modules.ProductConfigurations)
 local ItemConfigurations = require(ReplicatedStorage.Modules.ItemConfigurations)
 local LuckyBlockConfiguration = require(ReplicatedStorage.Modules.LuckyBlockConfiguration)
@@ -611,6 +613,27 @@ local function buildUIEffectOptions()
 	}
 end
 
+local function buildBrainrotEventTypeOptions()
+	local options = {}
+
+	for _, definition in ipairs(BrainrotEventConfiguration.EventTypes) do
+		table.insert(
+			options,
+			buildOption(
+				definition.Id,
+				`{definition.Id} [{definition.Rarity}]`,
+				string.lower(definition.Id .. " " .. definition.Rarity .. " " .. definition.Message)
+			)
+		)
+	end
+
+	table.sort(options, function(a, b)
+		return string.lower(a.label) < string.lower(b.label)
+	end)
+
+	return options
+end
+
 local itemOptions = buildItemOptions()
 local rarityOptions = buildRarityOptions()
 local mutationOptions = buildMutationOptions()
@@ -626,6 +649,7 @@ local spinProductOptions = buildSpinProductOptions()
 local teleportOptions = buildTeleportOptions()
 local notificationTypeOptions = buildNotificationTypeOptions()
 local uiEffectOptions = buildUIEffectOptions()
+local brainrotEventTypeOptions = buildBrainrotEventTypeOptions()
 
 local function buildAccessBadgeColor(accessLevel: string): Color3
 	if accessLevel == "studio_admin" then
@@ -2592,6 +2616,37 @@ registerAction({
 			return true, "Profile saved."
 		end
 		return false, "Failed to save profile."
+	end,
+})
+
+registerAction({
+	id = "force_brainrot_event",
+	label = "Force Brainrot Event",
+	description = "Immediately starts one mythic brainrot event of the selected type.",
+	category = "World / QA",
+	order = 55,
+	minAccess = "tester",
+	allowOtherTarget = false,
+	inputs = {
+		searchSelectInput("eventType", "Event Type", "Mythic", brainrotEventTypeOptions, "Pick an event type"),
+	},
+	handler = function(_executor, _target, params)
+		local eventType = normalizeString(params.eventType, "Mythic") or "Mythic"
+		return RoundBrainrotEventManager:ForceStartEvent(eventType)
+	end,
+})
+
+registerAction({
+	id = "clear_brainrot_event",
+	label = "Clear Brainrot Event",
+	description = "Removes the active mythic brainrot event and clears its UI state.",
+	category = "World / QA",
+	order = 57,
+	minAccess = "tester",
+	allowOtherTarget = false,
+	inputs = {},
+	handler = function()
+		return RoundBrainrotEventManager:ForceClearActiveEvent()
 	end,
 })
 

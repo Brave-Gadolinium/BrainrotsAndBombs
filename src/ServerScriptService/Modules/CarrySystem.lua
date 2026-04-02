@@ -20,6 +20,7 @@ local AnalyticsFunnelsService = require(ServerScriptService.Modules.AnalyticsFun
 local AnalyticsEconomyService = require(ServerScriptService.Modules.AnalyticsEconomyService)
 local ItemManager -- Lazy Loaded
 local PickaxeController -- ## ADDED ##
+local RoundBrainrotEventManager -- Lazy Loaded
 local TRANSACTION_TYPES = AnalyticsEconomyService:GetTransactionTypes()
 
 -- [ ASSETS ]
@@ -40,6 +41,17 @@ local lastBombRepairAttempt: {[Player]: number} = {}
 local CHECK_INTERVAL = 0.2 
 local STACK_GAP = 0.5 
 
+local function getFallbackDropPosition(): (Vector3, Vector3)
+	local mines = Workspace:FindFirstChild("Mines")
+	local zonePart = mines and mines:FindFirstChild("Zone5")
+	if zonePart and zonePart:IsA("BasePart") then
+		local elevatedPosition = zonePart.Position + Vector3.new(0, (zonePart.Size.Y * 0.5) + 8, 0)
+		return elevatedPosition, elevatedPosition
+	end
+
+	return Vector3.new(0, 12, 0), Vector3.new(0, 12, 0)
+end
+
 -- [ HELPERS ]
 local function isInsideAnyZone(position: Vector3): boolean
 	for _, zonePart in ipairs(CollectionZones:GetChildren()) do
@@ -57,7 +69,7 @@ local function isInsideAnyZone(position: Vector3): boolean
 	return false
 end
 
-local function createStackItem(player: Player, itemName: string, mutation: string)
+local function createStackItem(player: Player, itemName: string, mutation: string, eventAttributes: {[string]: any}?)
 	local character = player.Character
 	if not character then return nil end
 
@@ -70,6 +82,11 @@ local function createStackItem(player: Player, itemName: string, mutation: strin
 
 	local model = template:Clone() :: Model
 	model.Name = "StackItem"
+	if type(eventAttributes) == "table" then
+		for attributeName, attributeValue in pairs(eventAttributes) do
+			model:SetAttribute(attributeName, attributeValue)
+		end
+	end
 
 	local primary = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart")
 	if not primary then return nil end
@@ -117,6 +134,68 @@ local function createStackItem(player: Player, itemName: string, mutation: strin
 	return model
 end
 
+local function getRoundBrainrotEventManager()
+	if not RoundBrainrotEventManager then
+		local roundBrainrotEventModule = ServerScriptService.Modules:FindFirstChild("RoundBrainrotEventManager")
+		if roundBrainrotEventModule and roundBrainrotEventModule:IsA("ModuleScript") then
+			RoundBrainrotEventManager = require(roundBrainrotEventModule)
+		end
+	end
+
+	return RoundBrainrotEventManager
+end
+
+local function dropCarriedItemData(itemData, targetPos: Vector3, originPos: Vector3?)
+	local roundBrainrotEventManager = getRoundBrainrotEventManager()
+	local handledByEventManager = roundBrainrotEventManager
+		and roundBrainrotEventManager.HandleEventItemDropped
+		and roundBrainrotEventManager:HandleEventItemDropped(itemData, targetPos, originPos)
+
+	if handledByEventManager then
+		return
+	end
+
+	ItemManager.SpawnDroppedItem(
+		itemData.Name,
+		itemData.Mutation,
+		itemData.Rarity,
+		targetPos,
+		originPos,
+		{
+			Level = itemData.Level or 1,
+			ExtraAttributes = itemData.EventAttributes,
+		}
+	)
+end
+
+local function restoreActiveEventItemsFromCarry(player: Player)
+	local items = carryingData[player]
+	if not items or #items == 0 then
+		return
+	end
+
+	local character = player.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart") :: BasePart?
+	local head = character and character:FindFirstChild("Head") :: BasePart?
+	local baseDropPosition = if root then root.Position else if head then head.Position else nil
+	local dropPosition: Vector3
+	local originPosition: Vector3
+
+	if baseDropPosition then
+		local forwardVector = if root then root.CFrame.LookVector else Vector3.new(0, 0, -1)
+		dropPosition = baseDropPosition + (forwardVector * 3)
+		originPosition = if head then head.Position else baseDropPosition
+	else
+		dropPosition, originPosition = getFallbackDropPosition()
+	end
+
+	for _, itemData in ipairs(items) do
+		if type(itemData.EventAttributes) == "table" then
+			dropCarriedItemData(itemData, dropPosition, originPosition)
+		end
+	end
+end
+
 local function clearVisualStack(player: Player)
 	local items = carryingData[player]
 	if items then
@@ -140,18 +219,29 @@ function CarrySystem.CanCarryMore(player: Player): boolean
 	return #current < limit
 end
 
-function CarrySystem.AddItemToCarry(player: Player, name: string, mutation: string, rarity: string)
+function CarrySystem.AddItemToCarry(player: Player, name: string, mutation: string, rarity: string, _source: BasePart?, metadata)
 	if not carryingData[player] then carryingData[player] = {} end
 
+	local level = type(metadata) == "table" and (metadata.Level or 1) or 1
+	local eventAttributes = type(metadata) == "table" and metadata.EventAttributes or nil
+
 	if CarrySystem.CanCarryMore(player) then
-		local visualModel = createStackItem(player, name, mutation)
+		local visualModel = createStackItem(player, name, mutation, eventAttributes)
 
 		table.insert(carryingData[player], {
 			Name = name,
 			Mutation = mutation,
 			Rarity = rarity,
+			Level = level,
+			EventAttributes = eventAttributes,
 			VisualModel = visualModel
 		})
+
+		local token = type(eventAttributes) == "table" and eventAttributes.EventBrainrotToken or nil
+		local roundBrainrotEventManager = getRoundBrainrotEventManager()
+		if roundBrainrotEventManager and roundBrainrotEventManager.HandleEventItemPickedUp and type(token) == "string" then
+			roundBrainrotEventManager:HandleEventItemPickedUp(player, token)
+		end
 		return true
 	end
 
@@ -186,13 +276,7 @@ function CarrySystem.DropItemsAtFeet(player: Player)
 		local originPos = head and head.Position or root.Position
 
 		for _, itemData in ipairs(items) do
-			ItemManager.SpawnDroppedItem(
-				itemData.Name,
-				itemData.Mutation,
-				itemData.Rarity,
-				dropPos,
-				originPos
-			)
+			dropCarriedItemData(itemData, dropPos, originPos)
 		end
 	end
 
@@ -229,13 +313,7 @@ function CarrySystem.DropOneItemAtFeet(player: Player): boolean
 	local originPos = head and head.Position or root.Position
 	local dropPos = root.Position + (root.CFrame.LookVector * 3)
 
-	ItemManager.SpawnDroppedItem(
-		itemData.Name,
-		itemData.Mutation,
-		itemData.Rarity,
-		dropPos,
-		originPos
-	)
+	dropCarriedItemData(itemData, dropPos, originPos)
 
 	return true
 end
@@ -265,7 +343,15 @@ local function processZoneExit(player: Player)
 
 			for _, itemData in ipairs(items) do
 				-- Capture the returned tool
-				local newTool = ItemManager.GiveItemToPlayer(player, itemData.Name, itemData.Mutation, itemData.Rarity, 1, false)
+				local newTool = ItemManager.GiveItemToPlayer(
+					player,
+					itemData.Name,
+					itemData.Mutation,
+					itemData.Rarity,
+					itemData.Level or 1,
+					false,
+					itemData.EventAttributes
+				)
 				if newTool then lastGivenTool = newTool end
 				if newTool then
 					AnalyticsEconomyService:LogItemValueSourceForItem(
@@ -283,6 +369,12 @@ local function processZoneExit(player: Player)
 							mutation = itemData.Mutation,
 						}
 					)
+				end
+				if newTool then
+					local roundBrainrotEventManager = getRoundBrainrotEventManager()
+					if roundBrainrotEventManager and roundBrainrotEventManager.HandleEventItemDelivered then
+						roundBrainrotEventManager:HandleEventItemDelivered(newTool)
+					end
 				end
 				totalCollected += 1
 				BadgeManager:EvaluateBrainrotMilestones(player, itemData.Rarity, totalCollected)
@@ -404,13 +496,31 @@ function CarrySystem:Init()
 	end
 
 	clearEvent.OnServerEvent:Connect(function(player)
+		restoreActiveEventItemsFromCarry(player)
 		CarrySystem.ClearAllItems(player)
 	end)
 end
 
 function CarrySystem:Start()
+	local function bindCharacter(player: Player, character: Model)
+		local humanoid = character:FindFirstChildOfClass("Humanoid") or character:WaitForChild("Humanoid", 5)
+		if humanoid then
+			humanoid.Died:Connect(function()
+				restoreActiveEventItemsFromCarry(player)
+				CarrySystem.ClearAllItems(player)
+			end)
+		end
+	end
+
 	local function onPlayerAdded(player)
-		player.CharacterAdded:Connect(function() carryingData[player] = {} end)
+		player.CharacterAdded:Connect(function(character)
+			carryingData[player] = {}
+			bindCharacter(player, character)
+		end)
+
+		if player.Character then
+			bindCharacter(player, player.Character)
+		end
 	end
 
 	for _, player in ipairs(Players:GetPlayers()) do onPlayerAdded(player) end
@@ -448,6 +558,8 @@ function CarrySystem:Start()
 	end)
 
 	Players.PlayerRemoving:Connect(function(player)
+		restoreActiveEventItemsFromCarry(player)
+		CarrySystem.ClearAllItems(player)
 		carryingData[player] = nil
 		playersInZone[player] = nil
 		lastLimitNotif[player] = nil
