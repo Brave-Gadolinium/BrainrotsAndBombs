@@ -108,34 +108,67 @@ local function getEquipState(player: Player): {InProgress: boolean, PendingPicka
 	return state
 end
 
+local function getPreferredPickaxeName(player: Player): string
+	local profile = PlayerController and PlayerController:GetProfile(player)
+	local equippedPickaxe = profile and profile.Data and profile.Data.EquippedPickaxe
+	if type(equippedPickaxe) == "string" and BombsConfigurations.Bombs[equippedPickaxe] then
+		return equippedPickaxe
+	end
+
+	return "Bomb 1"
+end
+
+local function collectBombTools(container: Instance?): {Tool}
+	local tools = {}
+	if not container then
+		return tools
+	end
+
+	for _, child in ipairs(container:GetChildren()) do
+		if child:IsA("Tool") and BombsConfigurations.Bombs[child.Name] then
+			table.insert(tools, child)
+		end
+	end
+
+	return tools
+end
+
+local function findNamedBombTool(tools: {Tool}, preferredPickaxeName: string?): Tool?
+	if preferredPickaxeName == nil then
+		return nil
+	end
+
+	for _, tool in ipairs(tools) do
+		if tool.Name == preferredPickaxeName then
+			return tool
+		end
+	end
+
+	return nil
+end
+
 local function deduplicatePickaxes(player: Player, preferredPickaxeName: string?): Tool?
 	local character = player.Character
 	local backpack = player:FindFirstChild("Backpack")
 	local starterGear = player:FindFirstChild("StarterGear")
-	local keptActiveTool: Tool? = nil
+	local characterTools = collectBombTools(character)
+	local backpackTools = collectBombTools(backpack)
+	local keptActiveTool = findNamedBombTool(characterTools, preferredPickaxeName)
+		or findNamedBombTool(backpackTools, preferredPickaxeName)
+		or characterTools[1]
+		or backpackTools[1]
 
-	local function processContainer(container: Instance?, allowKeep: boolean)
-		if not container then
-			return
-		end
-
-		for _, child in ipairs(container:GetChildren()) do
-			if child:IsA("Tool") and BombsConfigurations.Bombs[child.Name] then
-				local shouldPrefer = preferredPickaxeName ~= nil and child.Name == preferredPickaxeName
-				if allowKeep and (not keptActiveTool or shouldPrefer) then
-					if keptActiveTool and keptActiveTool ~= child and keptActiveTool.Parent then
-						keptActiveTool:Destroy()
-					end
-					keptActiveTool = child
-				else
-					child:Destroy()
-				end
-			end
+	for _, tool in ipairs(characterTools) do
+		if tool ~= keptActiveTool then
+			tool:Destroy()
 		end
 	end
 
-	processContainer(character, true)
-	processContainer(backpack, true)
+	for _, tool in ipairs(backpackTools) do
+		if tool ~= keptActiveTool then
+			tool:Destroy()
+		end
+	end
 
 	if starterGear then
 		local keptStarterGear = false
@@ -189,6 +222,15 @@ local function getCurrentBombTool(player: Player): Tool?
 	return nil
 end
 
+local function resolvePreferredBombTool(player: Player, preferredPickaxeName: string?): Tool?
+	local resolvedPreferred = preferredPickaxeName
+	if type(resolvedPreferred) ~= "string" or not BombsConfigurations.Bombs[resolvedPreferred] then
+		resolvedPreferred = getPreferredPickaxeName(player)
+	end
+
+	return deduplicatePickaxes(player, resolvedPreferred) or getCurrentBombTool(player)
+end
+
 local function moveBombToFirstSlot(player: Player, bombTool: Tool, shouldEquipAfter: boolean): Tool?
 	local backpack = player:FindFirstChild("Backpack")
 	if not backpack or not bombTool.Parent then
@@ -197,17 +239,12 @@ local function moveBombToFirstSlot(player: Player, bombTool: Tool, shouldEquipAf
 
 	local character = player.Character
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if bombTool.Parent == character then
+		return bombTool
+	end
+
 	if bombTool.Parent ~= backpack then
-		if humanoid and bombTool.Parent == character then
-			humanoid:UnequipTools()
-			task.wait()
-		end
-
-		if not bombTool.Parent then
-			return nil
-		end
-
-		bombTool.Parent = backpack
+		return nil
 	end
 
 	local otherTools = {}
@@ -274,9 +311,8 @@ local function performEquipPickaxe(player: Player, pickaxeName: string)
 end
 
 function PickaxeController.EnsureBombFirstSlot(player: Player)
-	local profile = PlayerController and PlayerController:GetProfile(player)
-	local equippedPickaxe = profile and profile.Data and profile.Data.EquippedPickaxe or "Bomb 1"
-	local bombTool = deduplicatePickaxes(player, equippedPickaxe) or getCurrentBombTool(player)
+	local equippedPickaxe = getPreferredPickaxeName(player)
+	local bombTool = resolvePreferredBombTool(player, equippedPickaxe)
 
 	if not bombTool and type(equippedPickaxe) == "string" and BombsConfigurations.Bombs[equippedPickaxe] then
 		PickaxeController.EquipPickaxe(player, equippedPickaxe)
@@ -287,13 +323,14 @@ function PickaxeController.EnsureBombFirstSlot(player: Player)
 		return
 	end
 
-	moveBombToFirstSlot(player, bombTool, bombTool.Parent == player.Character)
+	if bombTool.Parent ~= player.Character then
+		moveBombToFirstSlot(player, bombTool, false)
+	end
 end
 
 function PickaxeController.EnsureBombEquipped(player: Player)
-	local profile = PlayerController and PlayerController:GetProfile(player)
-	local equippedPickaxe = profile and profile.Data and profile.Data.EquippedPickaxe or "Bomb 1"
-	local bombTool = deduplicatePickaxes(player, equippedPickaxe) or getCurrentBombTool(player)
+	local equippedPickaxe = getPreferredPickaxeName(player)
+	local bombTool = resolvePreferredBombTool(player, equippedPickaxe)
 
 	if not bombTool and type(equippedPickaxe) == "string" and BombsConfigurations.Bombs[equippedPickaxe] then
 		PickaxeController.EquipPickaxe(player, equippedPickaxe)
@@ -304,9 +341,19 @@ function PickaxeController.EnsureBombEquipped(player: Player)
 		return
 	end
 
-	local character = player.Character
-	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-	moveBombToFirstSlot(player, bombTool, humanoid ~= nil)
+	if bombTool.Parent == player.Character then
+		return
+	end
+
+	moveBombToFirstSlot(player, bombTool, true)
+end
+
+function PickaxeController.GetPreferredPickaxeName(player: Player): string
+	return getPreferredPickaxeName(player)
+end
+
+function PickaxeController.ResolvePreferredBombTool(player: Player): Tool?
+	return resolvePreferredBombTool(player, getPreferredPickaxeName(player))
 end
 
 function PickaxeController.EquipPickaxe(player: Player, pickaxeName: string)

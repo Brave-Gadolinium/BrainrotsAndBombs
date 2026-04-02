@@ -33,17 +33,16 @@ local highlightLoop: RBXScriptConnection? = nil
 
 local MOBILE_BOMB_READY_ICON = "rbxassetid://123855876242070"
 local MOBILE_BOMB_COOLDOWN_ICON = "rbxassetid://135164909685622"
-local MOBILE_BOMB_MARGIN_RIGHT = 56
+local MOBILE_BOMB_MARGIN_RIGHT = 152
 local MOBILE_BOMB_MARGIN_BOTTOM = 92
 
 local mobileBombButton: ImageButton? = nil
 local mobileBombButtonScale: UIScale? = nil
 local mobileBombButtonIcon: ImageLabel? = nil
-local mobileBombButtonLabel: TextLabel? = nil
 local attemptMine: (tool: Tool) -> ()
 
 local function shouldShowMobileBombButton(): boolean
-	return true
+	return UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled and not UserInputService.MouseEnabled
 end
 
 local function getCharacterBombTool(): Tool?
@@ -121,8 +120,7 @@ end
 local function updateMobileBombButtonState()
 	local button = mobileBombButton
 	local icon = mobileBombButtonIcon
-	local label = mobileBombButtonLabel
-	if not button or not icon or not label then
+	if not button or not icon then
 		return
 	end
 
@@ -149,8 +147,6 @@ local function updateMobileBombButtonState()
 	button.BackgroundTransparency = if isReady then 0.08 else 0.16
 	icon.Image = if isReady then MOBILE_BOMB_READY_ICON else MOBILE_BOMB_COOLDOWN_ICON
 	icon.ImageTransparency = if hasBomb then (if isReady then 0 else 0.12) else 0.2
-	label.Text = if not hasBomb then "Bomb" else if isReady then "Bomb" else string.format("%.1fs", remainingCooldown)
-	label.TextColor3 = if isReady then Color3.fromRGB(255, 240, 226) else Color3.fromRGB(217, 217, 217)
 
 	local stroke = button:FindFirstChildOfClass("UIStroke")
 	if stroke then
@@ -262,33 +258,13 @@ local function ensureMobileBombButton()
 	local icon = Instance.new("ImageLabel")
 	icon.Name = "Icon"
 	icon.AnchorPoint = Vector2.new(0.5, 0.5)
-	icon.Position = UDim2.fromScale(0.5, 0.44)
-	icon.Size = UDim2.fromScale(0.52, 0.52)
+	icon.Position = UDim2.fromScale(0.5, 0.5)
+	icon.Size = UDim2.fromScale(1, 1)
 	icon.BackgroundTransparency = 1
 	icon.Image = MOBILE_BOMB_READY_ICON
 	icon.ScaleType = Enum.ScaleType.Fit
 	icon.ZIndex = 47
 	icon.Parent = button
-
-	local label = Instance.new("TextLabel")
-	label.Name = "Label"
-	label.AnchorPoint = Vector2.new(0.5, 1)
-	label.Position = UDim2.fromScale(0.5, 0.92)
-	label.Size = UDim2.new(1, -18, 0, 16)
-	label.BackgroundTransparency = 1
-	label.Font = Enum.Font.GothamBold
-	label.Text = "Bomb"
-	label.TextColor3 = Color3.fromRGB(255, 240, 226)
-	label.TextSize = 12
-	label.TextTransparency = 0.08
-	label.TextScaled = true
-	label.ZIndex = 47
-	label.Parent = button
-
-	local labelConstraint = Instance.new("UITextSizeConstraint")
-	labelConstraint.MinTextSize = 10
-	labelConstraint.MaxTextSize = 14
-	labelConstraint.Parent = label
 
 	local scale = Instance.new("UIScale")
 	scale.Scale = 1
@@ -297,41 +273,13 @@ local function ensureMobileBombButton()
 	button.Activated:Connect(function()
 		local tool = getAvailableBombTool()
 		if not tool then
+			updateMobileBombButtonState()
 			return
 		end
 
 		local config = PickaxesConfigurations.Pickaxes[tool.Name]
 		if not config then
-			return
-		end
-
-		local remainingCooldown = getBombCooldownRemaining(tool)
-		if remainingCooldown > 0.02 then
-			return
-		end
-
-		local character = player.Character
-		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-		if tool.Parent ~= character and humanoid then
-			humanoid:EquipTool(tool)
-			currentTool = tool
 			updateMobileBombButtonState()
-
-			task.spawn(function()
-				local deadline = tick() + 0.35
-				while tick() < deadline do
-					if tool.Parent == character then
-						tryActivateBombFromButton(tool)
-						return
-					end
-					task.wait()
-				end
-
-				local equippedTool = getCharacterBombTool()
-				if equippedTool then
-					tryActivateBombFromButton(equippedTool)
-				end
-			end)
 			return
 		end
 
@@ -341,7 +289,6 @@ local function ensureMobileBombButton()
 	mobileBombButton = button
 	mobileBombButtonScale = scale
 	mobileBombButtonIcon = icon
-	mobileBombButtonLabel = label
 
 	updateMobileBombButtonState()
 	return button
@@ -697,25 +644,18 @@ local function onCharacterAdded(character: Model)
 				end
 			end
 
-			currentAnimationTrack = animator:LoadAnimation(PickaxeAnimation)
-
 			if activeToolConnection then activeToolConnection:Disconnect() end
+			activeToolConnection = nil
 
-			activeToolConnection = UserInputService.InputBegan:Connect(function(input, gameProcessedEvent)
-				if gameProcessedEvent then return end 
-
-				if input.UserInputType == Enum.UserInputType.MouseButton1 
-					or input.UserInputType == Enum.UserInputType.Touch 
-					or input.KeyCode == Enum.KeyCode.ButtonR2 then
-
-					attemptMine(child)
-				end
-			end)
+			if currentAnimationTrack then
+				currentAnimationTrack:Stop()
+				currentAnimationTrack:Destroy()
+				currentAnimationTrack = nil
+			end
 
 			if highlightLoop then highlightLoop:Disconnect() end
-			highlightLoop = RunService.RenderStepped:Connect(function()
-				updateHighlights(child)
-			end)
+			highlightLoop = nil
+			clearHighlights()
 		end
 	end
 

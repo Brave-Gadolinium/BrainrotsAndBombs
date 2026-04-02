@@ -3,8 +3,6 @@
 
 local BadgeConfigurations = {}
 
-BadgeConfigurations.TutorialCompletionStep = 6
-
 -- TODO: Replace all `Id = 0` values below with real Roblox badge ids before release.
 
 BadgeConfigurations.Badges = {

@@ -18,11 +18,8 @@ local Zones = Workspace:WaitForChild("Zones")
 local gui = playerGui:WaitForChild("GUI")
 local hud = gui:WaitForChild("HUD")
 local dropButton = hud:WaitForChild("Drop") :: GuiButton 
-local backButton = hud:WaitForChild("Back") :: GuiButton 
 
 print("[DropController] Loaded (Smart Visibility Active)")
-
-backButton.Visible = true
 
 -- [ HELPERS ]
 local function isInsideAnyZone(position: Vector3): boolean

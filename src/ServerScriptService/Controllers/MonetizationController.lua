@@ -114,15 +114,15 @@ function MonetizationController.ProcessReceipt(receiptInfo)
 				if hum then hum.WalkSpeed = 16 + profile.Data[statId] end
 			end
 
-			local UpgradesSystem = require(ServerScriptService.Modules.UpgradesSystem)
-			UpgradesSystem.UpdateClientUI(player)
-
 			if targetUpgradeConfig.HiddenInUI ~= true then
 				local tutorialService = getTutorialService()
 				if tutorialService then
 					tutorialService:HandlePostTutorialCharacterUpgradePurchased(player, targetUpgradeConfig.Id)
 				end
 			end
+
+			local UpgradesSystem = require(ServerScriptService.Modules.UpgradesSystem)
+			UpgradesSystem.UpdateClientUI(player)
 
 			if notif then notif:FireClient(player, "+" .. upgradeAmount .. " " .. targetUpgradeConfig.DisplayName .. " Purchased!", "Success") end
 			playPurchaseEffects(player)

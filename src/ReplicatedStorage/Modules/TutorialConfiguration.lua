@@ -7,8 +7,13 @@ export type TutorialStepDefinition = {
 	TargetType: string,
 }
 
-TutorialConfiguration.FinalStep = 9
-TutorialConfiguration.CashGoal = 100
+TutorialConfiguration.FinalStep = 13
+TutorialConfiguration.CashGoal = 50
+TutorialConfiguration.TutorialCharacterUpgradeId = "Speed1"
+TutorialConfiguration.TutorialBaseUpgradeMode = "FirstSlotUnlock"
+TutorialConfiguration.LegacyCompletedFinalStep = 9
+TutorialConfiguration.BaseUpgradeApproachDistance = 20
+TutorialConfiguration.CompletionMessageDuration = 10
 
 TutorialConfiguration.Steps = {
 	[1] = {
@@ -24,7 +29,7 @@ TutorialConfiguration.Steps = {
 		TargetType = "WorldBrainrot",
 	},
 	[4] = {
-		Text = "Back to base",
+		Text = "Go to the surface",
 		TargetType = "GuiBackButton",
 	},
 	[5] = {
@@ -32,11 +37,11 @@ TutorialConfiguration.Steps = {
 		TargetType = "HybridInventoryOrSlot",
 	},
 	[6] = {
-		Text = "Collect $100 cash",
+		Text = "Collect $50 cash",
 		TargetType = "WorldCollectButton",
 	},
 	[7] = {
-		Text = "Upgrade your bomb.",
+		Text = "Upgrade your bomb",
 		TargetType = "GuiShopButton",
 	},
 	[8] = {
@@ -44,6 +49,22 @@ TutorialConfiguration.Steps = {
 		TargetType = "GuiBuyBombButton",
 	},
 	[9] = {
+		Text = "Upgrade your character",
+		TargetType = "WorldCharacterUpgrade",
+	},
+	[10] = {
+		Text = "Well done! Upgrade your character and become faster!",
+		TargetType = "GuiCharacterUpgradeButton",
+	},
+	[11] = {
+		Text = "Make base upgrade",
+		TargetType = "WorldBaseUpgrade",
+	},
+	[12] = {
+		Text = "Well done! Upgrade your base and get more money!",
+		TargetType = "GuiBaseUpgradeButton",
+	},
+	[13] = {
 		Text = "Well done! Upgrade your bomb and search for rare Brainrots in the depths!",
 		TargetType = "None",
 	},

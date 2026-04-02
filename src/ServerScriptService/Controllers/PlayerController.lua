@@ -59,6 +59,9 @@ type PlayerData = {
 	unlocked_slots: number,
 	OnboardingStep: number,
 	PostTutorialStage: number,
+	TutorialVersion: number,
+	TutorialFreeCharacterUpgradeConsumed: boolean,
+	TutorialFreeBaseUpgradeConsumed: boolean,
 	OnboardingFunnelStep: number,
 	AnalyticsFunnels: {[string]: any},
 	LastSaveTime: number,
@@ -82,6 +85,9 @@ local Template: PlayerData = {
 	unlocked_slots = SlotUnlockConfigurations.StartSlots,
 	OnboardingStep = 1,
 	PostTutorialStage = 0,
+	TutorialVersion = 2,
+	TutorialFreeCharacterUpgradeConsumed = false,
+	TutorialFreeBaseUpgradeConsumed = false,
 	OnboardingFunnelStep = 0,
 	AnalyticsFunnels = {
 		OneTime = {},
@@ -744,7 +750,17 @@ local function onPlayerAdded(player: Player)
 		profile.Data.AnalyticsFunnels.OneTime = {}
 	end
 
-	profile.Data.OnboardingFunnelStep = math.clamp(tonumber(profile.Data.OnboardingFunnelStep) or 0, 0, 10)
+	if type(profile.Data.TutorialVersion) ~= "number" then
+		profile.Data.TutorialVersion = 1
+	end
+	if type(profile.Data.TutorialFreeCharacterUpgradeConsumed) ~= "boolean" then
+		profile.Data.TutorialFreeCharacterUpgradeConsumed = false
+	end
+	if type(profile.Data.TutorialFreeBaseUpgradeConsumed) ~= "boolean" then
+		profile.Data.TutorialFreeBaseUpgradeConsumed = false
+	end
+
+	profile.Data.OnboardingFunnelStep = math.clamp(tonumber(profile.Data.OnboardingFunnelStep) or 0, 0, 14)
 	profile.Data.AnalyticsFunnels.OneTime.TutorialFTUE = math.max(
 		tonumber(profile.Data.AnalyticsFunnels.OneTime.TutorialFTUE) or 0,
 		profile.Data.OnboardingFunnelStep

@@ -2,6 +2,7 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
 
@@ -10,6 +11,8 @@ local BombToolClient = {}
 local player = Players.LocalPlayer
 local remote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("Bomb"):WaitForChild("PlaceBomb") :: RemoteEvent
 local timerTemplate = ReplicatedStorage:WaitForChild("Templates"):WaitForChild("TimerGUI") :: BillboardGui
+local ACTIVATION_HANDOFF_TIMEOUT = 0.35
+local ACTIVATION_HANDOFF_STEP = 0.03
 
 type ToolState = {
 	RunId: number,
@@ -34,6 +37,98 @@ local function getToolState(tool: Tool): ToolState
 	}
 	toolStates[tool] = newState
 	return newState
+end
+
+local function debugActivationBlock(reason: string, tool: Tool?)
+	if not RunService:IsStudio() then
+		return
+	end
+
+	local toolName = if tool then tool.Name else "nil"
+	warn(string.format("[BombToolClient] Activation blocked (%s) for %s", reason, toolName))
+end
+
+local function failActivation(reason: string, tool: Tool?): (boolean, string)
+	debugActivationBlock(reason, tool)
+	return false, reason
+end
+
+local function findMatchingTool(container: Instance?, preferredName: string): Tool?
+	if not container then
+		return nil
+	end
+
+	for _, child in ipairs(container:GetChildren()) do
+		if child:IsA("Tool") and child.Name == preferredName then
+			return child
+		end
+	end
+
+	return nil
+end
+
+local function resolveRequestedTool(tool: Tool): Tool?
+	local character = player.Character
+	local backpack = player:FindFirstChildOfClass("Backpack")
+	if tool.Parent == character or tool.Parent == backpack then
+		return tool
+	end
+
+	return findMatchingTool(character, tool.Name) or findMatchingTool(backpack, tool.Name)
+end
+
+local function waitForEquippedTool(tool: Tool): Tool?
+	local character = player.Character
+	if not character then
+		return nil
+	end
+
+	local deadline = tick() + ACTIVATION_HANDOFF_TIMEOUT
+	while tick() < deadline do
+		local resolvedTool = resolveRequestedTool(tool)
+		if resolvedTool and resolvedTool.Parent == character then
+			return resolvedTool
+		end
+
+		task.wait(ACTIVATION_HANDOFF_STEP)
+	end
+
+	local resolvedTool = resolveRequestedTool(tool)
+	if resolvedTool and resolvedTool.Parent == character then
+		return resolvedTool
+	end
+
+	return nil
+end
+
+local function resolveActivatableTool(tool: Tool): (Tool?, string?)
+	local resolvedTool = resolveRequestedTool(tool)
+	if not resolvedTool then
+		return nil, "no_tool"
+	end
+
+	local character = player.Character
+	if not character then
+		return nil, "not_equipped"
+	end
+
+	if resolvedTool.Parent == character then
+		return resolvedTool, nil
+	end
+
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	local backpack = player:FindFirstChildOfClass("Backpack")
+	if not humanoid or resolvedTool.Parent ~= backpack then
+		return nil, "not_equipped"
+	end
+
+	humanoid:EquipTool(resolvedTool)
+	local equippedTool = waitForEquippedTool(resolvedTool)
+	if equippedTool then
+		return equippedTool, nil
+	end
+
+	return nil, "not_equipped"
 end
 
 local function ensureTimerGui(tool: Tool): BillboardGui?
@@ -167,19 +262,20 @@ local function playCooldownVisual(tool: Tool)
 	end)
 end
 
-function BombToolClient.TryActivate(tool: Tool): boolean
-	if tool.Parent ~= player.Character then
-		return false
+function BombToolClient.TryActivate(tool: Tool): (boolean, string?)
+	local activatableTool, resolveError = resolveActivatableTool(tool)
+	if not activatableTool then
+		return failActivation(resolveError or "not_equipped", tool)
 	end
 
-	local state = getToolState(tool)
+	local state = getToolState(activatableTool)
 	if state.WaitingForServer then
-		return false
+		return failActivation("waiting_for_server", activatableTool)
 	end
 
-	local cooldownEndsAt = tool:GetAttribute("CooldownEndsAt")
+	local cooldownEndsAt = activatableTool:GetAttribute("CooldownEndsAt")
 	if type(cooldownEndsAt) == "number" and cooldownEndsAt > Workspace:GetServerTimeNow() then
-		return false
+		return failActivation("cooldown", activatableTool)
 	end
 
 	state.RequestId += 1
@@ -187,7 +283,7 @@ function BombToolClient.TryActivate(tool: Tool): boolean
 	state.WaitingForServer = true
 
 	task.delay(0.35, function()
-		local currentState = toolStates[tool]
+		local currentState = toolStates[activatableTool]
 		if not currentState then
 			return
 		end
@@ -200,7 +296,7 @@ function BombToolClient.TryActivate(tool: Tool): boolean
 	local camera = Workspace.CurrentCamera
 	local cameraLookVector = if camera then camera.CFrame.LookVector else nil
 	remote:FireServer(cameraLookVector)
-	return true
+	return true, nil
 end
 
 function BombToolClient.Bind(tool: Tool)

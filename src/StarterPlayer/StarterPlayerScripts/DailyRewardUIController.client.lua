@@ -180,9 +180,11 @@ local function updateRewardVisual(item: RewardSlot, reward, state: string)
 	local claimmark = item:WaitForChild("Claimmark") :: Frame
 	local readymark = item:WaitForChild("Readymark") :: Frame
 	local display = getRewardDisplay(reward)
+	local shouldHideImage = reward.HiddenUntilClaimed == true and state ~= "Collected"
 
 	dayLabel.Text = "Day " .. tostring(reward.Day)
 	imageLabel.Image = display.image
+	imageLabel.ImageColor3 = if shouldHideImage then Color3.fromRGB(0, 0, 0) else Color3.fromRGB(255, 255, 255)
 	rewardName.Text = display.name
 
 	checkmark.Visible = state == "Collected"

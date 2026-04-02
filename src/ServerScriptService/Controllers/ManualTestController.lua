@@ -1160,6 +1160,18 @@ local function setPostTutorialStageDirect(target: Player, stage: number)
 	return true
 end
 
+local function setTutorialFtueState(target: Player, characterUpgradeConsumed: boolean, baseUpgradeConsumed: boolean)
+	local profile = ensureProfileTables(target)
+	if not profile then
+		return false
+	end
+
+	profile.Data.TutorialVersion = 2
+	profile.Data.TutorialFreeCharacterUpgradeConsumed = characterUpgradeConsumed
+	profile.Data.TutorialFreeBaseUpgradeConsumed = baseUpgradeConsumed
+	return true
+end
+
 local function resolveTargetPartByTag(tagName: string, rootPosition: Vector3?): BasePart?
 	local bestPart = nil
 	local bestDistance = math.huge
@@ -1959,9 +1971,7 @@ registerAction({
 	handler = function(_executor, target, params)
 		local step = normalizeInteger(params.step, TutorialConfiguration.FinalStep, 1, TutorialConfiguration.FinalStep)
 		if setOnboardingStepDirect(target, step) then
-			if step < TutorialConfiguration.FinalStep then
-				setPostTutorialStageDirect(target, PostTutorialConfiguration.Stages.WaitingForCharacterMoney)
-			end
+			setPostTutorialStageDirect(target, PostTutorialConfiguration.Stages.Completed)
 			refreshTargetState(target)
 			return true, `Set onboarding step to {step}.`
 		end
@@ -1979,7 +1989,9 @@ registerAction({
 	allowOtherTarget = true,
 	inputs = {},
 	handler = function(_executor, target)
-		if setOnboardingStepDirect(target, TutorialConfiguration.FinalStep) then
+		if setOnboardingStepDirect(target, TutorialConfiguration.FinalStep)
+			and setPostTutorialStageDirect(target, PostTutorialConfiguration.Stages.Completed)
+			and setTutorialFtueState(target, true, true) then
 			refreshTargetState(target)
 			return true, "FTUE marked as completed."
 		end
@@ -1999,7 +2011,9 @@ registerAction({
 	confirmationText = "RESET",
 	inputs = {},
 	handler = function(_executor, target)
-		local success = setOnboardingStepDirect(target, 1) and setPostTutorialStageDirect(target, PostTutorialConfiguration.Stages.WaitingForCharacterMoney)
+		local success = setOnboardingStepDirect(target, 1)
+			and setPostTutorialStageDirect(target, PostTutorialConfiguration.Stages.Completed)
+			and setTutorialFtueState(target, false, false)
 		if success then
 			refreshTargetState(target)
 			return true, "FTUE reset to step 1."

@@ -544,7 +544,10 @@ local function ensureEventMarker(): Frame?
 
 	local progressBar = hud:FindFirstChild("ProgressBar")
 	local markersContainer = progressBar and progressBar:FindFirstChild("Markers")
-	local markerTemplate = markersContainer and markersContainer:FindFirstChild("PlayerMark")
+	local dedicatedTemplate = markersContainer and markersContainer:FindFirstChild("EventBrainrotMarkTemplate")
+	local markerTemplate = if dedicatedTemplate and dedicatedTemplate:IsA("Frame")
+		then dedicatedTemplate
+		else markersContainer and markersContainer:FindFirstChild("PlayerMark")
 	if not markersContainer or not markersContainer:IsA("Frame") or not markerTemplate or not markerTemplate:IsA("Frame") then
 		return nil
 	end
@@ -555,30 +558,39 @@ local function ensureEventMarker(): Frame?
 	marker.BackgroundColor3 = Color3.fromRGB(255, 176, 66)
 	marker.ZIndex = 4
 
-	for _, descendant in ipairs(marker:GetDescendants()) do
-		if descendant:IsA("UIStroke") then
-			descendant:Destroy()
-		elseif descendant:IsA("GuiObject") and string.find(string.lower(descendant.Name), "arrow", 1, true) then
-			descendant:Destroy()
+	if markerTemplate.Name ~= "EventBrainrotMarkTemplate" then
+		for _, descendant in ipairs(marker:GetDescendants()) do
+			if descendant:IsA("UIStroke") then
+				descendant:Destroy()
+			elseif descendant:IsA("GuiObject") and string.find(string.lower(descendant.Name), "arrow", 1, true) then
+				descendant:Destroy()
+			end
 		end
 	end
 
-	local icon = marker:FindFirstChild("PlayerImage")
+	local icon = marker:FindFirstChild("Icon", true)
+	if not icon or not icon:IsA("ImageLabel") then
+		icon = marker:FindFirstChild("PlayerImage", true)
+	end
 	if not icon or not icon:IsA("ImageLabel") then
 		icon = Instance.new("ImageLabel")
-		icon.Name = "PlayerImage"
+		icon.Name = "Icon"
 		icon.Parent = marker
 	end
 
 	icon.Name = "Icon"
-	icon.AnchorPoint = Vector2.new(0.5, 0.5)
-	icon.Position = UDim2.fromScale(0.5, 0.5)
-	icon.Size = UDim2.fromScale(0.94, 0.94)
 	icon.BackgroundTransparency = 1
 	icon.Image = ""
 	icon.ImageTransparency = 0
 	icon.ScaleType = Enum.ScaleType.Fit
 	icon.ZIndex = 5
+
+	if markerTemplate.Name ~= "EventBrainrotMarkTemplate" then
+		icon.AnchorPoint = Vector2.new(0.5, 0.5)
+		icon.Position = UDim2.fromScale(0.5, 0.5)
+		icon.Size = UDim2.fromScale(0.94, 0.94)
+	end
+
 	eventMarkerIcon = icon
 
 	marker.Parent = markersContainer

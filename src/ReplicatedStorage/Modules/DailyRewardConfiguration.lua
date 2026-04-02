@@ -6,6 +6,7 @@ export type RewardEntry = {
 	Type: string,
 	Amount: number?,
 	Image: string,
+	HiddenUntilClaimed: boolean?,
 	Rarity: string?,
 	PickaxeName: string?,
 	CompensationType: string?,
@@ -23,8 +24,8 @@ DailyRewardConfiguration.Rewards = {
 	[2] = { Day = 2, Type = "Money", Amount = 24999, Image = MONEY_IMAGE } :: RewardEntry,
 	[3] = { Day = 3, Type = "Pickaxe", PickaxeName = "Bomb 7", Image = BOMB_IMAGE, CompensationType = "Money", CompensationAmount = 24999 } :: RewardEntry,
 	[4] = { Day = 4, Type = "Money", Amount = 74999, Image = MONEY_IMAGE } :: RewardEntry,
-	[5] = { Day = 5, Type = "RandomItemByRarity", Rarity = "Legendary", Image = RANDOM_ITEM_IMAGE2 } :: RewardEntry,
-	[6] = { Day = 6, Type = "RandomItemByRarity", Rarity = "Mythic", Image = RANDOM_ITEM_IMAGE3 } :: RewardEntry,
+	[5] = { Day = 5, Type = "RandomItemByRarity", Rarity = "Legendary", Image = RANDOM_ITEM_IMAGE2, HiddenUntilClaimed = true } :: RewardEntry,
+	[6] = { Day = 6, Type = "RandomItemByRarity", Rarity = "Mythic", Image = RANDOM_ITEM_IMAGE3, HiddenUntilClaimed = true } :: RewardEntry,
 	[7] = { Day = 7, Type = "Pickaxe", PickaxeName = "Bomb 13", Image = BOMB_IMAGE2, CompensationType = "Money", CompensationAmount = 149999 } :: RewardEntry,
 }
 function DailyRewardConfiguration.GetMaxDay(): number
@@ -34,7 +35,6 @@ function DailyRewardConfiguration.GetRewardForDay(day: number): RewardEntry?
 	return DailyRewardConfiguration.Rewards[day]
 end
 return DailyRewardConfiguration
-
 
 
 

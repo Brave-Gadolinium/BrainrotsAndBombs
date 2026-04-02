@@ -319,7 +319,13 @@ local function updateUpgradeSlotsButton(player: Player, plotModel: Model)
 	upgradeButton.AutoButtonColor = true
 	--upgradeButton.Text = "UPGRADE"
 	if costLabel and costLabel:IsA("TextLabel") then
-		costLabel.Text = "Build - $" .. NumberFormatter.Format(upgradeData.money_req)
+		local isTutorialFree = TutorialService.IsTutorialBaseUpgradeFreeAvailable
+			and TutorialService:IsTutorialBaseUpgradeFreeAvailable(player)
+		if isTutorialFree then
+			costLabel.Text = "Build - FREE"
+		else
+			costLabel.Text = "Build - $" .. NumberFormatter.Format(upgradeData.money_req)
+		end
 	end
 end
 
@@ -398,22 +404,28 @@ local function purchaseSlotUpgrade(player: Player)
 	end
 
 	AnalyticsEconomyService:FlushBombIncome(player)
-	if PlayerController:DeductMoney(player, upgradeData.money_req) then
+	local isTutorialFree = TutorialService.IsTutorialBaseUpgradeFreeAvailable
+		and TutorialService:IsTutorialBaseUpgradeFreeAvailable(player)
+	local price = if isTutorialFree then 0 else upgradeData.money_req
+
+	if isTutorialFree or PlayerController:DeductMoney(player, price) then
 		local newUnlockedSlots = PlayerController:AddUnlockedSlots(player, upgradeData.new_slots)
-		AnalyticsEconomyService:LogCashSink(
-			player,
-			upgradeData.money_req,
-			TRANSACTION_TYPES.Shop,
-			`SlotUnlock:{unlockedSlots}->{newUnlockedSlots}`,
-			{
-				feature = "slot_unlock",
-				content_id = tostring(newUnlockedSlots),
-				context = "base",
-			}
-		)
+		if not isTutorialFree and price > 0 then
+			AnalyticsEconomyService:LogCashSink(
+				player,
+				price,
+				TRANSACTION_TYPES.Shop,
+				`SlotUnlock:{unlockedSlots}->{newUnlockedSlots}`,
+				{
+					feature = "slot_unlock",
+					content_id = tostring(newUnlockedSlots),
+					context = "base",
+				}
+			)
+		end
 		AnalyticsFunnelsService:HandleExtraSlotsBought(player, newUnlockedSlots)
-		updatePlotVisuals(player)
 		TutorialService:HandlePostTutorialBaseUpgradePurchased(player)
+		updatePlotVisuals(player)
 
 		if notif then
 			notif:FireClient(player, "Unlocked slots: " .. tostring(newUnlockedSlots), "Success")

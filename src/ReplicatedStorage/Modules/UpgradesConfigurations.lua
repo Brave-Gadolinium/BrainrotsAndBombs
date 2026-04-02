@@ -40,6 +40,7 @@ UpgradesConfigurations.Upgrades = {
 		StatId = "BonusSpeed",
 		Amount = 1,
 		DisplayName = "+1 Walk Speed",
+		BaseCostTutorial = 0, -- тут надо подключить
 		BaseCost = 10000,
 		PriceMultiplier = 1.5,
 		RobuxProductId = 3567800914,

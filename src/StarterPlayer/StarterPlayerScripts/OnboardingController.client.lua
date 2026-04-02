@@ -41,7 +41,7 @@ type ActivePostTutorialCompletion = {
 }
 
 local currentStep = 0
-local currentPostTutorialStage = PostTutorialConfiguration.Stages.WaitingForCharacterMoney
+local currentPostTutorialStage = PostTutorialConfiguration.Stages.Completed
 local activeBeam: Beam? = nil
 local activeAttachment0: Attachment? = nil
 local activeAttachment1: Attachment? = nil
@@ -62,6 +62,8 @@ local guiOverlaySuppressedUntil = 0
 local hiddenHudBackState: {[Instance]: {[string]: any}} = {}
 local postTutorialCompletionQueue: {QueuedPostTutorialCompletion} = {}
 local activePostTutorialCompletion: ActivePostTutorialCompletion? = nil
+local shouldUseTutorialGuiProxy: ((number) -> boolean)? = nil
+local getTutorialGuiTarget: ((number) -> GuiButton?)? = nil
 
 local function getCharacter()
 	return player.Character or player.CharacterAdded:Wait()
@@ -416,7 +418,7 @@ local function syncTutorialGuiLayout(targetButton: GuiButton)
 
 	if tutorialGuiCursor then
 		local cursorParent: Instance = targetButton
-		if tutorialGuiProxyButton and (currentStep == 4 or currentStep == 7) then
+		if tutorialGuiProxyButton and shouldUseTutorialGuiProxy and shouldUseTutorialGuiProxy(currentStep) then
 			cursorParent = tutorialGuiProxyButton
 		end
 
@@ -587,7 +589,45 @@ local function findBombBuyButton(): GuiButton?
 	return nil
 end
 
-local function shouldUseTutorialGuiProxy(step: number): boolean
+local function findCharacterUpgradeButton(): GuiButton?
+	local scrollingFrame = upgradesFrame:FindFirstChild("Scrolling")
+	if not scrollingFrame then
+		return nil
+	end
+
+	local upgradeCard = scrollingFrame:FindFirstChild(TutorialConfiguration.TutorialCharacterUpgradeId)
+	if not upgradeCard then
+		return nil
+	end
+
+	local buttonsFrame = upgradeCard:FindFirstChild("Buttons")
+	local moneyButton = buttonsFrame and buttonsFrame:FindFirstChild("Money")
+	if moneyButton and moneyButton:IsA("GuiButton") then
+		return moneyButton
+	end
+
+	return nil
+end
+
+local function findBaseUpgradeGuiButton(): GuiButton?
+	local plot = Workspace:FindFirstChild("Plot_" .. player.Name)
+	if not plot then
+		return nil
+	end
+
+	local upgradeModel = plot:FindFirstChild("UpgradeSlotsButton", true)
+	local mainGui = upgradeModel and upgradeModel:FindFirstChild("MainGUI")
+	local surfaceGui = mainGui and mainGui:FindFirstChild("SurfaceGuiA")
+	local frame = surfaceGui and surfaceGui:FindFirstChild("FrameB")
+	local button = frame and frame:FindFirstChild("UpgradeButton")
+	if button and button:IsA("GuiButton") then
+		return button
+	end
+
+	return nil
+end
+
+shouldUseTutorialGuiProxy = function(step: number): boolean
 	return step == 4 or step == 7
 end
 
@@ -595,7 +635,7 @@ local function shouldShowTutorialGuiBlackout(step: number): boolean
 	return step == 4 or step == 7
 end
 
-local function getTutorialGuiTarget(step: number): GuiButton?
+getTutorialGuiTarget = function(step: number): GuiButton?
 	if step == 4 then
 		local backButton = hud:FindFirstChild("Back")
 		if backButton and backButton:IsA("GuiButton") then
@@ -605,6 +645,10 @@ local function getTutorialGuiTarget(step: number): GuiButton?
 		return findBombShopButton()
 	elseif step == 8 then
 		return findBombBuyButton()
+	elseif step == 10 then
+		return findCharacterUpgradeButton()
+	elseif step == 12 then
+		return findBaseUpgradeGuiButton()
 	end
 
 	return nil
@@ -973,6 +1017,23 @@ local function resolveWorldTargetForStep(step: number): Instance?
 			return findClosestTaggedPart("ShopPart")
 		end
 		return nil
+	elseif step == 9 then
+		if not upgradesFrame.Visible then
+			return findClosestTaggedPart("UpgradePart")
+		end
+		return nil
+	elseif step == 10 then
+		if not upgradesFrame.Visible then
+			return findClosestTaggedPart("UpgradePart")
+		end
+		return nil
+	elseif step == 11 then
+		return findUpgradeSlotsButtonTarget()
+	elseif step == 12 then
+		if not findBaseUpgradeGuiButton() then
+			return findUpgradeSlotsButtonTarget()
+		end
+		return nil
 	end
 
 	return nil
@@ -1091,7 +1152,7 @@ local function refreshCurrentStep()
 	if currentStep ~= clampedStep then
 		local previousStep = currentStep
 		if previousStep > 0 and previousStep < TutorialConfiguration.FinalStep and clampedStep >= TutorialConfiguration.FinalStep then
-			finalMessageHideAt = tick() + 10
+			finalMessageHideAt = tick() + TutorialConfiguration.CompletionMessageDuration
 		end
 		currentStep = clampedStep
 	end
@@ -1100,7 +1161,7 @@ local function refreshCurrentStep()
 	if type(savedPostTutorialStage) == "number" then
 		currentPostTutorialStage = PostTutorialConfiguration.ClampStage(savedPostTutorialStage)
 	else
-		currentPostTutorialStage = PostTutorialConfiguration.Stages.WaitingForCharacterMoney
+		currentPostTutorialStage = PostTutorialConfiguration.Stages.Completed
 	end
 
 	applyStepPresentation()
@@ -1131,6 +1192,9 @@ local function connectUiReporting()
 	if not upgradesFrame:GetAttribute("TutorialConnected") then
 		upgradesFrame:SetAttribute("TutorialConnected", true)
 		upgradesFrame:GetPropertyChangedSignal("Visible"):Connect(function()
+			if upgradesFrame.Visible then
+				reportAction("UpgradesOpened")
+			end
 			task.defer(refreshCurrentStep)
 		end)
 	end

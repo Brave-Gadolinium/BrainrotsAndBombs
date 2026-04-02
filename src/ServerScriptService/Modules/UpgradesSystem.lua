@@ -56,6 +56,17 @@ local function getTutorialService()
 	return TutorialService
 end
 
+local function getResolvedPrice(player: Player, profile: any, config: any, currentValue: number): (number, boolean)
+	local tutorialService = getTutorialService()
+	if tutorialService
+		and tutorialService.IsTutorialCharacterUpgradeFreeAvailable
+		and tutorialService:IsTutorialCharacterUpgradeFreeAvailable(player, config.Id) then
+		return 0, true
+	end
+
+	return getCompoundPrice(config, currentValue), false
+end
+
 function UpgradesSystem.PurchaseUpgrade(player: Player, upgradeId: string)
 	local profile = PlayerController:GetProfile(player)
 	local config = getUpgradeConfig(upgradeId)
@@ -73,18 +84,20 @@ function UpgradesSystem.PurchaseUpgrade(player: Player, upgradeId: string)
 		return
 	end
 
-	local price = getCompoundPrice(config, currentValue)
+	local price, isTutorialFree = getResolvedPrice(player, profile, config, currentValue)
 	AnalyticsFunnelsService:HandleUpgradePurchaseRequested(player, upgradeId)
 	AnalyticsEconomyService:FlushBombIncome(player)
 
-	if PlayerController:DeductMoney(player, price) then
+	if isTutorialFree or PlayerController:DeductMoney(player, price) then
 		-- Increase the actual stat
 		profile.Data[statId] = currentValue + config.Amount
-		AnalyticsEconomyService:LogCashSink(player, price, TRANSACTION_TYPES.Shop, `Upgrade:{upgradeId}`, {
-			feature = "upgrade",
-			content_id = upgradeId,
-			context = "base",
-		})
+		if not isTutorialFree and price > 0 then
+			AnalyticsEconomyService:LogCashSink(player, price, TRANSACTION_TYPES.Shop, `Upgrade:{upgradeId}`, {
+				feature = "upgrade",
+				content_id = upgradeId,
+				context = "base",
+			})
+		end
 
 		-- Save Attribute so client can read it
 		player:SetAttribute(statId, profile.Data[statId])
@@ -102,14 +115,14 @@ function UpgradesSystem.PurchaseUpgrade(player: Player, upgradeId: string)
 		end
 		AnalyticsFunnelsService:HandleStatUpgradePurchased(player, upgradeId)
 
-		UpgradesSystem.UpdateClientUI(player)
-
 		if config.HiddenInUI ~= true then
 			local tutorialService = getTutorialService()
 			if tutorialService then
 				tutorialService:HandlePostTutorialCharacterUpgradePurchased(player, upgradeId)
 			end
 		end
+
+		UpgradesSystem.UpdateClientUI(player)
 	else
 		local Events = ReplicatedStorage:FindFirstChild("Events")
 		if Events and Events:FindFirstChild("ShowNotification") then 
@@ -132,11 +145,13 @@ function UpgradesSystem.UpdateClientUI(player: Player)
 	for _, config in ipairs(UpgradesConfiguration.Upgrades) do
 		local statId = config.StatId
 		local currentVal = profile.Data[statId] or 0
+		local resolvedCost, isTutorialFree = getResolvedPrice(player, profile, config, currentVal)
 
 		uiData[config.Id] = { 
 			Current = currentVal, 
-			Cost = getCompoundPrice(config, currentVal),
-			Amount = config.Amount
+			Cost = resolvedCost,
+			Amount = config.Amount,
+			IsTutorialFree = isTutorialFree,
 		}
 	end
 

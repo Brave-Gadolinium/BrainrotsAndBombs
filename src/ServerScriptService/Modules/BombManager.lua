@@ -16,6 +16,7 @@ local DepthLevelUtils = require(ServerScriptService.Modules.DepthLevelUtils)
 local Utils = require(ServerScriptService.Modules.Utils)
 
 local PlayerController
+local PickaxeController
 local CarrySystem
 local remote: RemoteEvent
 local notificationEvent: RemoteEvent?
@@ -25,6 +26,7 @@ local zonesFolder = workspace:WaitForChild("Zones")
 local soundsFolder = Workspace:FindFirstChild("Sounds")
 
 local playerCooldowns = {}
+local missingBombRepairAttempts = {}
 local activeBombs = {}
 local BOMB_SPAWN_FORWARD_OFFSET = 1.65
 local BOMB_SPAWN_UP_OFFSET = 2
@@ -41,6 +43,7 @@ local BOMB_STUCK_EXPLODE_DELAY = 0.08
 local BOMB_TERRAIN_STICK_PADDING = 0.05
 local BOMB_TERRAIN_MONITOR_MIN_TRAVEL = 0.05
 local BOMB_TERRAIN_DOWNWARD_PROBE_PADDING = 0.35
+local BOMB_REPAIR_ATTEMPT_COOLDOWN = 0.75
 
 local function isFiniteNumber(value: number): boolean
 	return value == value and value > -math.huge and value < math.huge
@@ -143,22 +146,116 @@ local function firePlayerUIEffect(player: Player, effectName: string, ...)
 	end
 end
 
-local function getEquippedBomb(player: Player)
-	local character = player.Character
-	if not character then
+local function getPickaxeController()
+	if PickaxeController then
+		return PickaxeController
+	end
+
+	local controllersFolder = ServerScriptService:FindFirstChild("Controllers")
+	if not controllersFolder then
+		return nil
+	end
+
+	local pickaxeModule = controllersFolder:FindFirstChild("PickaxeController")
+	if pickaxeModule and pickaxeModule:IsA("ModuleScript") then
+		PickaxeController = require(pickaxeModule)
+	end
+
+	return PickaxeController
+end
+
+local function getPlayerController()
+	if PlayerController then
+		return PlayerController
+	end
+
+	PlayerController = require(game.ServerScriptService.Controllers.PlayerController)
+	return PlayerController
+end
+
+local function getBombFromContainer(container: Instance?, preferredBombName: string?): (Tool?, any, string?)
+	if not container then
 		return nil, nil, nil
 	end
 
-	for _, child in ipairs(character:GetChildren()) do
+	local fallbackTool: Tool? = nil
+	local fallbackData = nil
+	local fallbackName: string? = nil
+
+	for _, child in ipairs(container:GetChildren()) do
 		if child:IsA("Tool") then
 			local bombData = BombsConfigurations.GetBombData(child.Name)
 			if bombData then
-				return child, bombData, child.Name
+				if preferredBombName and child.Name == preferredBombName then
+					return child, bombData, child.Name
+				end
+
+				if not fallbackTool then
+					fallbackTool = child
+					fallbackData = bombData
+					fallbackName = child.Name
+				end
 			end
 		end
 	end
 
-	return nil, nil, nil
+	return fallbackTool, fallbackData, fallbackName
+end
+
+local function getPreferredBombName(player: Player): string?
+	local pickaxeController = getPickaxeController()
+	if pickaxeController and pickaxeController.GetPreferredPickaxeName then
+		return pickaxeController.GetPreferredPickaxeName(player)
+	end
+
+	local playerController = getPlayerController()
+	local profile = playerController and playerController:GetProfile(player)
+	local equippedPickaxe = profile and profile.Data and profile.Data.EquippedPickaxe
+	if type(equippedPickaxe) == "string" and BombsConfigurations.GetBombData(equippedPickaxe) then
+		return equippedPickaxe
+	end
+
+	return nil
+end
+
+local function resolveAvailableBomb(player: Player): (Tool?, any, string?)
+	local pickaxeController = getPickaxeController()
+	if pickaxeController and pickaxeController.ResolvePreferredBombTool then
+		local resolvedTool = pickaxeController.ResolvePreferredBombTool(player)
+		if resolvedTool then
+			local bombData = BombsConfigurations.GetBombData(resolvedTool.Name)
+			if bombData then
+				return resolvedTool, bombData, resolvedTool.Name
+			end
+		end
+	end
+
+	local preferredBombName = getPreferredBombName(player)
+	local character = player.Character
+	local tool, bombData, bombName = getBombFromContainer(character, preferredBombName)
+	if tool and bombData then
+		return tool, bombData, bombName
+	end
+
+	local backpack = player:FindFirstChild("Backpack")
+	return getBombFromContainer(backpack, preferredBombName)
+end
+
+local function tryRepairMissingBomb(player: Player): boolean
+	local pickaxeController = getPickaxeController()
+	if not pickaxeController or not pickaxeController.EnsureBombEquipped then
+		return false
+	end
+
+	local now = tick()
+	local lastAttempt = missingBombRepairAttempts[player] or 0
+	if now - lastAttempt < BOMB_REPAIR_ATTEMPT_COOLDOWN then
+		return false
+	end
+
+	missingBombRepairAttempts[player] = now
+	pickaxeController.EnsureBombEquipped(player)
+	return true
 end
 
 local function getMaterialAtPosition(position: Vector3): Enum.Material
@@ -845,8 +942,10 @@ local function tryThrowBomb(player: Player, cameraLookVector: Vector3?)
 		return
 	end
 
-	local bombTool, bombData, bombName = getEquippedBomb(player)
+	local bombTool, bombData, bombName = resolveAvailableBomb(player)
 	if not bombTool or not bombData then
+		tryRepairMissingBomb(player)
+		notifyPlayer(player, "Bomb unavailable, try again")
 		return
 	end
 
@@ -887,6 +986,7 @@ end
 function BombManager:Start()
 	Players.PlayerRemoving:Connect(function(player)
 		playerCooldowns[player] = nil
+		missingBombRepairAttempts[player] = nil
 	end)
 end
 

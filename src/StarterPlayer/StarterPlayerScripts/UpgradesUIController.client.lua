@@ -9,6 +9,7 @@ local MarketplaceService = game:GetService("MarketplaceService")
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local UpgradesConfig = require(Modules:WaitForChild("UpgradesConfigurations"))
 local NumberFormatter = require(Modules:WaitForChild("NumberFormatter"))
+local TutorialConfiguration = require(Modules:WaitForChild("TutorialConfiguration"))
 
 local player = Players.LocalPlayer
 local Templates = ReplicatedStorage:WaitForChild("Templates")
@@ -25,6 +26,13 @@ local TWEEN_INFO = TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirecti
 local MAX_CARRY_CAPACITY = 4
 
 local uiReferences = {} 
+local lastUpgradeUiData = {}
+
+local function isTutorialFreeUpgrade(upgradeId: string, upgradeData: any): boolean
+	return upgradeId == TutorialConfiguration.TutorialCharacterUpgradeId
+		and ((upgradeData and upgradeData.IsTutorialFree == true)
+			or (tonumber(player:GetAttribute("OnboardingStep")) or 0) == 10)
+end
 
 local function setupButtonAnimation(button: GuiButton)
 	local uiScale = button:FindFirstChildOfClass("UIScale")
@@ -135,6 +143,36 @@ local function initializeUI()
 	end
 end
 
+local function refreshUpgradeVisual(upgradeId: string, upgradeData: any)
+	local ref = uiReferences[upgradeId]
+	if not ref then
+		return
+	end
+
+	if upgradeId == "Carry1" and upgradeData.Current >= MAX_CARRY_CAPACITY then
+		if ref.MoneyPriceLabel then ref.MoneyPriceLabel.Text = "MAX" end
+		if ref.BeforeLabel then ref.BeforeLabel.Text = tostring(upgradeData.Current) end
+		if ref.AfterLabel then ref.AfterLabel.Text = "MAX" end
+		return
+	end
+
+	if ref.MoneyPriceLabel then
+		if isTutorialFreeUpgrade(upgradeId, upgradeData) then
+			ref.MoneyPriceLabel.Text = "FREE"
+		else
+			ref.MoneyPriceLabel.Text = "$" .. NumberFormatter.Format(upgradeData.Cost)
+		end
+	end
+	if ref.BeforeLabel then ref.BeforeLabel.Text = tostring(upgradeData.Current) end
+	if ref.AfterLabel then ref.AfterLabel.Text = tostring(upgradeData.Current + upgradeData.Amount) end
+end
+
+local function refreshUpgradeVisuals()
+	for upgradeId, upgradeData in pairs(lastUpgradeUiData) do
+		refreshUpgradeVisual(upgradeId, upgradeData)
+	end
+end
+
 task.spawn(function()
 	local playerGui = player:WaitForChild("PlayerGui")
 	local mainGui = playerGui:WaitForChild("GUI")
@@ -144,27 +182,17 @@ task.spawn(function()
 	upgradesFrame:GetPropertyChangedSignal("Visible"):Connect(function()
 		if upgradesFrame.Visible then
 			reportAnalyticsIntent:FireServer("UpgradesOpened")
+			updateEvent:FireServer()
+			task.defer(refreshUpgradeVisuals)
 		end
 	end)
 end)
 
 local function onServerUpdate(data: any)
-	for upgradeId, upgradeData in pairs(data) do
-		local ref = uiReferences[upgradeId]
-		if ref then
-			-- Carry starts at 1, so the visible max capacity is 4 after 3 upgrades.
-			if upgradeId == "Carry1" and upgradeData.Current >= MAX_CARRY_CAPACITY then
-				if ref.MoneyPriceLabel then ref.MoneyPriceLabel.Text = "MAX" end
-				if ref.BeforeLabel then ref.BeforeLabel.Text = tostring(upgradeData.Current) end
-				if ref.AfterLabel then ref.AfterLabel.Text = "MAX" end
-			else
-				if ref.MoneyPriceLabel then ref.MoneyPriceLabel.Text = "$" .. NumberFormatter.Format(upgradeData.Cost) end
-				if ref.BeforeLabel then ref.BeforeLabel.Text = tostring(upgradeData.Current) end
+	lastUpgradeUiData = data or {}
 
-				-- Automatically adds +1 or +3 to the After label depending on the config!
-				if ref.AfterLabel then ref.AfterLabel.Text = tostring(upgradeData.Current + upgradeData.Amount) end 
-			end
-		end
+	for upgradeId, upgradeData in pairs(data) do
+		refreshUpgradeVisual(upgradeId, upgradeData)
 	end
 end
 
@@ -177,4 +205,7 @@ player.CharacterAdded:Connect(function()
 end)
 
 updateEvent.OnClientEvent:Connect(onServerUpdate)
+player:GetAttributeChangedSignal("OnboardingStep"):Connect(function()
+	refreshUpgradeVisuals()
+end)
 updateEvent:FireServer()

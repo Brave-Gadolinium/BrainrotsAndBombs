@@ -7,6 +7,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local Workspace = game:GetService("Workspace")
 
 local BadgeConfigurations = require(ServerScriptService.Modules.BadgeConfigurations)
+local TutorialConfiguration = require(game:GetService("ReplicatedStorage").Modules.TutorialConfiguration)
 
 local BadgeManager = {}
 local bottomTouchConnection: RBXScriptConnection? = nil
@@ -134,7 +135,7 @@ function BadgeManager:EvaluatePickaxeMilestones(player: Player, pickaxeName: str
 end
 
 function BadgeManager:EvaluateOnboardingStep(player: Player, onboardingStep: number)
-	local finalStep = BadgeConfigurations.TutorialCompletionStep
+	local finalStep = TutorialConfiguration.FinalStep
 	if onboardingStep >= finalStep then
 		self:AwardBadge(player, "TutorialMaster")
 	end

@@ -23,7 +23,7 @@ local reportIntentEvent: RemoteEvent? = nil
 local activeSessions: {[Player]: {[string]: SessionState}} = {}
 local initialized = false
 
-local TUTORIAL_VERSION = "ftue_v2"
+local TUTORIAL_VERSION = "ftue_v3"
 local SECONDS_PER_DAY = 86400
 local FREE_SPIN_COOLDOWN_SECONDS = math.max(0, tonumber(DailySpinConfiguration.FreeSpinCooldownSeconds) or (15 * 60))
 local OneTimeFunnels = {
@@ -38,10 +38,14 @@ local OneTimeFunnels = {
 			[4] = "PickupBrainrot",
 			[5] = "BackToSurface",
 			[6] = "PlaceBrainrot",
-			[7] = "Collect100Cash",
+			[7] = "Collect50Cash",
 			[8] = "OpenBombShop",
 			[9] = "BuyBomb2",
-			[10] = "TutorialComplete",
+			[10] = "OpenCharacterUpgrader",
+			[11] = "CharacterUpgradeComplete",
+			[12] = "ApproachBaseUpgrade",
+			[13] = "BaseUpgradeComplete",
+			[14] = "TutorialComplete",
 		},
 	},
 	EarlyProgressionToFirstRebirth = {
@@ -520,7 +524,7 @@ function AnalyticsFunnelsService:LogFailure(player: Player, reason: string, cust
 end
 
 function AnalyticsFunnelsService:SyncTutorial(player: Player, tutorialStep: number)
-	local funnelStep = if tutorialStep >= TutorialConfiguration.FinalStep then 10 else math.clamp(tutorialStep, 1, 9)
+	local funnelStep = if tutorialStep >= TutorialConfiguration.FinalStep then 14 else math.clamp(tutorialStep, 1, 13)
 	if advanceOneTimeFunnel(player, "TutorialFTUE", funnelStep, {
 		zone = "tutorial",
 	}) and tutorialStep >= TutorialConfiguration.FinalStep then
