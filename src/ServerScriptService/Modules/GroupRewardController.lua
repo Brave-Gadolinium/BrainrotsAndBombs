@@ -22,6 +22,7 @@ function GroupRewardController:ProcessRewardRequest(player: Player)
 
 	-- Check if they already claimed it
 	if profile.Data.ClaimedPacks["GroupItemReward"] then
+		player:SetAttribute("GroupRewardClaimed", true)
 		return {Success = false, Msg = "Already claimed!"}
 	end
 

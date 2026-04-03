@@ -27,6 +27,22 @@ local robuxPriceCache: {[number]: string} = {}
 local HOVER_SCALE = 1.05
 local CLICK_SCALE = 0.95
 local TWEEN_INFO = TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+local DISABLED_BUTTON_BACKGROUND_TRANSPARENCY_OFFSET = 0.14
+local DISABLED_BUTTON_TEXT_TRANSPARENCY_OFFSET = 0.18
+
+type TextVisualSnapshot = {
+	TextColor3: Color3,
+	TextTransparency: number,
+}
+
+type ButtonVisualSnapshot = {
+	AutoButtonColor: boolean,
+	BackgroundColor3: Color3,
+	BackgroundTransparency: number,
+	TextElements: {[GuiObject]: TextVisualSnapshot},
+}
+
+local buttonVisualSnapshots: {[GuiButton]: ButtonVisualSnapshot} = {}
 
 local function setupButtonAnimation(button: GuiButton)
 	local uiScale = button:FindFirstChildOfClass("UIScale")
@@ -62,20 +78,80 @@ local function formatStatValue(value: number): string
 	return string.format("%.1f", value)
 end
 
-local function setButtonEnabled(button: GuiButton?, enabled: boolean, backgroundColor: Color3?)
+local function getButtonVisualSnapshot(button: GuiButton): ButtonVisualSnapshot
+	local existingSnapshot = buttonVisualSnapshots[button]
+	if existingSnapshot then
+		return existingSnapshot
+	end
+
+	local textElements: {[GuiObject]: TextVisualSnapshot} = {}
+	local function registerTextElement(element: GuiObject)
+		if element:IsA("TextLabel") or element:IsA("TextButton") then
+			textElements[element] = {
+				TextColor3 = element.TextColor3,
+				TextTransparency = element.TextTransparency,
+			}
+		end
+	end
+
+	registerTextElement(button)
+	for _, descendant in ipairs(button:GetDescendants()) do
+		if descendant:IsA("TextLabel") or descendant:IsA("TextButton") then
+			registerTextElement(descendant)
+		end
+	end
+
+	local snapshot = {
+		AutoButtonColor = button.AutoButtonColor,
+		BackgroundColor3 = button.BackgroundColor3,
+		BackgroundTransparency = button.BackgroundTransparency,
+		TextElements = textElements,
+	}
+	buttonVisualSnapshots[button] = snapshot
+
+	button.AncestryChanged:Connect(function(_, parent)
+		if not parent then
+			buttonVisualSnapshots[button] = nil
+		end
+	end)
+
+	return snapshot
+end
+
+local function restoreButtonVisuals(button: GuiButton)
+	local snapshot = getButtonVisualSnapshot(button)
+	button.AutoButtonColor = snapshot.AutoButtonColor
+	button.BackgroundColor3 = snapshot.BackgroundColor3
+	button.BackgroundTransparency = snapshot.BackgroundTransparency
+
+	for textElement, textSnapshot in pairs(snapshot.TextElements) do
+		if textElement.Parent and (textElement:IsA("TextLabel") or textElement:IsA("TextButton")) then
+			textElement.TextColor3 = textSnapshot.TextColor3
+			textElement.TextTransparency = textSnapshot.TextTransparency
+		end
+	end
+end
+
+local function setButtonEnabled(button: GuiButton?, enabled: boolean)
 	if not button then
 		return
 	end
 
+	local snapshot = getButtonVisualSnapshot(button)
+	restoreButtonVisuals(button)
+
 	button.Active = enabled
-	button.AutoButtonColor = enabled
+	button.AutoButtonColor = if enabled then snapshot.AutoButtonColor else false
+	button.Selectable = enabled
 
-	if button:IsA("GuiButton") then
-		button.Selectable = enabled
-	end
+	if not enabled then
+		button.BackgroundTransparency = math.clamp(snapshot.BackgroundTransparency + DISABLED_BUTTON_BACKGROUND_TRANSPARENCY_OFFSET, 0, 1)
 
-	if backgroundColor and button:IsA("GuiObject") then
-		button.BackgroundColor3 = backgroundColor
+		for textElement, textSnapshot in pairs(snapshot.TextElements) do
+			if textElement.Parent and (textElement:IsA("TextLabel") or textElement:IsA("TextButton")) then
+				textElement.TextTransparency = math.clamp(textSnapshot.TextTransparency + DISABLED_BUTTON_TEXT_TRANSPARENCY_OFFSET, 0, 1)
+			end
+		end
 	end
 end
 
@@ -298,32 +374,32 @@ local function updateShowcase(pickaxesFrame: Frame, pickaxeId: string, shouldRep
 	if softBuyButton then
 		if isOwned then
 			setButtonText(softBuyButton, if isEquipped then "EQUIPPED" else "OWNED")
-			setButtonEnabled(softBuyButton, false, Color3.fromRGB(100, 100, 100))
+			setButtonEnabled(softBuyButton, false)
 		elseif isLockedForSoftPurchase then
 			setButtonText(softBuyButton, "LOCKED")
-			setButtonEnabled(softBuyButton, false, Color3.fromRGB(150, 50, 50))
+			setButtonEnabled(softBuyButton, false)
 		else
 			if (config.Price or 0) > 0 then
 				setButtonText(softBuyButton, "BUY $" .. NumberFormatter.Format(config.Price))
 			else
 				setButtonText(softBuyButton, "FREE")
 			end
-			setButtonEnabled(softBuyButton, true, Color3.fromRGB(50, 150, 50))
+			setButtonEnabled(softBuyButton, true)
 		end
 	end
 
 	if robuxButton then
 		if isOwned then
 			setButtonText(robuxButton, if isEquipped then "EQUIPPED" else "OWNED")
-			setButtonEnabled(robuxButton, false, Color3.fromRGB(100, 100, 100))
+			setButtonEnabled(robuxButton, false)
 		else
 			local robuxPriceText = getRobuxPriceText(robuxProductId)
 			if robuxPriceText then
 				setButtonText(robuxButton, robuxPriceText)
-				setButtonEnabled(robuxButton, true, Color3.fromRGB(35, 120, 170))
+				setButtonEnabled(robuxButton, true)
 			else
 				setButtonText(robuxButton, "N/A")
-				setButtonEnabled(robuxButton, false, Color3.fromRGB(100, 100, 100))
+				setButtonEnabled(robuxButton, false)
 			end
 		end
 	end
@@ -481,10 +557,10 @@ local function initializeUI()
 			setupButtonAnimation(equipButton)
 			if isOwned then
 				setButtonText(equipButton, if isEquipped then "EQUIPPED" else "EQUIP")
-				setButtonEnabled(equipButton, not isEquipped, if isEquipped then Color3.fromRGB(100, 100, 100) else Color3.fromRGB(50, 150, 50))
+				setButtonEnabled(equipButton, not isEquipped)
 			else
 				setButtonText(equipButton, "LOCKED")
-				setButtonEnabled(equipButton, false, Color3.fromRGB(150, 50, 50))
+				setButtonEnabled(equipButton, false)
 			end
 
 			equipButton.MouseButton1Click:Connect(function()

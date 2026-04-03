@@ -555,8 +555,8 @@ local function ensureEventMarker(): Frame?
 	local marker = markerTemplate:Clone()
 	marker.Name = "EventBrainrotMark"
 	marker.Visible = false
-	marker.BackgroundColor3 = Color3.fromRGB(255, 176, 66)
-	marker.ZIndex = 4
+	--marker.BackgroundColor3 = Color3.fromRGB(255, 176, 66)
+	marker.ZIndex = 10
 
 	if markerTemplate.Name ~= "EventBrainrotMarkTemplate" then
 		for _, descendant in ipairs(marker:GetDescendants()) do
@@ -579,11 +579,11 @@ local function ensureEventMarker(): Frame?
 	end
 
 	icon.Name = "Icon"
-	icon.BackgroundTransparency = 1
+	--icon.BackgroundTransparency = 1
 	icon.Image = ""
 	icon.ImageTransparency = 0
 	icon.ScaleType = Enum.ScaleType.Fit
-	icon.ZIndex = 5
+	icon.ZIndex = 15
 
 	if markerTemplate.Name ~= "EventBrainrotMarkTemplate" then
 		icon.AnchorPoint = Vector2.new(0.5, 0.5)

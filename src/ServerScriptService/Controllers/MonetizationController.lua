@@ -13,8 +13,11 @@ local ProductConfigurations = require(ReplicatedStorage.Modules.ProductConfigura
 local UpgradesConfiguration = require(ReplicatedStorage.Modules.UpgradesConfigurations)
 local BombsConfigurations = require(ReplicatedStorage.Modules.BombsConfigurations)
 local ItemConfigurations = require(ReplicatedStorage.Modules.ItemConfigurations)
+local NumberFormatter = require(ReplicatedStorage.Modules.NumberFormatter)
 local AnalyticsFunnelsService = require(ServerScriptService.Modules.AnalyticsFunnelsService)
 local AnalyticsEconomyService = require(ServerScriptService.Modules.AnalyticsEconomyService)
+local BadgeManager = require(ServerScriptService.Modules.BadgeManager)
+local LimitedProductStockService = require(ServerScriptService.Modules.LimitedProductStockService)
 local RebirthSystem
 local ItemManager
 local PlayerController
@@ -72,6 +75,90 @@ local function getTutorialService()
 	end
 
 	return TutorialService
+end
+
+local function grantItemProductReward(player: Player, productName: string, itemReward: {[string]: any}, notif: RemoteEvent?): boolean
+	if not ItemManager then
+		ItemManager = require(ServerScriptService.Modules.ItemManager)
+	end
+
+	if not PlayerController then
+		PlayerController = require(ServerScriptService.Controllers.PlayerController)
+	end
+
+	local itemName = itemReward.Name
+	if type(itemName) ~= "string" or itemName == "" then
+		warn("[MonetizationController] Missing item reward name for product:", productName)
+		return false
+	end
+
+	local mutation = if type(itemReward.Mutation) == "string" and itemReward.Mutation ~= "" then itemReward.Mutation else "Normal"
+	local level = math.max(1, math.floor(tonumber(itemReward.Level) or 1))
+	local itemConf = ItemConfigurations.GetItemData(itemName)
+	local rarity = itemConf and itemConf.Rarity or "Common"
+	local displayName = itemConf and itemConf.DisplayName or itemName
+
+	local tool = ItemManager.GiveItemToPlayer(player, itemName, mutation, rarity, level)
+	if not tool then
+		warn("[MonetizationController] Failed to grant item reward for product:", productName, itemName)
+		return false
+	end
+
+	local totalCollected = PlayerController:IncrementBrainrotsCollected(player, 1)
+	BadgeManager:EvaluateBrainrotMilestones(player, rarity, totalCollected)
+	AnalyticsEconomyService:LogItemValueSourceForItem(
+		player,
+		itemName,
+		mutation,
+		level,
+		TRANSACTION_TYPES.IAP,
+		`ItemIAP:{productName}`,
+		{
+			feature = "iap_item",
+			content_id = itemName,
+			context = "shop",
+			rarity = rarity,
+			mutation = mutation,
+		}
+	)
+
+	if notif then
+		notif:FireClient(player, displayName .. " Purchased!", "Success")
+	end
+
+	playPurchaseEffects(player)
+	return true
+end
+
+local function grantLuckyBlockProductReward(player: Player, productName: string, blockId: string, notif: RemoteEvent?): boolean
+	if not ItemManager then
+		ItemManager = require(ServerScriptService.Modules.ItemManager)
+	end
+
+	local tool = ItemManager.GiveLuckyBlockToPlayer(player, blockId)
+	if not tool then
+		warn("[MonetizationController] Failed to grant lucky block reward for product:", productName, blockId)
+		return false
+	end
+
+	AnalyticsEconomyService:LogItemValueSourceForLuckyBlock(
+		player,
+		blockId,
+		TRANSACTION_TYPES.IAP,
+		`LuckyBlockIAP:{productName}`,
+		{
+			feature = "iap_lucky_block",
+			content_id = blockId,
+			context = "shop",
+		}
+	)
+
+	if notif then
+		notif:FireClient(player, "You got " .. tool.Name .. "!", "Success")
+	end
+
+	playPurchaseEffects(player)
+	return true
 end
 
 function MonetizationController.ProcessReceipt(receiptInfo)
@@ -161,6 +248,28 @@ function MonetizationController.ProcessReceipt(receiptInfo)
 
 	if not productName then return Enum.ProductPurchaseDecision.NotProcessedYet end
 
+	local rewardedAdReward = ProductConfigurations.RewardedAdRewards[productName]
+	if rewardedAdReward then
+		if not PlayerController then PlayerController = require(ServerScriptService.Controllers.PlayerController) end
+
+		local cashAmount = math.max(0, math.floor(tonumber(rewardedAdReward.CashAmount) or 0))
+		if cashAmount > 0 then
+			AnalyticsEconomyService:FlushBombIncome(player)
+			PlayerController:AddMoney(player, cashAmount)
+			AnalyticsEconomyService:LogCashSource(player, cashAmount, TRANSACTION_TYPES.Gameplay, `RewardedAd:{productName}`, {
+				feature = "rewarded_ad",
+				content_id = productName,
+				context = "rewarded_video",
+			})
+		end
+
+		if notif then
+			notif:FireClient(player, "+" .. NumberFormatter.Format(cashAmount) .. " soft from ad!", "Success")
+		end
+		playPurchaseEffects(player)
+		return Enum.ProductPurchaseDecision.PurchaseGranted
+	end
+
 	if productName == "SkipRebirth" then
 		if not RebirthSystem then RebirthSystem = require(ServerScriptService.Modules.RebirthSystem) end
 		local rebirthCost = 0
@@ -237,35 +346,43 @@ function MonetizationController.ProcessReceipt(receiptInfo)
 		return Enum.ProductPurchaseDecision.NotProcessedYet
 	end
 
-	local itemReward = ProductConfigurations.ItemProductRewards[productName]
-	if itemReward then
-		if not ItemManager then ItemManager = require(ServerScriptService.Modules.ItemManager) end
-
-		local itemConf = ItemConfigurations.GetItemData(itemReward.Name)
-		local rarity = itemConf and itemConf.Rarity or "Common"
-
-		local tool = ItemManager.GiveItemToPlayer(player, itemReward.Name, itemReward.Mutation, rarity, itemReward.Level)
-		if tool then
-			AnalyticsEconomyService:LogItemValueSourceForItem(
-				player,
-				itemReward.Name,
-				itemReward.Mutation,
-				itemReward.Level,
-				TRANSACTION_TYPES.IAP,
-				`ItemIAP:{productName}`,
-				{
-					feature = "iap_item",
-					content_id = itemReward.Name,
-					context = "shop",
-					rarity = rarity,
-					mutation = itemReward.Mutation,
-				}
-			)
+	local luckyBlockReward = ProductConfigurations.LuckyBlockProductRewards[productName]
+	if type(luckyBlockReward) == "string" and luckyBlockReward ~= "" then
+		if grantLuckyBlockProductReward(player, productName, luckyBlockReward, notif) then
+			return Enum.ProductPurchaseDecision.PurchaseGranted
 		end
 
-		if notif then notif:FireClient(player, itemReward.Name .. " Purchased!", "Success") end
-		playPurchaseEffects(player)
-		return Enum.ProductPurchaseDecision.PurchaseGranted
+		return Enum.ProductPurchaseDecision.NotProcessedYet
+	end
+
+	local itemReward = ProductConfigurations.ItemProductRewards[productName]
+	if itemReward then
+		local limitedReceiptState = LimitedProductStockService:BeginReceiptGrant(receiptInfo)
+		if limitedReceiptState.IsLimited then
+			if not limitedReceiptState.Success then
+				return Enum.ProductPurchaseDecision.NotProcessedYet
+			end
+
+			if limitedReceiptState.AlreadyDelivered then
+				return Enum.ProductPurchaseDecision.PurchaseGranted
+			end
+		end
+
+		if grantItemProductReward(player, productName, itemReward, notif) then
+			if limitedReceiptState.IsLimited then
+				local purchaseId = limitedReceiptState.PurchaseId
+				if type(purchaseId) == "string" and purchaseId ~= "" then
+					local didMarkDelivered = LimitedProductStockService:MarkReceiptDelivered(productId, purchaseId)
+					if not didMarkDelivered then
+						warn("[MonetizationController] Failed to mark limited product receipt as delivered:", productName, purchaseId)
+					end
+				end
+			end
+
+			return Enum.ProductPurchaseDecision.PurchaseGranted
+		end
+
+		return Enum.ProductPurchaseDecision.NotProcessedYet
 	end
 
 	local cashAmount = ProductConfigurations.CashProductRewards[productName]
@@ -278,7 +395,6 @@ function MonetizationController.ProcessReceipt(receiptInfo)
 			content_id = productName,
 			context = "shop",
 		})
-		local NumberFormatter = require(ReplicatedStorage.Modules.NumberFormatter)
 		if notif then notif:FireClient(player, "$" .. NumberFormatter.Format(cashAmount) .. " Purchased!", "Success") end
 		playPurchaseEffects(player)
 		return Enum.ProductPurchaseDecision.PurchaseGranted

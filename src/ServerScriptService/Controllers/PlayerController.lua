@@ -561,6 +561,8 @@ function PlayerController:SetupSharedInstances()
 	createRemote("RemoteEvent", "ReportAnalyticsIntent")
 	createRemote("RemoteEvent", "TriggerUIEffect") 
 	createRemote("RemoteEvent", "ShowPostTutorialCompletion")
+	createRemote("RemoteEvent", "RequestRewardedAd")
+	createRemote("RemoteEvent", "RewardedAdResult")
 end
 
 local function toolToData(tool: Tool): ItemData?

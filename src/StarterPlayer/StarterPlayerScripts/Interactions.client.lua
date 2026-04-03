@@ -24,37 +24,37 @@ end
 
 for i, v in pairs(CollectionService:GetTagged("Rotate")) do
 	
-	local ProductId = v:GetAttribute("Product")
+	-- local ProductId = v:GetAttribute("Product")
 	--if not ProductId then continue end
 
 	local BikeModel = v
 	local StartingCFrame = BikeModel:GetPivot()
 
-	v.PrimaryPart.Touched:Connect(function(HitPart)
+	-- v.PrimaryPart.Touched:Connect(function(HitPart)
 
-		if HitPart.Parent:FindFirstChild("Humanoid") == nil then return end
+	-- 	if HitPart.Parent:FindFirstChild("Humanoid") == nil then return end
 
-		local Player = game.Players:GetPlayerFromCharacter(HitPart.Parent)
-		if not Cache[Player] then 
-			Cache[Player] = 0
-		end
+	-- 	local Player = game.Players:GetPlayerFromCharacter(HitPart.Parent)
+	-- 	if not Cache[Player] then 
+	-- 		Cache[Player] = 0
+	-- 	end
 		
-		if debounce == false then
-			debounce = true
-		else
-			return
-		end
+	-- 	if debounce == false then
+	-- 		debounce = true
+	-- 	else
+	-- 		return
+	-- 	end
 
 
-		if Player == game.Players.LocalPlayer then
-			debounce = true
-			MarketplaceService:PromptProductPurchase(Player, ProductId)
-		end
+	-- 	if Player == game.Players.LocalPlayer then
+	-- 		debounce = true
+	-- 		MarketplaceService:PromptProductPurchase(Player, ProductId)
+	-- 	end
 		
-		task.delay(1, function()
-			debounce = false
-		end)
-	end)
+	-- 	task.delay(1, function()
+	-- 		debounce = false
+	-- 	end)
+	-- end)
 
 	local Rotation = 0
 	local Time = 0

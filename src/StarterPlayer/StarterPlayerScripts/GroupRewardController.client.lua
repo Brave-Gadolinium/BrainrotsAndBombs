@@ -40,6 +40,7 @@ local function setupRewardUI()
 	if giftFrame then
 		local rewardConfig = ProductConfigurations.Group.Reward
 		local itemData = ItemConfigurations.GetItemData(rewardConfig.Name)
+		local displayName = itemData and itemData.DisplayName or rewardConfig.Name
 
 		if itemData then
 			local imageLabel = giftFrame:FindFirstChild("Image") :: ImageLabel
@@ -49,7 +50,7 @@ local function setupRewardUI()
 
 			local nameLabel = giftFrame:FindFirstChild("Name") :: TextLabel
 			if nameLabel then
-				nameLabel.Text = rewardConfig.Mutation .. " " .. rewardConfig.Name
+				nameLabel.Text = rewardConfig.Mutation .. " " .. displayName
 			end
 
 			local incomeLabel = giftFrame:FindFirstChild("Income") :: TextLabel

@@ -33,8 +33,17 @@ local highlightLoop: RBXScriptConnection? = nil
 
 local MOBILE_BOMB_READY_ICON = "rbxassetid://123855876242070"
 local MOBILE_BOMB_COOLDOWN_ICON = "rbxassetid://135164909685622"
-local MOBILE_BOMB_MARGIN_RIGHT = 152
-local MOBILE_BOMB_MARGIN_BOTTOM = 92
+local MOBILE_BOMB_MIN_SIZE = 68
+local MOBILE_BOMB_MAX_SIZE = 93
+local MOBILE_BOMB_SIZE_RATIO = 0.16
+local MOBILE_BOMB_MIN_MARGIN_RIGHT = 18
+local MOBILE_BOMB_MAX_MARGIN_RIGHT = 30
+local MOBILE_BOMB_RIGHT_MARGIN_RATIO = 0.035
+local MOBILE_BOMB_EXTRA_LEFT_OFFSET = 92
+local MOBILE_BOMB_MIN_MARGIN_BOTTOM = 26
+local MOBILE_BOMB_MAX_MARGIN_BOTTOM = 44
+local MOBILE_BOMB_BOTTOM_MARGIN_RATIO = 0.06
+local MOBILE_BOMB_EXTRA_UP_OFFSET = 54
 
 local mobileBombButton: ImageButton? = nil
 local mobileBombButtonScale: UIScale? = nil
@@ -102,6 +111,48 @@ local function getGuiRoot(): ScreenGui?
 	return nil
 end
 
+local function layoutMobileBombButton()
+	local button = mobileBombButton
+	if not button then
+		return
+	end
+
+	local guiRoot = getGuiRoot()
+	local camera = Workspace.CurrentCamera
+	local viewportSize = if camera then camera.ViewportSize else Vector2.new(0, 0)
+	if viewportSize.X <= 0 or viewportSize.Y <= 0 then
+		viewportSize = if guiRoot and guiRoot.AbsoluteSize.Magnitude > 0 then guiRoot.AbsoluteSize else Vector2.new(0, 0)
+	end
+
+	if viewportSize.X <= 0 or viewportSize.Y <= 0 then
+		return
+	end
+
+	local safeAreaRightInset = 0
+	local safeAreaBottomInset = 0
+	if guiRoot and guiRoot.AbsoluteSize.Magnitude > 0 then
+		local guiBottomRight = guiRoot.AbsolutePosition + guiRoot.AbsoluteSize
+		safeAreaRightInset = math.max(0, viewportSize.X - guiBottomRight.X)
+		safeAreaBottomInset = math.max(0, viewportSize.Y - guiBottomRight.Y)
+	end
+
+	local minViewportSide = math.min(viewportSize.X, viewportSize.Y)
+	local buttonSize = math.clamp(math.floor(minViewportSide * MOBILE_BOMB_SIZE_RATIO), MOBILE_BOMB_MIN_SIZE, MOBILE_BOMB_MAX_SIZE)
+	local marginRight = math.clamp(
+		math.floor(viewportSize.X * MOBILE_BOMB_RIGHT_MARGIN_RATIO),
+		MOBILE_BOMB_MIN_MARGIN_RIGHT,
+		MOBILE_BOMB_MAX_MARGIN_RIGHT
+	)
+	local marginBottom = math.clamp(
+		math.floor(viewportSize.Y * MOBILE_BOMB_BOTTOM_MARGIN_RATIO),
+		MOBILE_BOMB_MIN_MARGIN_BOTTOM,
+		MOBILE_BOMB_MAX_MARGIN_BOTTOM
+	)
+
+	button.Size = UDim2.fromOffset(buttonSize, buttonSize)
+	button.Position = UDim2.new(1, safeAreaRightInset - marginRight - MOBILE_BOMB_EXTRA_LEFT_OFFSET, 1, safeAreaBottomInset - marginBottom - MOBILE_BOMB_EXTRA_UP_OFFSET)
+end
+
 local function animateMobileBombButtonPress()
 	local scale = mobileBombButtonScale
 	if not scale then
@@ -123,6 +174,8 @@ local function updateMobileBombButtonState()
 	if not button or not icon then
 		return
 	end
+
+	layoutMobileBombButton()
 
 	local tool = currentTool
 	if not tool or not tool.Parent then
@@ -180,8 +233,8 @@ local function ensureMobileBombButton()
 	local button = Instance.new("ImageButton")
 	button.Name = "MobileBombButton"
 	button.AnchorPoint = Vector2.new(1, 1)
-	button.Position = UDim2.new(1, -MOBILE_BOMB_MARGIN_RIGHT, 1, -MOBILE_BOMB_MARGIN_BOTTOM)
-	button.Size = UDim2.new(0.15, 0, 0.15, 0)
+	button.Position = UDim2.new(1, -MOBILE_BOMB_MIN_MARGIN_RIGHT, 1, -MOBILE_BOMB_MIN_MARGIN_BOTTOM)
+	button.Size = UDim2.fromOffset(MOBILE_BOMB_MIN_SIZE, MOBILE_BOMB_MIN_SIZE)
 	button.BackgroundColor3 = Color3.fromRGB(26, 28, 37)
 	button.BackgroundTransparency = 0.08
 	button.AutoButtonColor = false
@@ -191,11 +244,6 @@ local function ensureMobileBombButton()
 	button.Visible = true
 	button.ZIndex = 45
 	button.Parent = guiRoot
-
-	local sizeConstraint = Instance.new("UISizeConstraint")
-	sizeConstraint.MinSize = Vector2.new(82, 82)
-	sizeConstraint.MaxSize = Vector2.new(112, 112)
-	sizeConstraint.Parent = button
 
 	local aspect = Instance.new("UIAspectRatioConstraint")
 	aspect.AspectRatio = 1
@@ -290,6 +338,7 @@ local function ensureMobileBombButton()
 	mobileBombButtonScale = scale
 	mobileBombButtonIcon = icon
 
+	layoutMobileBombButton()
 	updateMobileBombButtonState()
 	return button
 end
