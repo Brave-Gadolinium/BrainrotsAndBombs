@@ -20,7 +20,7 @@ ProductConfigurations.Products = {
 	["PlaytimeRewardsSpeedX5"] = 3567801499,
 	["DailyRewardsSkipAll"] = 3567802250,
 	["DailyRewardsSkip1"] = 3567802115,
-	["RewardedSoft100"] = 3569056023,
+	["RewardedSoft100"] = 0,
 
 	["ItemProduct1"] = 3567803285,
 	["ItemProduct2"] = 3567803643,

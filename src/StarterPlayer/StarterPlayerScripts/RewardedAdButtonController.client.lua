@@ -30,6 +30,21 @@ local buttonStroke: UIStroke? = nil
 local requestSerial = 0
 local requestPending = false
 
+local function isRewardedAdConfigured(): boolean
+	local rewardKey = ProductConfigurations.PrimaryRewardedAdKey
+	if type(rewardKey) ~= "string" or rewardKey == "" then
+		return false
+	end
+
+	local rewardConfig = ProductConfigurations.RewardedAdRewards[rewardKey]
+	if type(rewardConfig) ~= "table" then
+		return false
+	end
+
+	local productId = ProductConfigurations.Products[rewardKey]
+	return type(productId) == "number" and productId > 0
+end
+
 local function getRewardConfig(): {[string]: any}
 	local rewardKey = ProductConfigurations.PrimaryRewardedAdKey
 	local rewardConfig = if type(rewardKey) == "string" then ProductConfigurations.RewardedAdRewards[rewardKey] else nil
@@ -140,6 +155,14 @@ local function updateButtonVisuals()
 end
 
 local function ensureButton(): TextButton?
+	if not isRewardedAdConfigured() then
+		if button and button.Parent then
+			button:Destroy()
+		end
+
+		return nil
+	end
+
 	if button and button.Parent then
 		updateButtonVisuals()
 		return button
