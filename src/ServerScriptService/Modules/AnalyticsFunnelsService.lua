@@ -945,6 +945,12 @@ function AnalyticsFunnelsService:HandleGroupRewardRejected(player: Player)
 	})
 end
 
+function AnalyticsFunnelsService:HandleCodesOpened(player: Player)
+	safeLogCustomEvent(player, "codes_opened", 1, buildFirstStepFields(player, {
+		zone = "base",
+	}))
+end
+
 function AnalyticsFunnelsService:ReportIntent(player: Player, intentName: string, payload: any)
 	if intentName == "BombShopOpened" then
 		self:HandleBombShopOpened(player)
@@ -960,6 +966,8 @@ function AnalyticsFunnelsService:ReportIntent(player: Player, intentName: string
 		self:HandleDailyRewardsOpened(player)
 	elseif intentName == "PlaytimeRewardsOpened" then
 		self:HandlePlaytimeRewardsOpened(player)
+	elseif intentName == "CodesOpened" then
+		self:HandleCodesOpened(player)
 	elseif intentName == "DailySpinWheelOpened" then
 		self:HandleDailySpinWheelOpened(player)
 	end

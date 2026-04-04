@@ -72,6 +72,7 @@ type PlayerData = {
 	Plots: { [string]: FloorData },
 	DiscoveredItems: {[string]: boolean},
 	ClaimedPacks: {[string]: boolean},
+	RedeemedCodes: {[string]: boolean},
 	[string]: any 
 }
 
@@ -100,6 +101,7 @@ local Template: PlayerData = {
 	Plots = { Floor1 = {}, Floor2 = {}, Floor3 = {} },
 	DiscoveredItems = {},
 	ClaimedPacks = {},
+	RedeemedCodes = {},
 	OwnedPickaxes = { ["Bomb 1"] = true },
 	EquippedPickaxe = "Bomb 1",
 }
@@ -769,6 +771,7 @@ local function onPlayerAdded(player: Player)
 	)
 	if profile.Data.DiscoveredItems == nil then profile.Data.DiscoveredItems = {} end
 	if profile.Data.ClaimedPacks == nil then profile.Data.ClaimedPacks = {} end
+	if type(profile.Data.RedeemedCodes) ~= "table" then profile.Data.RedeemedCodes = {} end
 	if type(profile.Data.TotalBrainrotsCollected) ~= "number" then profile.Data.TotalBrainrotsCollected = 0 end
 	if type(profile.Data.PostTutorialStage) ~= "number" then profile.Data.PostTutorialStage = 0 end
 	if type(profile.Data.TotalMoneyEarned) ~= "number" then

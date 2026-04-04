@@ -21,6 +21,7 @@ local PROMPT_DISTANCE = 8
 local JOIN_ACTION_TEXT = "Join Group"
 local CLAIM_ACTION_TEXT = "Claim Reward"
 local LOADING_ACTION_TEXT = "Loading..."
+local DEFAULT_IDLE_ANIMATION_ID = "rbxassetid://117364235771341"
 local rewardClaimedOverride = localPlayer:GetAttribute("GroupRewardClaimed") == true
 
 type AnimationPlaybackController = Humanoid | AnimationController
@@ -178,11 +179,12 @@ local function applyVisibilityToInstance(record: PlotRecord, instance: Instance,
 		local originalCanCollide = ensureOriginalProperty(record, instance, "CanCollide")
 		local originalCanTouch = ensureOriginalProperty(record, instance, "CanTouch")
 		local originalCanQuery = ensureOriginalProperty(record, instance, "CanQuery")
+		local keepHidden = string.lower(instance.Name) == "modelroot"
 
-		instance.LocalTransparencyModifier = if isVisible then originalLocalTransparency else 1
-		instance.CanCollide = if isVisible then originalCanCollide else false
-		instance.CanTouch = if isVisible then originalCanTouch else false
-		instance.CanQuery = if isVisible then originalCanQuery else false
+		instance.LocalTransparencyModifier = if isVisible and not keepHidden then originalLocalTransparency else 1
+		instance.CanCollide = if isVisible and not keepHidden then originalCanCollide else false
+		instance.CanTouch = if isVisible and not keepHidden then originalCanTouch else false
+		instance.CanQuery = if isVisible and not keepHidden then originalCanQuery else false
 		return
 	end
 
@@ -246,6 +248,14 @@ local function normalizeSearchToken(value: string?): string
 	return string.lower(string.gsub(value, "[%W_]+", ""))
 end
 
+local function shouldIgnoreAnimationCandidate(instance: Instance): boolean
+	return normalizeSearchToken(instance.Name) == "modelroot"
+end
+
+local function isHiddenSupportPart(instance: Instance): boolean
+	return instance:IsA("BasePart") and normalizeSearchToken(instance.Name) == "modelroot"
+end
+
 local function instanceMatchesRewardModel(instance: Instance): boolean
 	local rewardConfig = ProductConfigurations.Group.Reward
 	local instanceToken = normalizeSearchToken(instance.Name)
@@ -287,6 +297,13 @@ local function findIdleAnimation(root: Instance): Animation?
 	return fallbackAnimation
 end
 
+local function createFallbackIdleAnimation(): Animation
+	local animation = Instance.new("Animation")
+	animation.Name = "JoinLikeStandFallbackIdle"
+	animation.AnimationId = DEFAULT_IDLE_ANIMATION_ID
+	return animation
+end
+
 local function findAnimationController(root: Instance): AnimationPlaybackController?
 	local humanoid = root:FindFirstChildWhichIsA("Humanoid", true)
 	if humanoid and humanoid:IsA("Humanoid") then
@@ -302,6 +319,12 @@ local function findAnimationController(root: Instance): AnimationPlaybackControl
 end
 
 local function getAnimationRootScore(candidate: Instance, root: Instance): number
+	if shouldIgnoreAnimationCandidate(candidate) then
+		return -1000
+	end
+
+	local hasAnimationController = findAnimationController(candidate) ~= nil
+	local hasIdleAnimation = findIdleAnimation(candidate) ~= nil
 	local score = 0
 
 	if candidate == root then
@@ -317,15 +340,19 @@ local function getAnimationRootScore(candidate: Instance, root: Instance): numbe
 	end
 
 	if instanceMatchesRewardModel(candidate) then
-		score += 10
+		score += 1
 	end
 
-	if findAnimationController(candidate) then
-		score += 5
+	if hasAnimationController then
+		score += 20
 	end
 
-	if findIdleAnimation(candidate) then
-		score += 8
+	if hasIdleAnimation then
+		score += 12
+	end
+
+	if hasAnimationController and hasIdleAnimation then
+		score += 20
 	end
 
 	return score
@@ -370,6 +397,16 @@ local function findPlayingTrackByAnimationId(animator: Animator, animationId: st
 	return nil
 end
 
+local function hasAnyPlayingTrack(animator: Animator): boolean
+	for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
+		if track.IsPlaying then
+			return true
+		end
+	end
+
+	return false
+end
+
 local function ensureIdleAnimationPlaying(record: PlotRecord)
 	local stand = record.Stand
 	if not stand or record.IsHidden then
@@ -381,17 +418,22 @@ local function ensureIdleAnimationPlaying(record: PlotRecord)
 	end
 
 	local animationRoot = resolveAnimationRoot(stand)
-	local idleAnimation = findIdleAnimation(animationRoot)
-	if not idleAnimation then
-		return
-	end
-
 	local animationController = findAnimationController(animationRoot)
 	if not animationController then
+		warn("[JoinLikeStandController] No animation controller found for", animationRoot:GetFullName())
 		return
 	end
 
 	local animator = getOrCreateAnimator(animationController)
+	local idleAnimation = findIdleAnimation(animationRoot)
+	if not idleAnimation then
+		if hasAnyPlayingTrack(animator) then
+			return
+		end
+
+		idleAnimation = createFallbackIdleAnimation()
+	end
+
 	local animationId = idleAnimation.AnimationId
 	local existingTrack = findPlayingTrackByAnimationId(animator, animationId)
 	if existingTrack then
@@ -427,20 +469,27 @@ local function resolveStand(plot: Model): Instance?
 end
 
 local function resolveAnchorPart(root: Instance): BasePart?
-	if root:IsA("BasePart") then
+	if root:IsA("BasePart") and not isHiddenSupportPart(root) then
 		return root
 	end
 
-	if root:IsA("Model") and root.PrimaryPart then
+	if root:IsA("Model") and root.PrimaryPart and not isHiddenSupportPart(root.PrimaryPart) then
 		return root.PrimaryPart
 	end
 
+	local fallbackPart: BasePart? = nil
 	local basePart = root:FindFirstChildWhichIsA("BasePart", true)
 	if basePart and basePart:IsA("BasePart") then
-		return basePart
+		fallbackPart = basePart
 	end
 
-	return nil
+	for _, descendant in ipairs(root:GetDescendants()) do
+		if descendant:IsA("BasePart") and not isHiddenSupportPart(descendant) then
+			return descendant
+		end
+	end
+
+	return fallbackPart
 end
 
 local function disableForeignPrompts(record: PlotRecord)
