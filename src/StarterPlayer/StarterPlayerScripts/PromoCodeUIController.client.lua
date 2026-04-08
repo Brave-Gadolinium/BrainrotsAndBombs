@@ -247,7 +247,7 @@ local function submitCode()
 	end
 
 	local rawCode = codeTextBox.Text
-	log(`Submit requested by {player.Name}. Raw input="{rawCode}"`)
+	log(`Submit requested by {player.Name}.`)
 	updateSubmittingState(true)
 	log("Invoking server redeem remote...")
 
@@ -258,7 +258,7 @@ local function submitCode()
 	updateSubmittingState(false)
 
 	if not success then
-		warnLog(`Remote invoke failed for input "{rawCode}". Error={tostring(result)}`)
+		warnLog(`Remote invoke failed. Error={tostring(result)}`)
 		NotificationManager.show("Code service is unavailable right now.", "Error")
 		playFeedback(false)
 		return
@@ -266,13 +266,13 @@ local function submitCode()
 
 	if type(result) ~= "table" or result.Success ~= true then
 		local errorCode = if type(result) == "table" then result.Error else nil
-		log(`Redeem failed for input "{rawCode}". Error={tostring(errorCode)} Result={tostring(result)}`)
+		log(`Redeem failed. Error={tostring(errorCode)} Result={tostring(result)}`)
 		NotificationManager.show(ERROR_MESSAGES[errorCode] or "Could not redeem this code right now.", "Error")
 		playFeedback(false)
 		return
 	end
 
-	log(`Redeem succeeded for input "{rawCode}". CodeId={tostring(result.CodeId)} RewardType={tostring(result.RewardType)} RewardText={tostring(result.RewardText)}`)
+	log(`Redeem succeeded. CodeId={tostring(result.CodeId)} RewardType={tostring(result.RewardType)} RewardText={tostring(result.RewardText)}`)
 	codeTextBox.Text = ""
 	NotificationManager.show(result.RewardText or "Code redeemed!", "Success")
 	playFeedback(true)
@@ -357,6 +357,11 @@ local function bindUi()
 			if codeFrame and codeFrame.Visible then
 				log(`${FRAME_NAME} opened.`)
 				reportAnalyticsIntent:FireServer("CodesOpened")
+				reportAnalyticsIntent:FireServer("StoreOpened", {
+					surface = "promo_codes",
+					section = "promo_codes",
+					entrypoint = "frame_open",
+				})
 			end
 		end)
 	end

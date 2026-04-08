@@ -502,6 +502,27 @@ local function setRobuxPrice()
 	end)
 end
 
+local function reportStoreOpened(surface: string)
+	ReportAnalyticsIntent:FireServer("StoreOpened", {
+		surface = surface,
+		section = "rebirth",
+		entrypoint = "frame_open",
+	})
+end
+
+local function reportStorePromptFailed(reason: string)
+	ReportAnalyticsIntent:FireServer("StorePromptFailed", {
+		surface = "rebirth",
+		section = "rebirth",
+		entrypoint = "skip_button",
+		productName = "SkipRebirth",
+		productId = skipProductId,
+		purchaseKind = "product",
+		paymentType = "robux",
+		reason = reason,
+	})
+end
+
 local function bindObservers()
 	local backpack = player:WaitForChild("Backpack")
 	table.insert(rootConnections, backpack.ChildAdded:Connect(queueRefresh))
@@ -591,15 +612,32 @@ end)
 
 skipButton.MouseButton1Click:Connect(function()
 	if not skipProductId then
+		reportStorePromptFailed("missing_product_id")
 		return
 	end
 
-	MarketplaceService:PromptProductPurchase(player, skipProductId)
+	ReportAnalyticsIntent:FireServer("StoreOfferPrompted", {
+		surface = "rebirth",
+		section = "rebirth",
+		entrypoint = "skip_button",
+		productName = "SkipRebirth",
+		productId = skipProductId,
+		purchaseKind = "product",
+		paymentType = "robux",
+	})
+	local success, err = pcall(function()
+		MarketplaceService:PromptProductPurchase(player, skipProductId)
+	end)
+	if not success then
+		warn("[RebirthScript] Failed to prompt SkipRebirth:", err)
+		reportStorePromptFailed("prompt_failed")
+	end
 end)
 
 rootUI:GetPropertyChangedSignal("Visible"):Connect(function()
 	if rootUI.Visible then
 		ReportAnalyticsIntent:FireServer("RebirthUIOpened")
+		reportStoreOpened("rebirth")
 		queueRefresh()
 	end
 end)

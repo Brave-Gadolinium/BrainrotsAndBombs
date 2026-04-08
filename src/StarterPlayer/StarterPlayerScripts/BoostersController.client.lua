@@ -10,6 +10,7 @@ local ProductConfigurations = require(ReplicatedStorage.Modules.ProductConfigura
 local player = Players.LocalPlayer
 local events = ReplicatedStorage:WaitForChild("Events")
 local requestAutoBombState = events:WaitForChild("RequestAutoBombState") :: RemoteEvent
+local reportAnalyticsIntent = events:WaitForChild("ReportAnalyticsIntent") :: RemoteEvent
 
 local function formatRemainingTime(endsAt: number): string
 	local remaining = math.max(0, math.floor(endsAt - os.time()))
@@ -40,6 +41,34 @@ local function setButtonText(button: GuiButton?, text: string)
 	end
 end
 
+local function reportStoreOpened(surface: string)
+	reportAnalyticsIntent:FireServer("StoreOpened", {
+		surface = surface,
+		section = "boosters",
+		entrypoint = "frame_open",
+	})
+end
+
+local function reportStorePromptFailed(productName: string, purchaseKind: string, purchaseId: number?, reason: string)
+	local payload = {
+		surface = "boosters",
+		section = "boosters",
+		entrypoint = "button",
+		productName = productName,
+		purchaseKind = purchaseKind,
+		paymentType = "robux",
+		reason = reason,
+	}
+
+	if purchaseKind == "gamepass" then
+		payload.passId = purchaseId
+	else
+		payload.productId = purchaseId
+	end
+
+	reportAnalyticsIntent:FireServer("StorePromptFailed", payload)
+end
+
 local function setupCardActions(boostersFrame: Frame)
 	local megaCard = safeFindCard(boostersFrame, "MegaExplosion")
 	local shieldCard = safeFindCard(boostersFrame, "Shield")
@@ -59,12 +88,46 @@ local function setupCardActions(boostersFrame: Frame)
 			if infoType == Enum.InfoType.Product then
 				local productId = ProductConfigurations.Products[productName]
 				if type(productId) == "number" and productId > 0 then
-					MarketplaceService:PromptProductPurchase(player, productId)
+					reportAnalyticsIntent:FireServer("StoreOfferPrompted", {
+						surface = "boosters",
+						section = "boosters",
+						entrypoint = "button",
+						productName = productName,
+						productId = productId,
+						purchaseKind = "product",
+						paymentType = "robux",
+					})
+					local success, err = pcall(function()
+						MarketplaceService:PromptProductPurchase(player, productId)
+					end)
+					if not success then
+						warn("[BoostersController] Failed to prompt product:", productName, err)
+						reportStorePromptFailed(productName, "product", productId, "prompt_failed")
+					end
+				else
+					reportStorePromptFailed(productName, "product", productId, "missing_product_id")
 				end
 			else
 				local passId = ProductConfigurations.GamePasses[productName]
 				if type(passId) == "number" and passId > 0 then
-					MarketplaceService:PromptGamePassPurchase(player, passId)
+					reportAnalyticsIntent:FireServer("StoreOfferPrompted", {
+						surface = "boosters",
+						section = "boosters",
+						entrypoint = "button",
+						productName = productName,
+						passId = passId,
+						purchaseKind = "gamepass",
+						paymentType = "robux",
+					})
+					local success, err = pcall(function()
+						MarketplaceService:PromptGamePassPurchase(player, passId)
+					end)
+					if not success then
+						warn("[BoostersController] Failed to prompt gamepass:", productName, err)
+						reportStorePromptFailed(productName, "gamepass", passId, "prompt_failed")
+					end
+				else
+					reportStorePromptFailed(productName, "gamepass", passId, "missing_pass_id")
 				end
 			end
 		end)
@@ -79,13 +142,34 @@ local function setupCardActions(boostersFrame: Frame)
 			autoButton.MouseButton1Click:Connect(function()
 				if player:GetAttribute("HasAutoBomb") == true then
 					local nextState = not (player:GetAttribute("AutoBombEnabled") == true)
+					reportAnalyticsIntent:FireServer("AutoBombToggleRequested", {
+						surface = "boosters",
+						enabled = nextState,
+					})
 					requestAutoBombState:FireServer(nextState)
 					return
 				end
 
 				local passId = ProductConfigurations.GamePasses.AutoBomb
 				if type(passId) == "number" and passId > 0 then
-					MarketplaceService:PromptGamePassPurchase(player, passId)
+					reportAnalyticsIntent:FireServer("StoreOfferPrompted", {
+						surface = "boosters",
+						section = "boosters",
+						entrypoint = "button",
+						productName = "AutoBomb",
+						passId = passId,
+						purchaseKind = "gamepass",
+						paymentType = "robux",
+					})
+					local success, err = pcall(function()
+						MarketplaceService:PromptGamePassPurchase(player, passId)
+					end)
+					if not success then
+						warn("[BoostersController] Failed to prompt AutoBomb pass:", err)
+						reportStorePromptFailed("AutoBomb", "gamepass", passId, "prompt_failed")
+					end
+				else
+					reportStorePromptFailed("AutoBomb", "gamepass", passId, "missing_pass_id")
 				end
 			end)
 		end
@@ -143,6 +227,14 @@ local function init()
 	local boostersFrame = frames:WaitForChild("Boosters") :: Frame
 
 	setupCardActions(boostersFrame)
+	boostersFrame:GetPropertyChangedSignal("Visible"):Connect(function()
+		if boostersFrame.Visible then
+			reportStoreOpened("boosters")
+		end
+	end)
+	if boostersFrame.Visible then
+		reportStoreOpened("boosters")
+	end
 
 	local function refresh()
 		updateBoostersUI(boostersFrame)

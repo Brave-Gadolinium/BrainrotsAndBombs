@@ -482,6 +482,10 @@ local function checkAndGrantGroupReward(player: Player, profile: any)
 					context = "onboarding",
 				})
 			end
+			local analyticsFunnelsService = getAnalyticsFunnelsService()
+			if analyticsFunnelsService then
+				analyticsFunnelsService:HandleAutoGroupRewardGranted(player)
+			end
 			local Events = ReplicatedStorage:FindFirstChild("Events")
 			local notif = Events and Events:FindFirstChild("ShowNotification")
 			if notif then notif:FireClient(player, "Thanks for joining the group! +$1,000", "Success") end
@@ -1147,6 +1151,8 @@ function PlayerController:Init(controllers)
 	MarketplaceService.PromptGamePassPurchaseFinished:Connect(function(player, passId, wasPurchased)
 		if wasPurchased then
 			local analyticsEconomyService = getAnalyticsEconomyService()
+			local analyticsFunnelsService = getAnalyticsFunnelsService()
+			local purchasedPassName = ProductConfigurations.GetGamePassById(passId)
 			if passId == ProductConfigurations.GamePasses.VIP then
 				vipCache[player] = true
 				player:SetAttribute("IsVIP", true)
@@ -1182,10 +1188,18 @@ function PlayerController:Init(controllers)
 				end
 			end
 
-			local packName = ProductConfigurations.GetGamePassById(passId)
+			local packName = purchasedPassName
 			if packName and (packName == "StarterPack" or packName == "ProPack") then
 				player:SetAttribute(packName, true)
 				grantPackRewards(player, packName)
+			end
+			if analyticsFunnelsService then
+				analyticsFunnelsService:HandleStorePurchaseSuccess(player, {
+					purchaseKind = "gamepass",
+					id = passId,
+					productName = purchasedPassName,
+					paymentType = "robux",
+				})
 			end
 			playPurchaseEffects(player) 
 		end

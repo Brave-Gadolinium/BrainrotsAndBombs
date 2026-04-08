@@ -7,6 +7,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 
 local ItemConfigurations = require(ReplicatedStorage.Modules.ItemConfigurations)
 local PromoCodesConfiguration = require(ServerScriptService.Modules.PromoCodesConfiguration)
+local AnalyticsFunnelsService = require(ServerScriptService.Modules.AnalyticsFunnelsService)
 
 local PromoCodeController = {}
 local LOG_PREFIX = "[PromoCodeController]"
@@ -236,34 +237,41 @@ local function buildErrorResponse(errorCode: string, codeId: string?): RedeemRes
 end
 
 function PromoCodeController:HandleRedeem(player: Player, rawCode: string): RedeemResponse
-	log(`Redeem request received from {player.Name}. Raw="{tostring(rawCode)}"`)
 	local profile = getProfile(player)
 	if not profile then
 		warnLog(`Profile not loaded for {player.Name}.`)
+		AnalyticsFunnelsService:HandlePromoCodeRedeemAttempt(player, "Unknown")
+		AnalyticsFunnelsService:HandlePromoCodeRedeemFailure(player, "Unknown", "ProfileNotLoaded")
 		return buildErrorResponse("ProfileNotLoaded", nil)
 	end
 
 	local normalizedCode = PromoCodesConfiguration.NormalizeCode(rawCode)
-	log(`Normalized code for {player.Name}: "{normalizedCode}"`)
+	local entry: PromoCodeEntry? = PromoCodesConfiguration.GetByNormalizedCode(normalizedCode)
+	local codeId = entry and entry.Id or "Unknown"
+	AnalyticsFunnelsService:HandlePromoCodeRedeemAttempt(player, codeId)
+
 	if normalizedCode == "" then
 		log(`Rejected empty code from {player.Name}.`)
+		AnalyticsFunnelsService:HandlePromoCodeRedeemFailure(player, codeId, "EmptyCode")
 		return buildErrorResponse("EmptyCode", nil)
 	end
 
-	local entry: PromoCodeEntry? = PromoCodesConfiguration.GetByNormalizedCode(normalizedCode)
 	if not entry then
-		log(`Rejected invalid code from {player.Name}: "{normalizedCode}"`)
+		log(`Rejected invalid code from {player.Name}.`)
+		AnalyticsFunnelsService:HandlePromoCodeRedeemFailure(player, codeId, "InvalidCode")
 		return buildErrorResponse("InvalidCode", nil)
 	end
 
 	local redeemedCodes = ensureRedeemedCodes(profile)
 	if redeemedCodes[entry.Id] == true then
 		log(`Rejected already redeemed code for {player.Name}: CodeId={entry.Id}`)
+		AnalyticsFunnelsService:HandlePromoCodeRedeemFailure(player, entry.Id, "AlreadyRedeemed")
 		return buildErrorResponse("AlreadyRedeemed", entry.Id)
 	end
 
 	if redeemLocks[player] then
 		log(`Rejected busy redeem request for {player.Name}: CodeId={entry.Id}`)
+		AnalyticsFunnelsService:HandlePromoCodeRedeemFailure(player, entry.Id, "Busy")
 		return buildErrorResponse("Busy", entry.Id)
 	end
 
@@ -274,6 +282,7 @@ function PromoCodeController:HandleRedeem(player: Player, rawCode: string): Rede
 		local granted, errorCode, rewardType = grantReward(player, entry.Reward)
 		if not granted then
 			warnLog(`Reward grant failed for {player.Name}: CodeId={entry.Id} Error={tostring(errorCode)}`)
+			AnalyticsFunnelsService:HandlePromoCodeRedeemFailure(player, entry.Id, errorCode or "RewardGrantFailed")
 			return buildErrorResponse(errorCode or "RewardGrantFailed", entry.Id)
 		end
 
@@ -292,13 +301,16 @@ function PromoCodeController:HandleRedeem(player: Player, rawCode: string): Rede
 
 	if not success then
 		warnLog(`Unhandled redeem error for {player.Name}: CodeId={entry.Id} Error={tostring(response)}`)
+		AnalyticsFunnelsService:HandlePromoCodeRedeemFailure(player, entry.Id, "RewardGrantFailed")
 		return buildErrorResponse("RewardGrantFailed", entry.Id)
 	end
 
 	if response.Success then
 		log(`Redeem completed for {player.Name}: CodeId={entry.Id} RewardType={tostring(response.RewardType)}`)
+		AnalyticsFunnelsService:HandlePromoCodeRedeemSuccess(player, entry.Id, response.RewardType)
 	else
 		log(`Redeem finished with failure for {player.Name}: CodeId={entry.Id} Error={tostring(response.Error)}`)
+		AnalyticsFunnelsService:HandlePromoCodeRedeemFailure(player, entry.Id, response.Error or "Unknown")
 	end
 
 	return response

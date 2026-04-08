@@ -39,6 +39,54 @@ local rewardCountdowns: { [number]: number } = {}
 local currentStatus = nil
 local isClaiming = false
 
+local function reportStoreOpened(surface: string)
+	reportAnalyticsIntent:FireServer("StoreOpened", {
+		surface = surface,
+		section = "playtime_rewards",
+		entrypoint = "frame_open",
+	})
+end
+
+local function reportStorePromptFailed(productName: string, productId: number?, reason: string)
+	reportAnalyticsIntent:FireServer("StorePromptFailed", {
+		surface = "playtime_rewards",
+		section = "playtime_rewards",
+		entrypoint = "purchase_button",
+		productName = productName,
+		productId = productId,
+		purchaseKind = "product",
+		paymentType = "robux",
+		reason = reason,
+	})
+end
+
+local function promptPlaytimeProduct(productName: string, missingMessage: string)
+	local productId = ProductConfigurations.Products[productName]
+	if type(productId) ~= "number" or productId <= 0 then
+		NotificationManager.show(missingMessage, "Error")
+		reportStorePromptFailed(productName, productId, "missing_product_id")
+		return
+	end
+
+	reportAnalyticsIntent:FireServer("StoreOfferPrompted", {
+		surface = "playtime_rewards",
+		section = "playtime_rewards",
+		entrypoint = "purchase_button",
+		productName = productName,
+		productId = productId,
+		purchaseKind = "product",
+		paymentType = "robux",
+	})
+	local success, err = pcall(function()
+		MarketplaceService:PromptProductPurchase(player, productId)
+	end)
+	if not success then
+		warn("[PlaytimeRewardUIController] Failed to prompt product:", productName, err)
+		reportStorePromptFailed(productName, productId, "prompt_failed")
+		NotificationManager.show("Purchase prompt is unavailable right now.", "Error")
+	end
+end
+
 local STATE_COLORS = {
 	Claim = {
 		Background = Color3.fromRGB(0, 200, 0),
@@ -238,33 +286,18 @@ local function requestInitialStatus()
 end
 
 openAllButton.MouseButton1Click:Connect(function()
-	local productId = ProductConfigurations.Products["PlaytimeRewardsSkipAll"]
-	if type(productId) ~= "number" or productId <= 0 then
-		NotificationManager.show("Playtime Skip All product ID is not configured yet.", "Error")
-		return
-	end
-
-	MarketplaceService:PromptProductPurchase(player, productId)
+	reportAnalyticsIntent:FireServer("RewardBulkClaimClicked", {
+		surface = "playtime_rewards",
+	})
+	promptPlaytimeProduct("PlaytimeRewardsSkipAll", "Playtime Skip All product ID is not configured yet.")
 end)
 
 speedX2Button.MouseButton1Click:Connect(function()
-	local productId = ProductConfigurations.Products["PlaytimeRewardsSpeedX2"]
-	if type(productId) ~= "number" or productId <= 0 then
-		NotificationManager.show("Playtime x2 Speed product ID is not configured yet.", "Error")
-		return
-	end
-
-	MarketplaceService:PromptProductPurchase(player, productId)
+	promptPlaytimeProduct("PlaytimeRewardsSpeedX2", "Playtime x2 Speed product ID is not configured yet.")
 end)
 
 speedX5Button.MouseButton1Click:Connect(function()
-	local productId = ProductConfigurations.Products["PlaytimeRewardsSpeedX5"]
-	if type(productId) ~= "number" or productId <= 0 then
-		NotificationManager.show("Playtime x5 Speed product ID is not configured yet.", "Error")
-		return
-	end
-
-	MarketplaceService:PromptProductPurchase(player, productId)
+	promptPlaytimeProduct("PlaytimeRewardsSpeedX5", "Playtime x5 Speed product ID is not configured yet.")
 end)
 
 template.Visible = false
@@ -283,6 +316,7 @@ player:GetAttributeChangedSignal("PlaytimeRewardHasSpeedX5"):Connect(updateSpeed
 playtimeRewardsFrame:GetPropertyChangedSignal("Visible"):Connect(function()
 	if playtimeRewardsFrame.Visible then
 		reportAnalyticsIntent:FireServer("PlaytimeRewardsOpened")
+		reportStoreOpened("playtime_rewards")
 	end
 end)
 

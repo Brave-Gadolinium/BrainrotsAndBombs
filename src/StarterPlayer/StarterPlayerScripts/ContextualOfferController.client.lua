@@ -12,6 +12,7 @@ local ProductConfigurations = require(ReplicatedStorage.Modules.ProductConfigura
 local player = Players.LocalPlayer
 local events = ReplicatedStorage:WaitForChild("Events")
 local showContextualOffer = events:WaitForChild("ShowContextualOffer") :: RemoteEvent
+local reportAnalyticsIntent = events:WaitForChild("ReportAnalyticsIntent") :: RemoteEvent
 
 local GLOBAL_COOLDOWN = 60
 local PER_OFFER_COOLDOWN = 180
@@ -141,6 +142,25 @@ local function resolveOfferKey(rawOfferKey: string): string
 	return rawOfferKey
 end
 
+local function reportStorePromptFailed(offerKey: string, productName: string, purchaseKind: string, purchaseId: number?, reason: string)
+	local payload = {
+		surface = "contextual_offer",
+		section = "contextual_offer",
+		entrypoint = "cta",
+		productName = productName,
+		purchaseKind = purchaseKind,
+		paymentType = "robux",
+		offerKey = offerKey,
+		reason = reason,
+	}
+	if purchaseKind == "gamepass" then
+		payload.passId = purchaseId
+	else
+		payload.productId = purchaseId
+	end
+	reportAnalyticsIntent:FireServer("StorePromptFailed", payload)
+end
+
 local function promptFromOffer(offerKey: string)
 	local resolved = resolveOfferKey(offerKey)
 	if resolved == "BombUpgrade" then
@@ -150,8 +170,27 @@ local function promptFromOffer(offerKey: string)
 	if resolved == "AutoCollect" then
 		local passId = ProductConfigurations.GamePasses.CollectAll
 		if type(passId) == "number" and passId > 0 then
+			reportAnalyticsIntent:FireServer("StoreOfferPrompted", {
+				surface = "contextual_offer",
+				section = "contextual_offer",
+				entrypoint = "cta",
+				productName = "CollectAll",
+				passId = passId,
+				purchaseKind = "gamepass",
+				paymentType = "robux",
+				offerKey = offerKey,
+			})
 			purchasePromptActiveUntil = os.clock() + 15
-			MarketplaceService:PromptGamePassPurchase(player, passId)
+			local success, err = pcall(function()
+				MarketplaceService:PromptGamePassPurchase(player, passId)
+			end)
+			if not success then
+				purchasePromptActiveUntil = 0
+				warn("[ContextualOfferController] Failed to prompt CollectAll pass:", err)
+				reportStorePromptFailed(offerKey, "CollectAll", "gamepass", passId, "prompt_failed")
+			end
+		else
+			reportStorePromptFailed(offerKey, "CollectAll", "gamepass", passId, "missing_pass_id")
 		end
 		return
 	end
@@ -202,6 +241,16 @@ local function ensureCtaUi()
 		if not offerKey then
 			return
 		end
+		local resolvedOfferKey = resolveOfferKey(offerKey)
+		local action = if resolvedOfferKey == "AutoCollect" then "prompt_collect_all"
+			elseif resolvedOfferKey == "BombUpgrade" then "open_pickaxes"
+			elseif resolvedOfferKey == "StarterPack" then "open_shop"
+			else "open_boosters"
+		reportAnalyticsIntent:FireServer("ContextualOfferClicked", {
+			offerKey = offerKey,
+			resolvedOfferKey = resolvedOfferKey,
+			action = action,
+		})
 		promptFromOffer(offerKey)
 		hideCta()
 	end)

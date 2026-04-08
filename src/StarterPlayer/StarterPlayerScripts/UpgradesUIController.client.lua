@@ -53,6 +53,27 @@ local function findTextLabel(parent: Instance): TextLabel?
 	return parent:FindFirstChildWhichIsA("TextLabel", true)
 end
 
+local function reportStoreOpened(surface: string)
+	reportAnalyticsIntent:FireServer("StoreOpened", {
+		surface = surface,
+		section = "upgrades",
+		entrypoint = "frame_open",
+	})
+end
+
+local function reportStorePromptFailed(upgradeId: string, productId: number?, reason: string)
+	reportAnalyticsIntent:FireServer("StorePromptFailed", {
+		surface = "upgrades",
+		section = "upgrades",
+		entrypoint = "robux_button",
+		productName = upgradeId,
+		productId = productId,
+		purchaseKind = "product",
+		paymentType = "robux",
+		reason = reason,
+	})
+end
+
 local function initializeUI()
 	local playerGui = player:WaitForChild("PlayerGui")
 	local mainGui = playerGui:WaitForChild("GUI")
@@ -125,7 +146,18 @@ local function initializeUI()
 					end
 				end)
 				robuxBtn.MouseButton1Click:Connect(function()
-					MarketplaceService:PromptProductPurchase(player, robuxId)
+					reportAnalyticsIntent:FireServer("UpgradePurchaseRequested", {
+						upgradeId = upgrade.Id,
+						paymentType = "robux",
+						surface = "upgrades",
+					})
+					local success, err = pcall(function()
+						MarketplaceService:PromptProductPurchase(player, robuxId)
+					end)
+					if not success then
+						warn("[UpgradesUIController] Failed to prompt robux upgrade:", upgrade.Id, err)
+						reportStorePromptFailed(upgrade.Id, robuxId, "prompt_failed")
+					end
 				end)
 			else
 				robuxBtn.Visible = false
@@ -182,6 +214,7 @@ task.spawn(function()
 	upgradesFrame:GetPropertyChangedSignal("Visible"):Connect(function()
 		if upgradesFrame.Visible then
 			reportAnalyticsIntent:FireServer("UpgradesOpened")
+			reportStoreOpened("upgrades")
 			updateEvent:FireServer()
 			task.defer(refreshUpgradeVisuals)
 		end

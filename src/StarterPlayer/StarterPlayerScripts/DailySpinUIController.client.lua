@@ -45,6 +45,27 @@ local FREE_SPIN_COOLDOWN_SECONDS = math.max(0, tonumber(Config.FreeSpinCooldownS
 local DEFAULT_REWARD_IMAGE_COLOR = Color3.new(1, 1, 1)
 local ITEM_REWARD_IMAGE_COLOR = Color3.new(0, 0, 0)
 
+local function reportStoreOpened(surface: string)
+	ReportAnalyticsIntent:FireServer("StoreOpened", {
+		surface = surface,
+		section = "daily_spin",
+		entrypoint = "frame_open",
+	})
+end
+
+local function reportStorePromptFailed(productKey: string, productId: number?, reason: string)
+	ReportAnalyticsIntent:FireServer("StorePromptFailed", {
+		surface = "daily_spin",
+		section = "daily_spin",
+		entrypoint = "purchase_button",
+		productName = productKey,
+		productId = productId,
+		purchaseKind = "product",
+		paymentType = "robux",
+		reason = reason,
+	})
+end
+
 local function isBrainrotReward(data): boolean
 	return data.Type == "Item" or data.Type == "RandomItemByRarity"
 end
@@ -110,8 +131,19 @@ local function promptSpinProduct(productKey: string, missingMessage: string)
 	local productId = ProductConfigs.Products[productKey]
 	if type(productId) ~= "number" or productId <= 0 then
 		NotificationManager.show(missingMessage, "Error")
+		reportStorePromptFailed(productKey, productId, "missing_product_id")
 		return
 	end
+
+	ReportAnalyticsIntent:FireServer("StoreOfferPrompted", {
+		surface = "daily_spin",
+		section = "daily_spin",
+		entrypoint = "purchase_button",
+		productName = productKey,
+		productId = productId,
+		purchaseKind = "product",
+		paymentType = "robux",
+	})
 
 	local success, err = pcall(function()
 		MarketplaceService:PromptProductPurchase(player, productId)
@@ -119,6 +151,7 @@ local function promptSpinProduct(productKey: string, missingMessage: string)
 
 	if not success then
 		warn(`[DailySpinUIController] Failed to prompt {productKey}: {err}`)
+		reportStorePromptFailed(productKey, productId, "prompt_failed")
 		NotificationManager.show("Purchase prompt is unavailable right now.", "Error")
 	end
 end
@@ -252,6 +285,7 @@ player:GetAttributeChangedSignal("LastDailySpin"):Connect(updateSpinButton)
 wheelFrame:GetPropertyChangedSignal("Visible"):Connect(function()
 	if wheelFrame.Visible then
 		ReportAnalyticsIntent:FireServer("DailySpinWheelOpened")
+		reportStoreOpened("daily_spin")
 	end
 end)
 

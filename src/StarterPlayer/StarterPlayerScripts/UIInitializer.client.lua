@@ -43,35 +43,16 @@ local function ensureGuiCorner(target: Instance, radius: UDim)
 	corner.Parent = target
 end
 
-local function ensureBoostersButton()
+local function removeBoostersButton()
 	local rightPanel = hudGui:FindFirstChild("Right")
 	if not rightPanel then
 		return
 	end
 
 	local existingButton = rightPanel:FindFirstChild("BoostersButton")
-	if existingButton and existingButton:IsA("GuiButton") then
-		return
+	if existingButton then
+		existingButton:Destroy()
 	end
-
-	local button = Instance.new("TextButton")
-	button.Name = "BoostersButton"
-	button.Size = UDim2.fromOffset(120, 40)
-	button.Position = UDim2.new(1, -124, 0, 56)
-	button.AnchorPoint = Vector2.new(0, 0)
-	button.BackgroundColor3 = Color3.fromRGB(255, 170, 64)
-	button.TextColor3 = Color3.fromRGB(20, 20, 20)
-	button.TextScaled = true
-	button.Font = Enum.Font.GothamBold
-	button.Text = "Boosters"
-	button.Parent = rightPanel
-	ensureGuiCorner(button, UDim.new(0, 10))
-
-	local stroke = Instance.new("UIStroke")
-	stroke.Thickness = 1.25
-	stroke.Color = Color3.fromRGB(255, 255, 255)
-	stroke.Transparency = 0.2
-	stroke.Parent = button
 end
 
 local function createBoosterCard(parent: Instance, order: number, title: string, descriptionText: string): Frame
@@ -342,7 +323,7 @@ function UIInitializer:Init()
 
 	-- 2. Initialize Frames (Use IsA("GuiObject") to catch ScrollingFrames too!)
 	ensureBoostersFrame()
-	ensureBoostersButton()
+	removeBoostersButton()
 	for _, child in ipairs(framesContainer:GetChildren()) do
 		if child:IsA("GuiObject") then
 

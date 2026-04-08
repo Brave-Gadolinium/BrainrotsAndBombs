@@ -37,10 +37,10 @@ local Constants = {
 
 	MUTATION_MULTIPLIERS = {
 		["Normal"] = 1,
-		["Golden"] = 2,
-		["Diamond"] = 3,
-		["Ruby"] = 4,
-		["Neon"] = 5,
+		["Golden"] = 2.5,
+		["Diamond"] = 5,
+		["Ruby"] = 8,
+		["Neon"] = 12,
 	},
 
 }

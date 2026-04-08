@@ -17,12 +17,17 @@ local AnalyticsEconomyService = require(ServerScriptService.Modules.AnalyticsEco
 local TRANSACTION_TYPES = AnalyticsEconomyService:GetTransactionTypes()
 
 function GroupRewardController:ProcessRewardRequest(player: Player)
+	AnalyticsFunnelsService:HandleGroupRewardClaimAttempt(player, "group_reward_ui")
 	local profile = PlayerController:GetProfile(player)
-	if not profile then return {Success = false, Msg = "Data not loaded yet!"} end
+	if not profile then
+		AnalyticsFunnelsService:HandleGroupRewardClaimFailure(player, "group_reward_ui", "ProfileNotLoaded")
+		return {Success = false, Msg = "Data not loaded yet!"}
+	end
 
 	-- Check if they already claimed it
 	if profile.Data.ClaimedPacks["GroupItemReward"] then
 		player:SetAttribute("GroupRewardClaimed", true)
+		AnalyticsFunnelsService:HandleGroupRewardClaimFailure(player, "group_reward_ui", "AlreadyClaimed")
 		return {Success = false, Msg = "Already claimed!"}
 	end
 
@@ -33,6 +38,7 @@ function GroupRewardController:ProcessRewardRequest(player: Player)
 	end)
 
 	if not success then
+		AnalyticsFunnelsService:HandleGroupRewardClaimFailure(player, "group_reward_ui", "RobloxApiError")
 		return {Success = false, Msg = "Roblox API Error. Try again!"}
 	end
 
@@ -77,9 +83,12 @@ function GroupRewardController:ProcessRewardRequest(player: Player)
 			Events.TriggerUIEffect:FireClient(player, "HighlightLight")
 		end
 
+		AnalyticsFunnelsService:HandleGroupRewardClaimSuccess(player, "group_reward_ui")
+
 		return {Success = true}
 	else
 		AnalyticsFunnelsService:HandleGroupRewardRejected(player)
+		AnalyticsFunnelsService:HandleGroupRewardClaimFailure(player, "group_reward_ui", "NotInGroup")
 		return {Success = false, Msg = "You must join the group first!"}
 	end
 end

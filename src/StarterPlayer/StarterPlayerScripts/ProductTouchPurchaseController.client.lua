@@ -16,6 +16,7 @@ local RarityUtils = require(ReplicatedStorage.Modules.RarityUtils)
 local localPlayer = Players.LocalPlayer
 local events = ReplicatedStorage:WaitForChild("Events")
 local requestLimitedProductPrompt = events:WaitForChild("RequestLimitedProductPrompt") :: RemoteFunction
+local reportAnalyticsIntent = events:WaitForChild("ReportAnalyticsIntent") :: RemoteEvent
 local limitedProductStocks = ReplicatedStorage:WaitForChild("LimitedProductStocks")
 
 local PRODUCT_MODEL_TAG = "ProductModel"
@@ -447,6 +448,20 @@ local function requestLimitedPrompt(productId: number): PromptRequestResult
 	}
 end
 
+local function reportStorePromptFailed(productId: number?, productName: string?, limited: boolean, reason: string)
+	reportAnalyticsIntent:FireServer("StorePromptFailed", {
+		surface = "product_touch",
+		section = "world",
+		entrypoint = "touch",
+		productName = productName,
+		productId = productId,
+		purchaseKind = "product",
+		paymentType = "robux",
+		reason = reason,
+		limited = limited,
+	})
+end
+
 local function releaseLimitedPromptReservation(productId: number)
 	local releaseRequest: PromptReleaseRequest = {
 		Action = "Release",
@@ -468,6 +483,8 @@ local function promptProductPurchase(productInstance: Instance)
 		warn("[ProductTouchPurchaseController] Missing ProductId for", productInstance:GetFullName())
 		return
 	end
+	local productName = ProductConfigurations.GetProductById(productId)
+	local isLimitedProduct = ProductConfigurations.IsLimitedItemProductId(productId)
 
 	local now = os.clock()
 	local state = getProductInstanceState(productInstance)
@@ -478,9 +495,10 @@ local function promptProductPurchase(productInstance: Instance)
 	state.LastPromptAt = now
 	globalPromptLockedUntil = now + TOUCH_COOLDOWN
 
-	if ProductConfigurations.IsLimitedItemProductId(productId) then
+	if isLimitedProduct then
 		if isLimitedProductSoldOut(productId) then
 			refreshBillboards(productInstance)
+			reportStorePromptFailed(productId, productName, true, "sold_out")
 			NotificationManager.show("Sold out!", "Error")
 			return
 		end
@@ -488,6 +506,7 @@ local function promptProductPurchase(productInstance: Instance)
 		local promptReservationResult = requestLimitedPrompt(productId)
 		if promptReservationResult.Success ~= true then
 			refreshBillboards(productInstance)
+			reportStorePromptFailed(productId, productName or promptReservationResult.ProductName, true, promptReservationResult.Reason or "reservation_failed")
 
 			local errorMessage = promptReservationResult.Message
 			if type(errorMessage) == "string" and errorMessage ~= "" then
@@ -497,17 +516,24 @@ local function promptProductPurchase(productInstance: Instance)
 		end
 	end
 
+	reportAnalyticsIntent:FireServer("ProductTouchPrompted", {
+		productId = productId,
+		productName = productName,
+		limited = isLimitedProduct,
+	})
+
 	local success, err = pcall(function()
 		MarketplaceService:PromptProductPurchase(localPlayer, productId)
 	end)
 
 	if not success then
-		if ProductConfigurations.IsLimitedItemProductId(productId) then
+		if isLimitedProduct then
 			releaseLimitedPromptReservation(productId)
 			refreshBillboards(productInstance)
 		end
 
 		warn("[ProductTouchPurchaseController] Failed to prompt product purchase for", productInstance:GetFullName(), "ProductId:", productId, err)
+		reportStorePromptFailed(productId, productName, isLimitedProduct, "prompt_failed")
 		NotificationManager.show("Purchase prompt is unavailable right now.", "Error")
 	end
 end

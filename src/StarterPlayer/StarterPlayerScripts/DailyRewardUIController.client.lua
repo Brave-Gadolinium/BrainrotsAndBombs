@@ -47,6 +47,27 @@ local rewardSlots: { [number]: RewardSlot } = {}
 local currentStatus = nil
 local isClaiming = false
 
+local function reportStoreOpened(surface: string)
+	reportAnalyticsIntent:FireServer("StoreOpened", {
+		surface = surface,
+		section = "daily_rewards",
+		entrypoint = "frame_open",
+	})
+end
+
+local function reportStorePromptFailed(productName: string, productId: number?, reason: string)
+	reportAnalyticsIntent:FireServer("StorePromptFailed", {
+		surface = "daily_rewards",
+		section = "daily_rewards",
+		entrypoint = "purchase_button",
+		productName = productName,
+		productId = productId,
+		purchaseKind = "product",
+		paymentType = "robux",
+		reason = reason,
+	})
+end
+
 local function hasDay(dayMap, day: number): boolean
 	if type(dayMap) ~= "table" then
 		return false
@@ -288,10 +309,27 @@ local function promptDailyRewardProduct(productKey: string, missingMessage: stri
 	local productId = ProductConfigurations.Products[productKey]
 	if type(productId) ~= "number" or productId <= 0 then
 		NotificationManager.show(missingMessage, "Error")
+		reportStorePromptFailed(productKey, productId, "missing_product_id")
 		return
 	end
 
-	MarketplaceService:PromptProductPurchase(player, productId)
+	reportAnalyticsIntent:FireServer("StoreOfferPrompted", {
+		surface = "daily_rewards",
+		section = "daily_rewards",
+		entrypoint = "purchase_button",
+		productName = productKey,
+		productId = productId,
+		purchaseKind = "product",
+		paymentType = "robux",
+	})
+	local success, err = pcall(function()
+		MarketplaceService:PromptProductPurchase(player, productId)
+	end)
+	if not success then
+		warn("[DailyRewardUIController] Failed to prompt product:", productKey, err)
+		reportStorePromptFailed(productKey, productId, "prompt_failed")
+		NotificationManager.show("Purchase prompt is unavailable right now.", "Error")
+	end
 end
 
 local function connectRewardSlot(day: number, item: RewardSlot)
@@ -322,6 +360,9 @@ local day7Item = day7Frame:WaitForChild("Item") :: Frame
 connectRewardSlot(7, day7Item)
 
 openAllButton.MouseButton1Click:Connect(function()
+	reportAnalyticsIntent:FireServer("RewardBulkClaimClicked", {
+		surface = "daily_rewards",
+	})
 	claimAllAvailableRewards()
 	if currentStatus then
 		renderRewards(currentStatus)
@@ -350,5 +391,6 @@ end)
 dailyRewardsFrame:GetPropertyChangedSignal("Visible"):Connect(function()
 	if dailyRewardsFrame.Visible then
 		reportAnalyticsIntent:FireServer("DailyRewardsOpened")
+		reportStoreOpened("daily_rewards")
 	end
 end)

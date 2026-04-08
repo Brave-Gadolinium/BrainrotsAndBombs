@@ -11,6 +11,7 @@ local NumberFormatter = require(ReplicatedStorage:WaitForChild("Modules"):WaitFo
 local player = Players.LocalPlayer
 local events = ReplicatedStorage:WaitForChild("Events")
 local requestAutoBombState = events:WaitForChild("RequestAutoBombState")
+local reportAnalyticsIntent = events:WaitForChild("ReportAnalyticsIntent")
 
 local ShopFrame = script.Parent
 local MainFrame = ShopFrame:WaitForChild("MainFrame")
@@ -126,6 +127,27 @@ local function formatCash(amount)
 	return "$" .. NumberFormatter.Format(amount)
 end
 
+local function toSnakeCase(value)
+	if type(value) ~= "string" then
+		return "unknown"
+	end
+
+	local normalized = value
+		:gsub("([a-z0-9])([A-Z])", "%1_%2")
+		:gsub("%s+", "_")
+		:gsub("[^%w_]+", "_")
+		:gsub("_+", "_")
+		:gsub("^_+", "")
+		:gsub("_+$", "")
+		:lower()
+
+	if normalized == "" then
+		return "unknown"
+	end
+
+	return normalized
+end
+
 local function getCachedProductInfo(productId, infoType)
 	local cacheKey = tostring(infoType) .. ":" .. tostring(productId)
 	if infoCache[cacheKey] ~= nil then
@@ -232,6 +254,82 @@ local function bindButtonOnce(button, callback)
 	button.Activated:Connect(callback)
 end
 
+local function reportStoreOpened(surface)
+	reportAnalyticsIntent:FireServer("StoreOpened", {
+		surface = surface,
+		section = "shop",
+		entrypoint = "frame_open",
+	})
+end
+
+local function reportStorePromptFailed(section, entrypoint, productName, purchaseKind, purchaseId, reason)
+	local payload = {
+		surface = "shop_frame",
+		section = section,
+		entrypoint = entrypoint,
+		productName = productName,
+		purchaseKind = purchaseKind,
+		paymentType = "robux",
+		reason = reason,
+	}
+
+	if purchaseKind == "gamepass" then
+		payload.passId = purchaseId
+	else
+		payload.productId = purchaseId
+	end
+
+	reportAnalyticsIntent:FireServer("StorePromptFailed", payload)
+end
+
+local function promptProductPurchaseWithAnalytics(section, entrypoint, productName, productId)
+	if type(productId) ~= "number" or productId <= 0 then
+		reportStorePromptFailed(section, entrypoint, productName, "product", productId, "missing_product_id")
+		return
+	end
+
+	reportAnalyticsIntent:FireServer("StoreOfferPrompted", {
+		surface = "shop_frame",
+		section = section,
+		entrypoint = entrypoint,
+		productName = productName,
+		productId = productId,
+		purchaseKind = "product",
+		paymentType = "robux",
+	})
+	local success, err = pcall(function()
+		MarketplaceService:PromptProductPurchase(player, productId)
+	end)
+	if not success then
+		warn("[ShopController] Failed to prompt product:", productName, err)
+		reportStorePromptFailed(section, entrypoint, productName, "product", productId, "prompt_failed")
+	end
+end
+
+local function promptGamePassPurchaseWithAnalytics(section, entrypoint, productName, passId)
+	if type(passId) ~= "number" or passId <= 0 then
+		reportStorePromptFailed(section, entrypoint, productName, "gamepass", passId, "missing_pass_id")
+		return
+	end
+
+	reportAnalyticsIntent:FireServer("StoreOfferPrompted", {
+		surface = "shop_frame",
+		section = section,
+		entrypoint = entrypoint,
+		productName = productName,
+		passId = passId,
+		purchaseKind = "gamepass",
+		paymentType = "robux",
+	})
+	local success, err = pcall(function()
+		MarketplaceService:PromptGamePassPurchase(player, passId)
+	end)
+	if not success then
+		warn("[ShopController] Failed to prompt gamepass:", productName, err)
+		reportStorePromptFailed(section, entrypoint, productName, "gamepass", passId, "prompt_failed")
+	end
+end
+
 local function findPriceLabel(button)
 	local priceLabel = findNamedDescendant(button, {"Price"}, "TextLabel")
 	if priceLabel then
@@ -319,7 +417,7 @@ local function setupPackSection(frameNames, packName, title)
 		setupButtonEffects(buyButton, false)
 		setRobuxPriceAsync(findPriceLabel(buyButton), passId, Enum.InfoType.GamePass)
 		bindButtonOnce(buyButton, function()
-			MarketplaceService:PromptGamePassPurchase(player, passId)
+			promptGamePassPurchaseWithAnalytics("packs", toSnakeCase(packName), packName, passId)
 		end)
 	end
 
@@ -351,7 +449,7 @@ local function setupMoneySection()
 				setupButtonEffects(button, true)
 				setRobuxPriceAsync(findPriceLabel(button), productId, Enum.InfoType.Product)
 				bindButtonOnce(button, function()
-					MarketplaceService:PromptProductPurchase(player, productId)
+					promptProductPurchaseWithAnalytics("money", toSnakeCase(definition.ProductName), definition.ProductName, productId)
 				end)
 			end
 		end
@@ -379,7 +477,7 @@ local function setupHackerLuckyBlockSection()
 			setupButtonEffects(button, false)
 			setRobuxPriceAsync(findPriceLabel(button), productId, Enum.InfoType.Product)
 			bindButtonOnce(button, function()
-				MarketplaceService:PromptProductPurchase(player, productId)
+				promptProductPurchaseWithAnalytics("hacker_lucky_block", toSnakeCase(definition.ProductName), definition.ProductName, productId)
 			end)
 		end
 
@@ -557,7 +655,7 @@ local function setupBoosterSections()
 					return
 				end
 
-				MarketplaceService:PromptGamePassPurchase(player, passId)
+				promptGamePassPurchaseWithAnalytics("boosters", "collect_all", "CollectAll", passId)
 			end
 		)
 
@@ -569,14 +667,17 @@ local function setupBoosterSections()
 			ProductConfigurations.GamePasses.AutoBomb,
 			function()
 				if player:GetAttribute("HasAutoBomb") == true then
-					requestAutoBombState:FireServer(not (player:GetAttribute("AutoBombEnabled") == true))
+					local nextState = not (player:GetAttribute("AutoBombEnabled") == true)
+					reportAnalyticsIntent:FireServer("AutoBombToggleRequested", {
+						surface = "shop_frame",
+						enabled = nextState,
+					})
+					requestAutoBombState:FireServer(nextState)
 					return
 				end
 
 				local passId = ProductConfigurations.GamePasses.AutoBomb
-				if type(passId) == "number" and passId > 0 then
-					MarketplaceService:PromptGamePassPurchase(player, passId)
-				end
+				promptGamePassPurchaseWithAnalytics("boosters", "auto_bomb", "AutoBomb", passId)
 			end
 		)
 	end
@@ -600,7 +701,7 @@ local function setupBoosterSections()
 				productId,
 				function()
 					if type(productId) == "number" and productId > 0 then
-						MarketplaceService:PromptProductPurchase(player, productId)
+						promptProductPurchaseWithAnalytics("boosters", toSnakeCase(definition.ProductName), definition.ProductName, productId)
 					end
 				end
 			)
@@ -634,6 +735,15 @@ local function init()
 	setupHackerLuckyBlockSection()
 	setupMoneySection()
 	setupBoosterSections()
+
+	ShopFrame:GetPropertyChangedSignal("Visible"):Connect(function()
+		if ShopFrame.Visible then
+			reportStoreOpened("shop_frame")
+		end
+	end)
+	if ShopFrame.Visible then
+		reportStoreOpened("shop_frame")
+	end
 
 	refreshPackVisibility()
 	refreshTrackedBoosterCards()

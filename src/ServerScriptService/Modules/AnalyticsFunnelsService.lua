@@ -10,10 +10,18 @@ local PlaytimeRewardManager = require(script.Parent.PlaytimeRewardManager)
 local DailySpinConfiguration = require(ReplicatedStorage.Modules.DailySpinConfiguration)
 local TutorialConfiguration = require(ReplicatedStorage.Modules.TutorialConfiguration)
 local RebirthRequirements = require(ReplicatedStorage.Modules.RebirthRequirements)
+local ProductConfigurations = require(ReplicatedStorage.Modules.ProductConfigurations)
+local BombsConfigurations = require(ReplicatedStorage.Modules.BombsConfigurations)
+local UpgradesConfiguration = require(ReplicatedStorage.Modules.UpgradesConfigurations)
 
 type SessionState = {
 	SessionId: string,
 	Step: number,
+}
+
+type PurchaseAttribution = {
+	ExpiresAt: number,
+	Fields: {[string]: any},
 }
 
 local AnalyticsFunnelsService = {}
@@ -21,11 +29,14 @@ local AnalyticsFunnelsService = {}
 local PlayerController: any = nil
 local reportIntentEvent: RemoteEvent? = nil
 local activeSessions: {[Player]: {[string]: SessionState}} = {}
+local purchaseAttributions: {[Player]: {[string]: PurchaseAttribution}} = {}
+local autoBombToggleSurfaces: {[Player]: {Surface: string, ExpiresAt: number}} = {}
 local initialized = false
 
 local TUTORIAL_VERSION = "ftue_v3"
 local SECONDS_PER_DAY = 86400
 local FREE_SPIN_COOLDOWN_SECONDS = math.max(0, tonumber(DailySpinConfiguration.FreeSpinCooldownSeconds) or (15 * 60))
+local PURCHASE_ATTRIBUTION_TTL = 120
 local OneTimeFunnels = {
 	TutorialFTUE = {
 		Kind = "Standard",
@@ -176,6 +187,37 @@ local function getBombTierFromName(bombName: string?): number
 	return tonumber(bombName:match("(%d+)")) or 0
 end
 
+local function getUpgradeConfigById(upgradeId: string): any
+	for _, config in ipairs(UpgradesConfiguration.Upgrades) do
+		if config.Id == upgradeId then
+			return config
+		end
+	end
+
+	return nil
+end
+
+local function toSnakeCase(value: any): string
+	if type(value) ~= "string" then
+		return "unknown"
+	end
+
+	local normalized = value
+		:gsub("([a-z0-9])([A-Z])", "%1_%2")
+		:gsub("%s+", "_")
+		:gsub("[^%w_]+", "_")
+		:gsub("_+", "_")
+		:gsub("^_+", "")
+		:gsub("_+$", "")
+		:lower()
+
+	if normalized == "" then
+		return "unknown"
+	end
+
+	return normalized
+end
+
 local function getEquippedBombTier(player: Player): number
 	local profile = getProfile(player)
 	local equippedBomb = profile and profile.Data and profile.Data.EquippedPickaxe or nil
@@ -242,6 +284,102 @@ local function buildFirstStepFields(player: Player, customFields: {[string]: any
 	return sanitizeCustomFields(fields)
 end
 
+local function shallowCopyFields(fields: {[string]: any}?): {[string]: any}
+	local copy = {}
+	for key, value in pairs(fields or {}) do
+		copy[key] = value
+	end
+
+	return copy
+end
+
+local function getPurchaseAttributionBucket(player: Player): {[string]: PurchaseAttribution}
+	local bucket = purchaseAttributions[player]
+	if bucket then
+		return bucket
+	end
+
+	bucket = {}
+	purchaseAttributions[player] = bucket
+	return bucket
+end
+
+local function buildPurchaseAttributionKey(purchaseKind: string, purchaseId: number): string
+	return `{toSnakeCase(purchaseKind)}:{math.floor(purchaseId)}`
+end
+
+local function getPurchaseIdFieldName(purchaseKind: string): string
+	if toSnakeCase(purchaseKind) == "gamepass" then
+		return "pass_id"
+	end
+
+	return "product_id"
+end
+
+local function resolvePurchaseName(purchaseKind: string, purchaseId: number): string?
+	local normalizedKind = toSnakeCase(purchaseKind)
+	if normalizedKind == "gamepass" then
+		return ProductConfigurations.GetGamePassById(purchaseId)
+	end
+
+	if normalizedKind == "product" then
+		return ProductConfigurations.GetProductById(purchaseId)
+	end
+
+	return nil
+end
+
+local function pruneExpiredPurchaseAttributions(player: Player)
+	local bucket = purchaseAttributions[player]
+	if not bucket then
+		return
+	end
+
+	local now = os.clock()
+	for key, entry in pairs(bucket) do
+		if entry.ExpiresAt <= now then
+			bucket[key] = nil
+		end
+	end
+end
+
+local function cachePurchaseAttribution(player: Player, purchaseKind: string, purchaseId: number, fields: {[string]: any}?)
+	if type(purchaseId) ~= "number" or purchaseId <= 0 then
+		return
+	end
+
+	local bucket = getPurchaseAttributionBucket(player)
+	bucket[buildPurchaseAttributionKey(purchaseKind, purchaseId)] = {
+		ExpiresAt = os.clock() + PURCHASE_ATTRIBUTION_TTL,
+		Fields = shallowCopyFields(sanitizeCustomFields(fields)),
+	}
+end
+
+local function getPurchaseAttribution(player: Player, purchaseKind: string, purchaseId: number, consume: boolean): {[string]: any}?
+	if type(purchaseId) ~= "number" or purchaseId <= 0 then
+		return nil
+	end
+
+	pruneExpiredPurchaseAttributions(player)
+
+	local bucket = purchaseAttributions[player]
+	if not bucket then
+		return nil
+	end
+
+	local key = buildPurchaseAttributionKey(purchaseKind, purchaseId)
+	local entry = bucket[key]
+	if not entry then
+		return nil
+	end
+
+	if consume then
+		bucket[key] = nil
+	end
+
+	return shallowCopyFields(entry.Fields)
+end
+
 local function getPlayerSessions(player: Player): {[string]: SessionState}
 	local sessions = activeSessions[player]
 	if sessions then
@@ -258,6 +396,19 @@ local function clearRecurringSession(player: Player, funnelKey: string)
 	if sessions then
 		sessions[funnelKey] = nil
 	end
+end
+
+local function clearPurchaseAttribution(player: Player, purchaseKind: string, purchaseId: number)
+	if type(purchaseId) ~= "number" or purchaseId <= 0 then
+		return
+	end
+
+	local bucket = purchaseAttributions[player]
+	if not bucket then
+		return
+	end
+
+	bucket[buildPurchaseAttributionKey(purchaseKind, purchaseId)] = nil
 end
 
 local function getShortGuidToken(): string
@@ -519,6 +670,94 @@ local function getRebirthInfo(player: Player): (number, number, number, boolean)
 	return money, cost, targetRebirth, requirement ~= nil
 end
 
+local function buildStoreFields(player: Player, payload: {[string]: any}?): {[string]: any}?
+	local fields = shallowCopyFields(payload)
+	fields.surface = if type(fields.surface) == "string" and fields.surface ~= "" then toSnakeCase(fields.surface) else nil
+	fields.section = if type(fields.section) == "string" and fields.section ~= "" then toSnakeCase(fields.section) else nil
+	fields.entrypoint = if type(fields.entrypoint) == "string" and fields.entrypoint ~= "" then toSnakeCase(fields.entrypoint) else nil
+
+	if type(fields.offer_key) ~= "string" or fields.offer_key == "" then
+		fields.offer_key = if type(fields.offerKey) == "string" and fields.offerKey ~= "" then fields.offerKey else nil
+	end
+	fields.offer_key = if type(fields.offer_key) == "string" then toSnakeCase(fields.offer_key) else nil
+	fields.offerKey = nil
+
+	if type(fields.action) == "string" then
+		fields.action = toSnakeCase(fields.action)
+	end
+
+	if type(fields.reason) == "string" then
+		fields.reason = toSnakeCase(fields.reason)
+	end
+
+	if type(fields.purchase_kind) ~= "string" or fields.purchase_kind == "" then
+		fields.purchase_kind = if type(fields.purchaseKind) == "string" and fields.purchaseKind ~= "" then fields.purchaseKind else nil
+	end
+	fields.purchase_kind = if type(fields.purchase_kind) == "string" then toSnakeCase(fields.purchase_kind) else nil
+	fields.purchaseKind = nil
+
+	if type(fields.payment_type) ~= "string" or fields.payment_type == "" then
+		fields.payment_type = if type(fields.paymentType) == "string" and fields.paymentType ~= "" then fields.paymentType else nil
+	end
+	fields.payment_type = if type(fields.payment_type) == "string" then toSnakeCase(fields.payment_type) else nil
+	fields.paymentType = nil
+
+	local productName = nil
+	if type(fields.product_name) == "string" and fields.product_name ~= "" then
+		productName = fields.product_name
+	elseif type(fields.productName) == "string" and fields.productName ~= "" then
+		productName = fields.productName
+	end
+	fields.productName = nil
+
+	local productId = tonumber(fields.product_id or fields.productId)
+	fields.productId = nil
+	local passId = tonumber(fields.pass_id or fields.passId)
+	fields.passId = nil
+
+	if type(fields.id) == "number" then
+		if fields.purchase_kind == "gamepass" then
+			passId = passId or fields.id
+		else
+			productId = productId or fields.id
+		end
+	end
+	fields.id = nil
+
+	if type(productId) == "number" and productId > 0 then
+		fields.product_id = math.floor(productId)
+	elseif type(passId) == "number" and passId > 0 then
+		fields.pass_id = math.floor(passId)
+	end
+
+	local resolvedName = productName
+	if type(resolvedName) ~= "string" or resolvedName == "" then
+		if type(fields.pass_id) == "number" then
+			resolvedName = resolvePurchaseName("gamepass", fields.pass_id)
+		elseif type(fields.product_id) == "number" then
+			resolvedName = resolvePurchaseName("product", fields.product_id)
+		end
+	end
+
+	fields.product_name = if type(resolvedName) == "string" and resolvedName ~= "" then resolvedName else nil
+
+	if type(fields.purchase_kind) ~= "string" or fields.purchase_kind == "" then
+		if type(fields.pass_id) == "number" then
+			fields.purchase_kind = "gamepass"
+		elseif type(fields.product_id) == "number" then
+			fields.purchase_kind = "product"
+		end
+	end
+
+	if type(fields.payment_type) ~= "string" or fields.payment_type == "" then
+		if fields.purchase_kind == "product" or fields.purchase_kind == "gamepass" then
+			fields.payment_type = "robux"
+		end
+	end
+
+	return sanitizeCustomFields(fields)
+end
+
 function AnalyticsFunnelsService:LogFailure(player: Player, reason: string, customFields: {[string]: any}?)
 	safeLogCustomEvent(player, reason, 1, buildFirstStepFields(player, customFields))
 end
@@ -573,20 +812,24 @@ function AnalyticsFunnelsService:HandleSlotUpgraded(player: Player, floorName: s
 	end
 end
 
-function AnalyticsFunnelsService:HandleStatUpgradePurchased(player: Player, upgradeId: string)
+function AnalyticsFunnelsService:HandleStatUpgradePurchased(player: Player, upgradeId: string, paymentType: string?, surface: string?)
 	advanceRecurringFunnel(player, "StatUpgradesConversion", 4)
 	safeLogCustomEvent(player, "stat_upgrade_purchase_success", 1, buildFirstStepFields(player, {
 		zone = "base",
 		upgrade_id = upgradeId,
+		payment_type = if type(paymentType) == "string" then toSnakeCase(paymentType) else nil,
+		surface = if type(surface) == "string" then toSnakeCase(surface) else nil,
 	}))
 end
 
-function AnalyticsFunnelsService:HandleBombPurchased(player: Player, pickaxeName: string)
+function AnalyticsFunnelsService:HandleBombPurchased(player: Player, pickaxeName: string, paymentType: string?, surface: string?)
 	local bombTier = getBombTierFromName(pickaxeName)
 	if canAdvanceOneTime(player, "EarlyProgressionToFirstRebirth", 3) and bombTier >= 3 then
 		advanceOneTimeFunnel(player, "EarlyProgressionToFirstRebirth", 4, {
 			zone = "base",
 			bomb_tier = bombTier,
+			payment_type = if type(paymentType) == "string" then toSnakeCase(paymentType) else nil,
+			surface = if type(surface) == "string" then toSnakeCase(surface) else nil,
 		})
 	end
 
@@ -673,17 +916,42 @@ function AnalyticsFunnelsService:HandleBombSelected(player: Player, pickaxeName:
 	}))
 end
 
-function AnalyticsFunnelsService:HandleBombPurchaseRequested(player: Player, pickaxeName: string)
+function AnalyticsFunnelsService:HandleBombPurchaseRequested(player: Player, pickaxeName: string, paymentType: string?, surface: string?)
 	local sessions = getPlayerSessions(player)
 	if not sessions.BombShopConversion then
-		return
+		if type(paymentType) ~= "string" or toSnakeCase(paymentType) ~= "robux" then
+			return
+		end
 	end
 
-	advanceRecurringFunnel(player, "BombShopConversion", 3)
+	if sessions.BombShopConversion then
+		advanceRecurringFunnel(player, "BombShopConversion", 3)
+	end
+
+	local normalizedPaymentType = if type(paymentType) == "string" then toSnakeCase(paymentType) else "soft"
+	local normalizedSurface = if type(surface) == "string" then toSnakeCase(surface) else nil
 	safeLogCustomEvent(player, "bomb_shop_buy_pressed", 1, buildFirstStepFields(player, {
 		zone = "base",
 		target_bomb_tier = getBombTierFromName(pickaxeName),
+		payment_type = normalizedPaymentType,
+		surface = normalizedSurface,
 	}))
+
+	if normalizedPaymentType == "robux" then
+		local bombConfig = BombsConfigurations.Bombs[pickaxeName]
+		local productId = bombConfig and tonumber(bombConfig.RobuxProductId) or nil
+		if type(productId) == "number" and productId > 0 then
+			self:HandleStoreOfferPrompted(player, {
+				surface = normalizedSurface or "pickaxes",
+				section = "bombs",
+				entrypoint = "robux_button",
+				productName = pickaxeName,
+				productId = productId,
+				purchaseKind = "product",
+				paymentType = "robux",
+			})
+		end
+	end
 end
 
 function AnalyticsFunnelsService:HandleUpgradesOpened(player: Player)
@@ -692,17 +960,42 @@ function AnalyticsFunnelsService:HandleUpgradesOpened(player: Player)
 	})
 end
 
-function AnalyticsFunnelsService:HandleUpgradePurchaseRequested(player: Player, upgradeId: string)
+function AnalyticsFunnelsService:HandleUpgradePurchaseRequested(player: Player, upgradeId: string, paymentType: string?, surface: string?)
 	local sessions = getPlayerSessions(player)
 	if not sessions.StatUpgradesConversion then
-		return
+		if type(paymentType) ~= "string" or toSnakeCase(paymentType) ~= "robux" then
+			return
+		end
 	end
 
-	advanceRecurringFunnel(player, "StatUpgradesConversion", 3)
+	if sessions.StatUpgradesConversion then
+		advanceRecurringFunnel(player, "StatUpgradesConversion", 3)
+	end
+
+	local normalizedPaymentType = if type(paymentType) == "string" then toSnakeCase(paymentType) else "soft"
+	local normalizedSurface = if type(surface) == "string" then toSnakeCase(surface) else nil
 	safeLogCustomEvent(player, "upgrade_buy_pressed", 1, buildFirstStepFields(player, {
 		zone = "base",
 		upgrade_id = upgradeId,
+		payment_type = normalizedPaymentType,
+		surface = normalizedSurface,
 	}))
+
+	if normalizedPaymentType == "robux" then
+		local upgradeConfig = getUpgradeConfigById(upgradeId)
+		local productId = upgradeConfig and tonumber(upgradeConfig.RobuxProductId) or nil
+		if type(productId) == "number" and productId > 0 then
+			self:HandleStoreOfferPrompted(player, {
+				surface = normalizedSurface or "upgrades",
+				section = "upgrades",
+				entrypoint = "robux_button",
+				productName = upgradeId,
+				productId = productId,
+				purchaseKind = "product",
+				paymentType = "robux",
+			})
+		end
+	end
 end
 
 function AnalyticsFunnelsService:HandleUpgradeSelected(player: Player, upgradeId: string)
@@ -817,7 +1110,15 @@ function AnalyticsFunnelsService:HandleDailyRewardClaimSuccess(player: Player, d
 end
 
 function AnalyticsFunnelsService:HandleDailyRewardClaimFailure(player: Player, day: number, reason: string)
-	if reason == "RewardLocked" then
+	local normalizedReason = toSnakeCase(reason)
+	safeLogCustomEvent(player, "daily_reward_claim_failure", 1, buildFirstStepFields(player, {
+		zone = "base",
+		reward_day = day,
+		reward_id = day,
+		reason = normalizedReason,
+	}))
+
+	if normalizedReason == "reward_locked" then
 		self:LogFailure(player, "reward_locked", {
 			zone = "base",
 			funnel = "DailyRewardClaim",
@@ -881,7 +1182,14 @@ function AnalyticsFunnelsService:HandlePlaytimeRewardClaimSuccess(player: Player
 end
 
 function AnalyticsFunnelsService:HandlePlaytimeRewardClaimFailure(player: Player, rewardId: number, reason: string)
-	if reason == "RewardLocked" then
+	local normalizedReason = toSnakeCase(reason)
+	safeLogCustomEvent(player, "playtime_reward_claim_failure", 1, buildFirstStepFields(player, {
+		zone = "base",
+		reward_id = rewardId,
+		reason = normalizedReason,
+	}))
+
+	if normalizedReason == "reward_locked" then
 		self:LogFailure(player, "reward_locked", {
 			zone = "base",
 			funnel = "PlaytimeRewards",
@@ -951,13 +1259,248 @@ function AnalyticsFunnelsService:HandleCodesOpened(player: Player)
 	}))
 end
 
+function AnalyticsFunnelsService:HandleStoreOpened(player: Player, payload: {[string]: any}?)
+	local fields = buildStoreFields(player, payload)
+	if fields then
+		fields.surface = fields.surface or "unknown"
+		fields.section = fields.section or "unknown"
+		fields.entrypoint = fields.entrypoint or "unknown"
+	end
+	safeLogCustomEvent(player, "store_opened", 1, buildFirstStepFields(player, fields))
+end
+
+function AnalyticsFunnelsService:HandleStoreOfferPrompted(player: Player, payload: {[string]: any}?)
+	local fields = buildStoreFields(player, payload)
+	if fields then
+		fields.surface = fields.surface or "unknown"
+		fields.section = fields.section or "unknown"
+		fields.entrypoint = fields.entrypoint or "unknown"
+	end
+	safeLogCustomEvent(player, "store_offer_prompted", 1, buildFirstStepFields(player, fields))
+
+	local purchaseKind = fields and fields.purchase_kind
+	local purchaseIdField = purchaseKind and getPurchaseIdFieldName(purchaseKind) or nil
+	local purchaseId = purchaseIdField and fields and tonumber(fields[purchaseIdField]) or nil
+	if type(purchaseKind) == "string" and type(purchaseId) == "number" and purchaseId > 0 then
+		cachePurchaseAttribution(player, purchaseKind, purchaseId, fields)
+	end
+
+	if fields and fields.product_name == "SkipRebirth" then
+		safeLogCustomEvent(player, "skip_rebirth_prompted", 1, buildFirstStepFields(player, fields))
+	end
+end
+
+function AnalyticsFunnelsService:HandleStorePromptFailed(player: Player, payload: {[string]: any}?)
+	local fields = buildStoreFields(player, payload)
+	if fields then
+		fields.surface = fields.surface or "unknown"
+		fields.section = fields.section or "unknown"
+		fields.entrypoint = fields.entrypoint or "unknown"
+		local purchaseKind = fields.purchase_kind
+		local purchaseIdField = purchaseKind and getPurchaseIdFieldName(purchaseKind) or nil
+		local purchaseId = purchaseIdField and tonumber(fields[purchaseIdField]) or nil
+		if type(purchaseKind) == "string" and type(purchaseId) == "number" and purchaseId > 0 then
+			clearPurchaseAttribution(player, purchaseKind, purchaseId)
+		end
+	end
+	safeLogCustomEvent(player, "store_prompt_failed", 1, buildFirstStepFields(player, fields))
+end
+
+function AnalyticsFunnelsService:HandleStorePurchaseSuccess(player: Player, payload: {[string]: any}?)
+	local baseFields = buildStoreFields(player, payload)
+	local purchaseKind = baseFields and baseFields.purchase_kind or "product"
+	local purchaseIdField = getPurchaseIdFieldName(purchaseKind)
+	local purchaseId = baseFields and tonumber(baseFields[purchaseIdField]) or nil
+	local attributedFields = if type(purchaseId) == "number" and purchaseId > 0 then getPurchaseAttribution(player, purchaseKind, purchaseId, true) else nil
+	local mergedFields = shallowCopyFields(attributedFields)
+
+	for key, value in pairs(baseFields or {}) do
+		if value ~= nil then
+			mergedFields[key] = value
+		end
+	end
+
+	if type(mergedFields.surface) ~= "string" or mergedFields.surface == "" then
+		mergedFields.surface = "unknown"
+	end
+	if type(mergedFields.product_name) ~= "string" or mergedFields.product_name == "" then
+		mergedFields.product_name = "Unknown"
+	end
+
+	safeLogCustomEvent(player, "store_purchase_success", 1, buildFirstStepFields(player, mergedFields))
+
+	if mergedFields.product_name == "SkipRebirth" then
+		safeLogCustomEvent(player, "skip_rebirth_success", 1, buildFirstStepFields(player, mergedFields))
+	end
+end
+
+function AnalyticsFunnelsService:HandleAutoBombToggleRequested(player: Player, surface: string, enabled: boolean)
+	autoBombToggleSurfaces[player] = {
+		Surface = toSnakeCase(surface),
+		ExpiresAt = os.clock() + 30,
+	}
+	safeLogCustomEvent(player, "auto_bomb_toggle_requested", 1, buildFirstStepFields(player, {
+		zone = "base",
+		surface = toSnakeCase(surface),
+		enabled = enabled,
+	}))
+end
+
+function AnalyticsFunnelsService:HandleAutoBombToggleSuccess(player: Player, surface: string?, enabled: boolean)
+	local resolvedSurface = if type(surface) == "string" and surface ~= "" then toSnakeCase(surface) else "unknown"
+	local storedRequest = autoBombToggleSurfaces[player]
+	if storedRequest and storedRequest.ExpiresAt > os.clock() then
+		resolvedSurface = storedRequest.Surface
+	end
+	autoBombToggleSurfaces[player] = nil
+
+	safeLogCustomEvent(player, "auto_bomb_toggle_success", 1, buildFirstStepFields(player, {
+		zone = "base",
+		surface = resolvedSurface,
+		enabled = enabled,
+	}))
+end
+
+function AnalyticsFunnelsService:HandleContextualOfferShown(player: Player, offerKey: string, payload: {[string]: any}?)
+	local resolvedOfferKey = offerKey
+	if type(payload) == "table" then
+		if type(payload.ResolvedOfferKey) == "string" and payload.ResolvedOfferKey ~= "" then
+			resolvedOfferKey = payload.ResolvedOfferKey
+		elseif type(payload.resolvedOfferKey) == "string" and payload.resolvedOfferKey ~= "" then
+			resolvedOfferKey = payload.resolvedOfferKey
+		end
+	end
+
+	safeLogCustomEvent(player, "contextual_offer_shown", 1, buildFirstStepFields(player, {
+		zone = "base",
+		offer_key = toSnakeCase(offerKey),
+		resolved_offer_key = toSnakeCase(resolvedOfferKey),
+	}))
+end
+
+function AnalyticsFunnelsService:HandleContextualOfferClicked(player: Player, payload: {[string]: any}?)
+	local rawOfferKey = if type(payload) == "table" then payload.offerKey else nil
+	local resolvedOfferKey = if type(payload) == "table" then payload.resolvedOfferKey else nil
+	local action = if type(payload) == "table" then payload.action else nil
+	safeLogCustomEvent(player, "contextual_offer_clicked", 1, buildFirstStepFields(player, {
+		zone = "base",
+		offer_key = toSnakeCase(rawOfferKey),
+		resolved_offer_key = toSnakeCase(resolvedOfferKey or rawOfferKey),
+		action = toSnakeCase(action),
+	}))
+end
+
+function AnalyticsFunnelsService:HandleProductTouchPrompted(player: Player, payload: {[string]: any}?)
+	local productId = type(payload) == "table" and tonumber(payload.productId) or nil
+	local productName = type(payload) == "table" and payload.productName or nil
+	local isLimited = type(payload) == "table" and payload.limited == true or false
+
+	safeLogCustomEvent(player, "product_touch_prompted", 1, buildFirstStepFields(player, {
+		zone = "mine",
+		product_name = productName or "Unknown",
+		product_id = productId,
+		limited = isLimited,
+	}))
+
+	self:HandleStoreOfferPrompted(player, {
+		surface = "product_touch",
+		section = "world",
+		entrypoint = "touch",
+		productName = productName,
+		productId = productId,
+		purchaseKind = "product",
+		paymentType = "robux",
+	})
+end
+
+function AnalyticsFunnelsService:HandleRewardBulkClaimClicked(player: Player, surface: string)
+	safeLogCustomEvent(player, "reward_bulk_claim_clicked", 1, buildFirstStepFields(player, {
+		zone = "base",
+		surface = toSnakeCase(surface),
+	}))
+end
+
+function AnalyticsFunnelsService:HandlePromoCodeRedeemAttempt(player: Player, codeId: string)
+	safeLogCustomEvent(player, "promo_code_redeem_attempt", 1, buildFirstStepFields(player, {
+		zone = "base",
+		code_id = if codeId ~= "" then codeId else "Unknown",
+	}))
+end
+
+function AnalyticsFunnelsService:HandlePromoCodeRedeemSuccess(player: Player, codeId: string, rewardType: string?)
+	safeLogCustomEvent(player, "promo_code_redeem_success", 1, buildFirstStepFields(player, {
+		zone = "base",
+		code_id = if codeId ~= "" then codeId else "Unknown",
+		reward_type = if type(rewardType) == "string" and rewardType ~= "" then toSnakeCase(rewardType) else nil,
+	}))
+end
+
+function AnalyticsFunnelsService:HandlePromoCodeRedeemFailure(player: Player, codeId: string, reason: string)
+	safeLogCustomEvent(player, "promo_code_redeem_failure", 1, buildFirstStepFields(player, {
+		zone = "base",
+		code_id = if codeId ~= "" then codeId else "Unknown",
+		reason = toSnakeCase(reason),
+	}))
+end
+
+function AnalyticsFunnelsService:HandleLuckyBlockOpenStarted(player: Player, blockId: string)
+	safeLogCustomEvent(player, "lucky_block_open_started", 1, buildFirstStepFields(player, {
+		zone = "base",
+		block_id = blockId,
+		source = "slot",
+	}))
+end
+
+function AnalyticsFunnelsService:HandleLuckyBlockOpenReward(player: Player, blockId: string, rewardItem: string, rewardRarity: string?)
+	safeLogCustomEvent(player, "lucky_block_open_reward", 1, buildFirstStepFields(player, {
+		zone = "base",
+		block_id = blockId,
+		reward_item = rewardItem,
+		reward_rarity = if type(rewardRarity) == "string" and rewardRarity ~= "" then rewardRarity else nil,
+		source = "slot",
+	}))
+end
+
+function AnalyticsFunnelsService:HandleGroupRewardClaimAttempt(player: Player, source: string?)
+	safeLogCustomEvent(player, "group_reward_claim_attempt", 1, buildFirstStepFields(player, {
+		zone = "base",
+		source = if type(source) == "string" and source ~= "" then toSnakeCase(source) else "unknown",
+	}))
+end
+
+function AnalyticsFunnelsService:HandleGroupRewardClaimSuccess(player: Player, source: string?)
+	safeLogCustomEvent(player, "group_reward_claim_success", 1, buildFirstStepFields(player, {
+		zone = "base",
+		source = if type(source) == "string" and source ~= "" then toSnakeCase(source) else "unknown",
+	}))
+end
+
+function AnalyticsFunnelsService:HandleGroupRewardClaimFailure(player: Player, source: string?, reason: string)
+	safeLogCustomEvent(player, "group_reward_claim_failure", 1, buildFirstStepFields(player, {
+		zone = "base",
+		source = if type(source) == "string" and source ~= "" then toSnakeCase(source) else "unknown",
+		reason = toSnakeCase(reason),
+	}))
+end
+
+function AnalyticsFunnelsService:HandleAutoGroupRewardGranted(player: Player)
+	safeLogCustomEvent(player, "group_reward_auto_granted", 1, buildFirstStepFields(player, {
+		zone = "base",
+		source = "onboarding",
+	}))
+end
+
 function AnalyticsFunnelsService:ReportIntent(player: Player, intentName: string, payload: any)
 	if intentName == "BombShopOpened" then
 		self:HandleBombShopOpened(player)
 	elseif intentName == "BombSelected" and type(payload) == "table" and type(payload.pickaxeName) == "string" then
 		self:HandleBombSelected(player, payload.pickaxeName)
+	elseif intentName == "BombPurchaseRequested" and type(payload) == "table" and type(payload.pickaxeName) == "string" then
+		self:HandleBombPurchaseRequested(player, payload.pickaxeName, payload.paymentType, payload.surface)
 	elseif intentName == "UpgradeSelected" and type(payload) == "table" and type(payload.upgradeId) == "string" then
 		self:HandleUpgradeSelected(player, payload.upgradeId)
+	elseif intentName == "UpgradePurchaseRequested" and type(payload) == "table" and type(payload.upgradeId) == "string" then
+		self:HandleUpgradePurchaseRequested(player, payload.upgradeId, payload.paymentType, payload.surface)
 	elseif intentName == "UpgradesOpened" then
 		self:HandleUpgradesOpened(player)
 	elseif intentName == "RebirthUIOpened" then
@@ -970,6 +1513,20 @@ function AnalyticsFunnelsService:ReportIntent(player: Player, intentName: string
 		self:HandleCodesOpened(player)
 	elseif intentName == "DailySpinWheelOpened" then
 		self:HandleDailySpinWheelOpened(player)
+	elseif intentName == "StoreOpened" and type(payload) == "table" then
+		self:HandleStoreOpened(player, payload)
+	elseif intentName == "StoreOfferPrompted" and type(payload) == "table" then
+		self:HandleStoreOfferPrompted(player, payload)
+	elseif intentName == "StorePromptFailed" and type(payload) == "table" then
+		self:HandleStorePromptFailed(player, payload)
+	elseif intentName == "AutoBombToggleRequested" and type(payload) == "table" then
+		self:HandleAutoBombToggleRequested(player, payload.surface or "unknown", payload.enabled == true)
+	elseif intentName == "ContextualOfferClicked" and type(payload) == "table" then
+		self:HandleContextualOfferClicked(player, payload)
+	elseif intentName == "ProductTouchPrompted" and type(payload) == "table" then
+		self:HandleProductTouchPrompted(player, payload)
+	elseif intentName == "RewardBulkClaimClicked" and type(payload) == "table" then
+		self:HandleRewardBulkClaimClicked(player, payload.surface or "unknown")
 	end
 end
 
@@ -997,6 +1554,8 @@ function AnalyticsFunnelsService:Init(controllers)
 
 	Players.PlayerRemoving:Connect(function(player)
 		activeSessions[player] = nil
+		purchaseAttributions[player] = nil
+		autoBombToggleSurfaces[player] = nil
 	end)
 end
 

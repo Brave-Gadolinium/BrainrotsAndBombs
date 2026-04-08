@@ -217,6 +217,27 @@ local function getRobuxPriceText(productId: number?): string?
 	return "N/A"
 end
 
+local function reportStoreOpened(surface: string)
+	reportAnalyticsIntent:FireServer("StoreOpened", {
+		surface = surface,
+		section = "bombs",
+		entrypoint = "frame_open",
+	})
+end
+
+local function reportStorePromptFailed(productName: string, productId: number?, reason: string)
+	reportAnalyticsIntent:FireServer("StorePromptFailed", {
+		surface = "pickaxes",
+		section = "bombs",
+		entrypoint = "robux_button",
+		productName = productName,
+		productId = productId,
+		purchaseKind = "product",
+		paymentType = "robux",
+		reason = reason,
+	})
+end
+
 local function getPickaxesFrame(): Frame
 	local playerGui = player:WaitForChild("PlayerGui")
 	local mainGui = playerGui:WaitForChild("GUI")
@@ -462,8 +483,20 @@ local function bindShowcaseButtons(pickaxesFrame: Frame)
 
 			local robuxProductId = config.RobuxProductId
 			if type(robuxProductId) == "number" and robuxProductId > 0 then
-				MarketplaceService:PromptProductPurchase(player, robuxProductId)
+				reportAnalyticsIntent:FireServer("BombPurchaseRequested", {
+					pickaxeName = selectedPickaxeId,
+					paymentType = "robux",
+					surface = "pickaxes",
+				})
+				local success, err = pcall(function()
+					MarketplaceService:PromptProductPurchase(player, robuxProductId)
+				end)
+				if not success then
+					warn("[PickaxesUIController] Failed to prompt robux purchase for bomb:", selectedPickaxeId, err)
+					reportStorePromptFailed(selectedPickaxeId, robuxProductId, "prompt_failed")
+				end
 			else
+				reportStorePromptFailed(selectedPickaxeId, robuxProductId, "missing_product_id")
 				warn("[PickaxesUIController] Robux purchase is not configured for bomb:", selectedPickaxeId)
 			end
 		end)
@@ -590,6 +623,7 @@ task.spawn(function()
 		if pickaxesFrame.Visible then
 			initializeUI()
 			reportAnalyticsIntent:FireServer("BombShopOpened")
+			reportStoreOpened("pickaxes")
 		end
 	end)
 end)

@@ -208,6 +208,8 @@ local function startLuckyBlockOpening(player: Player, floorName: string, slotNam
 	local luckyBlockId = slotData.LuckyBlock and slotData.LuckyBlock.Id
 	if not luckyBlockId then return end
 
+	AnalyticsFunnelsService:HandleLuckyBlockOpenStarted(player, luckyBlockId)
+
 	local spawnPart = slotModel:FindFirstChild("Spawn") :: BasePart
 	local visualModel = spawnPart and spawnPart:FindFirstChild("VisualItem")
 	if not spawnPart or not visualModel or not visualModel:IsA("Model") then
@@ -279,6 +281,7 @@ local function startLuckyBlockOpening(player: Player, floorName: string, slotNam
 		},
 		finalItemValueBalance
 	)
+	AnalyticsFunnelsService:HandleLuckyBlockOpenReward(player, luckyBlockId, rolledReward.ItemName, rolledReward.ItemData.Rarity)
 
 	local isVip = PlayerController:IsVIP(player)
 	updateSlotVisuals(slotModel, latestFloorData[slotName], latestProfile.Data.Rebirths or 0, isVip)

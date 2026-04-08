@@ -3,6 +3,7 @@
 local Workspace = game:GetService("Workspace")
 
 local SpawnUtils = {}
+local PLOT_TELEPORT_DOWN_OFFSET = 1.25
 
 local function getClosestMiningZonePosition(fromPosition: Vector3): Vector3?
 	local zonesFolder = Workspace:FindFirstChild("Zones")
@@ -37,7 +38,8 @@ function SpawnUtils.GetPlotSpawnCFrame(plot: Model, heightOffset: number?): CFra
 		return nil
 	end
 
-	local spawnPosition = anchorPart.Position + Vector3.new(0, offsetY, 0)
+	-- Spawn slightly lower than the raw target to avoid catching overhead base geometry.
+	local spawnPosition = anchorPart.Position + Vector3.new(0, offsetY - PLOT_TELEPORT_DOWN_OFFSET, 0)
 	local mineZonePosition = getClosestMiningZonePosition(spawnPosition)
 
 	if mineZonePosition then

@@ -67,6 +67,16 @@ local function playPurchaseEffects(player: Player)
 	end
 end
 
+local function logStorePurchaseSuccess(player: Player, purchaseKind: string, purchaseId: number, productName: string?, paymentType: string?, surface: string?)
+	AnalyticsFunnelsService:HandleStorePurchaseSuccess(player, {
+		purchaseKind = purchaseKind,
+		id = purchaseId,
+		productName = productName,
+		paymentType = paymentType or "robux",
+		surface = surface,
+	})
+end
+
 local function getTutorialService()
 	if not TutorialService then
 		local tutorialModule = ServerScriptService.Modules:FindFirstChild("TutorialService")
@@ -227,6 +237,8 @@ function MonetizationController.ProcessReceipt(receiptInfo)
 
 			local UpgradesSystem = require(ServerScriptService.Modules.UpgradesSystem)
 			UpgradesSystem.UpdateClientUI(player)
+			AnalyticsFunnelsService:HandleStatUpgradePurchased(player, targetUpgradeConfig.Id, "robux", "upgrades")
+			logStorePurchaseSuccess(player, "product", productId, targetUpgradeConfig.Id, "robux", "upgrades")
 
 			if notif then notif:FireClient(player, "+" .. upgradeAmount .. " " .. targetUpgradeConfig.DisplayName .. " Purchased!", "Success") end
 			playPurchaseEffects(player)
@@ -256,6 +268,8 @@ function MonetizationController.ProcessReceipt(receiptInfo)
 				context = "robux_shop",
 				bomb_tier = tonumber(targetBombName:match("(%d+)")) or 0,
 			})
+			AnalyticsFunnelsService:HandleBombPurchased(player, targetBombName, "robux", "pickaxes")
+			logStorePurchaseSuccess(player, "product", productId, targetBombName, "robux", "pickaxes")
 			playPurchaseEffects(player)
 			return Enum.ProductPurchaseDecision.PurchaseGranted
 		end
@@ -299,6 +313,7 @@ function MonetizationController.ProcessReceipt(receiptInfo)
 			content_id = "SkipRebirth",
 			context = "shop",
 		})
+		logStorePurchaseSuccess(player, "product", productId, productName, "robux", "rebirth")
 		playPurchaseEffects(player)
 		return Enum.ProductPurchaseDecision.PurchaseGranted
 	end
@@ -310,6 +325,7 @@ function MonetizationController.ProcessReceipt(receiptInfo)
 
 		local endsAt = BoosterService:ActivateTimedBooster(player, productName)
 		if endsAt > 0 then
+			logStorePurchaseSuccess(player, "product", productId, productName, "robux")
 			if notif then
 				notif:FireClient(player, productName .. " activated for 10 minutes!", "Success")
 			end
@@ -329,6 +345,7 @@ function MonetizationController.ProcessReceipt(receiptInfo)
 		if notif then
 			notif:FireClient(player, if success then "Nuke detonated!" else "Nuke failed: enter mining zone", if success then "Success" else "Error")
 		end
+		logStorePurchaseSuccess(player, "product", productId, productName, "robux")
 		if success then
 			playPurchaseEffects(player)
 		end
@@ -347,6 +364,7 @@ function MonetizationController.ProcessReceipt(receiptInfo)
 				content_id = productName,
 				context = "shop",
 			})
+			logStorePurchaseSuccess(player, "product", productId, productName, "robux", "playtime_rewards")
 			playPurchaseEffects(player)
 			return Enum.ProductPurchaseDecision.PurchaseGranted
 		end
@@ -365,6 +383,7 @@ function MonetizationController.ProcessReceipt(receiptInfo)
 				content_id = productName,
 				context = "shop",
 			})
+			logStorePurchaseSuccess(player, "product", productId, productName, "robux", "playtime_rewards")
 			playPurchaseEffects(player)
 			return Enum.ProductPurchaseDecision.PurchaseGranted
 		end
@@ -389,6 +408,7 @@ function MonetizationController.ProcessReceipt(receiptInfo)
 				content_id = productName,
 				context = "shop",
 			})
+			logStorePurchaseSuccess(player, "product", productId, productName, "robux", "daily_rewards")
 			playPurchaseEffects(player)
 			return Enum.ProductPurchaseDecision.PurchaseGranted
 		end
@@ -407,6 +427,7 @@ function MonetizationController.ProcessReceipt(receiptInfo)
 		end
 
 		if type(rewardBlockId) == "string" and rewardBlockId ~= "" and grantLuckyBlockProductReward(player, productName, rewardBlockId, rewardQuantity, notif) then
+			logStorePurchaseSuccess(player, "product", productId, productName, "robux")
 			return Enum.ProductPurchaseDecision.PurchaseGranted
 		end
 
@@ -437,6 +458,8 @@ function MonetizationController.ProcessReceipt(receiptInfo)
 				end
 			end
 
+			logStorePurchaseSuccess(player, "product", productId, productName, "robux")
+
 			return Enum.ProductPurchaseDecision.PurchaseGranted
 		end
 
@@ -453,6 +476,7 @@ function MonetizationController.ProcessReceipt(receiptInfo)
 			content_id = productName,
 			context = "shop",
 		})
+		logStorePurchaseSuccess(player, "product", productId, productName, "robux")
 		if notif then notif:FireClient(player, "$" .. NumberFormatter.Format(cashAmount) .. " Purchased!", "Success") end
 		playPurchaseEffects(player)
 		return Enum.ProductPurchaseDecision.PurchaseGranted
@@ -492,6 +516,7 @@ function MonetizationController.ProcessReceipt(receiptInfo)
 			if notif then
 				notif:FireClient(player, "You unboxed a " .. chosenItem.Rarity .. " " .. chosenItem.Name .. "!", "Success")
 			end
+			logStorePurchaseSuccess(player, "product", productId, productName, "robux")
 			playPurchaseEffects(player)
 			return Enum.ProductPurchaseDecision.PurchaseGranted
 		else
@@ -512,6 +537,7 @@ function MonetizationController.ProcessReceipt(receiptInfo)
 				context = "shop",
 			})
 			AnalyticsFunnelsService:HandleDailySpinAvailable(player)
+			logStorePurchaseSuccess(player, "product", productId, productName, "robux", "daily_spin")
 
 			if notif then notif:FireClient(player, "+" .. spinAmount .. " Spins Purchased!", "Success") end
 			playPurchaseEffects(player)

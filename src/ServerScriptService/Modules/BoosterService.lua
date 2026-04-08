@@ -6,6 +6,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local ProductConfigurations = require(ReplicatedStorage.Modules.ProductConfigurations)
+local AnalyticsFunnelsService = require(ServerScriptService.Modules.AnalyticsFunnelsService)
 
 local BoosterService = {}
 
@@ -48,6 +49,17 @@ type OfferState = {
 }
 
 local offerStateByPlayer: {[Player]: OfferState} = {}
+
+local function resolveOfferKey(offerKey: string): string
+	if offerKey == "EarlyGame" then
+		return "StarterPack"
+	end
+	if offerKey == "CrowdedServer" then
+		return "NukeBooster"
+	end
+
+	return offerKey
+end
 
 local function getPlayerController()
 	if PlayerController then
@@ -204,7 +216,10 @@ local function fireOffer(player: Player, offerKey: string, payload: {[string]: a
 	state.LastAnyOfferAt = now
 	state.LastOfferAt[offerKey] = now
 	state.ShownThisSession[offerKey] = true
-	getShowContextualOfferEvent():FireClient(player, offerKey, payload or {})
+	local analyticsPayload = payload or {}
+	analyticsPayload.ResolvedOfferKey = resolveOfferKey(offerKey)
+	AnalyticsFunnelsService:HandleContextualOfferShown(player, offerKey, analyticsPayload)
+	getShowContextualOfferEvent():FireClient(player, offerKey, analyticsPayload)
 end
 
 local function hasGamePassAttribute(player: Player, attributeName: string): boolean
@@ -356,6 +371,7 @@ function BoosterService:Init(controllers)
 		end
 
 		setAutoBombEnabled(player, active)
+		AnalyticsFunnelsService:HandleAutoBombToggleSuccess(player, nil, player:GetAttribute("AutoBombEnabled") == true)
 	end)
 end
 
