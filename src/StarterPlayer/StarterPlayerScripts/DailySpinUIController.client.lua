@@ -208,14 +208,14 @@ local function updateProductLabels()
 			local btnText = robuxButton1:FindFirstChild("Text") :: TextLabel
 			local btnPrice = robuxButton1:FindFirstChild("Price") :: TextLabel
 			if btnText then btnText.Text = "+3 Spins!" end
-			if btnPrice then btnPrice.Text = "R$" .. p1.PriceInRobux end
+			if btnPrice then btnPrice.Text = p1.PriceInRobux end
 		end
 
 		if s2 and robuxButton2 then
 			local btnText = robuxButton2:FindFirstChild("Text") :: TextLabel
 			local btnPrice = robuxButton2:FindFirstChild("Price") :: TextLabel
 			if btnText then btnText.Text = "+9 Spins!" end
-			if btnPrice then btnPrice.Text = "R$" .. p2.PriceInRobux end
+			if btnPrice then btnPrice.Text = p2.PriceInRobux end
 		end
 	end)
 end

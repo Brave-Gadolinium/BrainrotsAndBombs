@@ -5,16 +5,12 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 
-local NumberFormatter = require(ReplicatedStorage.Modules.NumberFormatter)
-local SlotUnlockConfigurations = require(ReplicatedStorage.Modules.SlotUnlockConfigurations)
-
 local player = Players.LocalPlayer
 local events = ReplicatedStorage:WaitForChild("Events")
 local requestSlotPurchaseEvent = events:WaitForChild("RequestSlotPurchase")
 local soundFolder = Workspace:WaitForChild("Sounds")
 
 local currentButton: TextButton? = nil
-local currentCostLabel: TextLabel? = nil
 local buttonConnection: RBXScriptConnection? = nil
 local workspaceConnection: RBXScriptConnection? = nil
 
@@ -26,29 +22,6 @@ local function disconnectButton()
 		buttonConnection = nil
 	end
 	currentButton = nil
-	currentCostLabel = nil
-end
-
-local function updateUpgradeButtonPresentation()
-	if not currentCostLabel then
-		return
-	end
-
-	local unlockedSlots = tonumber(player:GetAttribute("UnlockedSlots")) or SlotUnlockConfigurations.StartSlots
-	local currentStep = tonumber(player:GetAttribute("OnboardingStep")) or 0
-	local upgradeData = SlotUnlockConfigurations.GetUpgradeData(unlockedSlots)
-
-	if currentStep == 12 and unlockedSlots <= SlotUnlockConfigurations.StartSlots and upgradeData then
-		currentCostLabel.Text = "Build - FREE"
-		return
-	end
-
-	if not upgradeData then
-		currentCostLabel.Text = "MAX SLOTS"
-		return
-	end
-
-	currentCostLabel.Text = "Build - $" .. NumberFormatter.Format(upgradeData.money_req)
 end
 
 local function connectUpgradeButton(button: TextButton)
@@ -58,8 +31,6 @@ local function connectUpgradeButton(button: TextButton)
 
 	disconnectButton()
 	currentButton = button
-	local costLabel = button:FindFirstChild("CostText")
-	currentCostLabel = if costLabel and costLabel:IsA("TextLabel") then costLabel else nil
 
 	buttonConnection = button.MouseButton1Click:Connect(function()
 		local upgradeSound = soundFolder:FindFirstChild("Upgrade")
@@ -69,8 +40,6 @@ local function connectUpgradeButton(button: TextButton)
 
 		requestSlotPurchaseEvent:FireServer()
 	end)
-
-	updateUpgradeButtonPresentation()
 end
 
 local function bindPlot(plotModel: Model)
@@ -111,6 +80,3 @@ player.CharacterAdded:Connect(function()
 	task.wait(0.25)
 	watchMyPlot()
 end)
-
-player:GetAttributeChangedSignal("OnboardingStep"):Connect(updateUpgradeButtonPresentation)
-player:GetAttributeChangedSignal("UnlockedSlots"):Connect(updateUpgradeButtonPresentation)

@@ -39,7 +39,12 @@ ProductConfigurations.Products = {
 	["BrainrotGodEsokSekolah"] = 3569172309,
 	["BrainrotGodEspressoSignora"] = 3569171748,
 	["HackerLuckyBlock"] = 3569174411,
+	["HackerLuckyBlockX2"] = 3572280987,
+	["HackerLuckyBlockX10"] = 3572281219,
 	["BrainrotGodMatteo"] = 3569171240,
+	["MegaExplosion"] = 3572281508,
+	["Shield"] = 3572281688,
+	["NukeBooster"] = 3572281861,
 }
 
 ProductConfigurations.GamePasses = {
@@ -47,21 +52,53 @@ ProductConfigurations.GamePasses = {
 	["StarterPack"] = 1781448453,
 	["ProPack"] = 1780452467,
 	["CollectAll"] = 1783037385,
+	["AutoBomb"] = 1788824679,
+}
+
+ProductConfigurations.Boosters = {
+	["MegaExplosion"] = {
+		DisplayName = "Mega Explosion",
+		Description = "Max explosion radius for 10 minutes.",
+		PriceRobux = 39,
+		Duration = 10 * 60,
+		ProductType = "Product",
+	},
+	["Shield"] = {
+		DisplayName = "Shield",
+		Description = "Blocks bomb knockback and brainrot loss for 10 minutes.",
+		PriceRobux = 39,
+		Duration = 10 * 60,
+		ProductType = "Product",
+	},
+	["NukeBooster"] = {
+		DisplayName = "Nuke Booster",
+		Description = "Mass blast across the mining zone.",
+		PriceRobux = 79,
+		Duration = 0,
+		ProductType = "Product",
+	},
+	["AutoBomb"] = {
+		DisplayName = "Auto Bomb",
+		Description = "Automatically throws your equipped bomb while farming.",
+		PriceRobux = 299,
+		Duration = 0,
+		ProductType = "GamePass",
+	},
 }
 
 ProductConfigurations.PackRewards = {
 	["StarterPack"] = {
-		Money = 5000,
+		Money = 100000,
 		Items = {
-			{Name = "Blue", Mutation = "Normal", Level = 1},
-			{Name = "Green", Mutation = "Normal", Level = 1}
+			{Name = "blueberrinni_octopusini", Mutation = "Normal", Level = 1},
+			{Name = "chimpanzini_bananini", Mutation = "Normal", Level = 1},
 		}
 	},
 	["ProPack"] = {
-		Money = 50000,
+		Money = 100000000,
 		Items = {
-			{Name = "Yellow", Mutation = "Normal", Level = 1},
-			{Name = "Pink", Mutation = "Normal", Level = 1}
+			{Name = "girafa_celeste", Mutation = "Normal", Level = 1},
+			{Name = "illuminato_triangolo", Mutation = "Normal", Level = 1},
 		}
 	}
 }
@@ -86,14 +123,28 @@ ProductConfigurations.LimitedItemProducts = {
 }
 
 ProductConfigurations.CashProductRewards = {
-	["CashProduct1"] = 10000,
-	["CashProduct2"] = 100000,
-	["CashProduct3"] = 1000000,
+	["CashProduct1"] = 100000,
+	["CashProduct2"] = 1000000,
+	["CashProduct3"] = 100000000,
 }
 
 ProductConfigurations.LuckyBlockProductRewards = {
-	["BrainrotGodLuckyBlock"] = "luckyblock_brainrotgod",
-	["HackerLuckyBlock"] = "luckyblock_hacker",
+	["BrainrotGodLuckyBlock"] = {
+		BlockId = "luckyblock_brainrotgod",
+		Quantity = 1,
+	},
+	["HackerLuckyBlock"] = {
+		BlockId = "luckyblock_hacker",
+		Quantity = 1,
+	},
+	["HackerLuckyBlockX2"] = {
+		BlockId = "luckyblock_hacker",
+		Quantity = 2,
+	},
+	["HackerLuckyBlockX10"] = {
+		BlockId = "luckyblock_hacker",
+		Quantity = 10,
+	},
 }
 
 ProductConfigurations.PrimaryRewardedAdKey = "RewardedSoft100"

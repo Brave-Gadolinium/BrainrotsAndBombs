@@ -373,8 +373,7 @@ function TutorialService:IsTutorialBaseUpgradeFreeAvailable(player: Player): boo
 
 	ensureTutorialFlags(profile)
 
-	return getCurrentStep(player) == 12
-		and profile.Data.TutorialFreeBaseUpgradeConsumed ~= true
+	return profile.Data.TutorialFreeBaseUpgradeConsumed ~= true
 		and not hasBaseSlotUpgrade(profile)
 end
 

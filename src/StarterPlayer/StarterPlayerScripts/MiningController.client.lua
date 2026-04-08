@@ -11,6 +11,7 @@ local UserInputService = game:GetService("UserInputService") -- ## ADDED ##
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local BombToolClient = require(Modules:WaitForChild("BombToolClient"))
+local FrameManager = require(Modules:WaitForChild("FrameManager"))
 local PickaxesConfigurations = require(Modules:WaitForChild("PickaxesConfigurations"))
 
 -- References for Animation, Sounds & UI
@@ -48,11 +49,8 @@ local MOBILE_BOMB_EXTRA_UP_OFFSET = 54
 local mobileBombButton: ImageButton? = nil
 local mobileBombButtonScale: UIScale? = nil
 local mobileBombButtonIcon: ImageLabel? = nil
+local trackedFrames: {[Instance]: RBXScriptConnection} = {}
 local attemptMine: (tool: Tool) -> ()
-
-local function shouldShowMobileBombButton(): boolean
-	return UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled and not UserInputService.MouseEnabled
-end
 
 local function getCharacterBombTool(): Tool?
 	local character = player.Character
@@ -109,6 +107,46 @@ local function getGuiRoot(): ScreenGui?
 	end
 
 	return nil
+end
+
+local function getFramesContainer(): Instance?
+	local guiRoot = getGuiRoot()
+	local frames = guiRoot and guiRoot:FindFirstChild("Frames")
+	if frames then
+		return frames
+	end
+
+	return nil
+end
+
+local function isBlockingFrame(frame: Instance): boolean
+	return frame:IsA("GuiObject") and frame.Name ~= "Notifications"
+end
+
+local function isAnyBlockingFrameVisible(): boolean
+	if FrameManager.isAnyFrameOpen() then
+		return true
+	end
+
+	local framesContainer = getFramesContainer()
+	if not framesContainer then
+		return false
+	end
+
+	for _, child in ipairs(framesContainer:GetChildren()) do
+		if isBlockingFrame(child) and child.Visible then
+			return true
+		end
+	end
+
+	return false
+end
+
+local function shouldShowMobileBombButton(): boolean
+	return UserInputService.TouchEnabled
+		and not UserInputService.KeyboardEnabled
+		and not UserInputService.MouseEnabled
+		and not isAnyBlockingFrameVisible()
 end
 
 local function layoutMobileBombButton()
@@ -210,6 +248,43 @@ local function updateMobileBombButtonState()
 	if glow and glow:IsA("Frame") then
 		glow.BackgroundTransparency = if isReady then 0.82 else if hasBomb then 0.9 else 0.93
 	end
+end
+
+local function trackFrame(frame: Instance)
+	if not isBlockingFrame(frame) or trackedFrames[frame] then
+		return
+	end
+
+	trackedFrames[frame] = frame:GetPropertyChangedSignal("Visible"):Connect(updateMobileBombButtonState)
+end
+
+local function untrackFrame(frame: Instance)
+	local connection = trackedFrames[frame]
+	if connection then
+		connection:Disconnect()
+		trackedFrames[frame] = nil
+	end
+end
+
+local function bindFrameVisibilityTracking()
+	local framesContainer = getFramesContainer()
+	if not framesContainer then
+		return
+	end
+
+	for _, child in ipairs(framesContainer:GetChildren()) do
+		trackFrame(child)
+	end
+
+	framesContainer.ChildAdded:Connect(function(child)
+		trackFrame(child)
+		updateMobileBombButtonState()
+	end)
+
+	framesContainer.ChildRemoved:Connect(function(child)
+		untrackFrame(child)
+		updateMobileBombButtonState()
+	end)
 end
 
 local function tryActivateBombFromButton(tool: Tool)
@@ -744,6 +819,8 @@ end
 
 player.CharacterAdded:Connect(onCharacterAdded)
 if player.Character then onCharacterAdded(player.Character) end
+
+bindFrameVisibilityTracking()
 
 RunService.RenderStepped:Connect(function()
 	if shouldShowMobileBombButton() then

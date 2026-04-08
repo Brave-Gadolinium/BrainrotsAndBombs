@@ -6,12 +6,10 @@ local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 local Debris = game:GetService("Debris")
-local CollectionService = game:GetService("CollectionService")
 
 local CarrySystem = {}
 
 -- [ MODULES ]
-local ItemConfigurations = require(ReplicatedStorage.Modules.ItemConfigurations)
 local BombsConfigurations = require(ReplicatedStorage.Modules.BombsConfigurations)
 local PlayerController = require(ServerScriptService.Controllers.PlayerController) 
 local BadgeManager = require(ServerScriptService.Modules.BadgeManager)
@@ -27,7 +25,6 @@ local TRANSACTION_TYPES = AnalyticsEconomyService:GetTransactionTypes()
 local CollectionZones = Workspace:WaitForChild("Zones")
 local Templates = ReplicatedStorage:WaitForChild("Templates")
 local ConfettiTemplate = Templates:WaitForChild("Confetti") 
-local ItemsFolder = ReplicatedStorage:WaitForChild("Items")
 local Events = ReplicatedStorage:WaitForChild("Events")
 local GlobalSounds = Workspace:WaitForChild("Sounds")
 
@@ -40,6 +37,7 @@ local lastBombRepairAttempt: {[Player]: number} = {}
 -- [ CONFIG ]
 local CHECK_INTERVAL = 0.2 
 local STACK_GAP = 0.5 
+local STACK_HEAD_CLEARANCE = 0.05
 
 local function getFallbackDropPosition(): (Vector3, Vector3)
 	local mines = Workspace:FindFirstChild("Mines")
@@ -69,18 +67,20 @@ local function isInsideAnyZone(position: Vector3): boolean
 	return false
 end
 
-local function createStackItem(player: Player, itemName: string, mutation: string, eventAttributes: {[string]: any}?)
+local function createStackItem(player: Player, itemName: string, mutation: string, rarity: string, eventAttributes: {[string]: any}?)
 	local character = player.Character
 	if not character then return nil end
 
 	local headPart = character:FindFirstChild("Head") :: BasePart
 	if not headPart then return nil end
 
-	local mutationFolder = ItemsFolder:FindFirstChild(mutation) or ItemsFolder.Normal
-	local template = mutationFolder:FindFirstChild(itemName) or ItemsFolder.Normal:FindFirstChild(itemName)
-	if not template then return nil end
+	if not ItemManager then
+		ItemManager = require(ServerScriptService.Modules.ItemManager)
+	end
 
-	local model = template:Clone() :: Model
+	local model = ItemManager.CreateItemModel and ItemManager.CreateItemModel(itemName, mutation, rarity)
+	if not model then return nil end
+
 	model.Name = "StackItem"
 	if type(eventAttributes) == "table" then
 		for attributeName, attributeValue in pairs(eventAttributes) do
@@ -106,7 +106,7 @@ local function createStackItem(player: Player, itemName: string, mutation: strin
 
 	model.Parent = character
 
-	local totalHeight = (headPart.Size.Y / 2) + 0.8 + STACK_GAP
+	local totalHeight = (headPart.Size.Y / 2) + STACK_HEAD_CLEARANCE
 
 	for _, data in ipairs(currentItems) do
 		if data.VisualModel and data.VisualModel:IsA("Model") then
@@ -226,7 +226,7 @@ function CarrySystem.AddItemToCarry(player: Player, name: string, mutation: stri
 	local eventAttributes = type(metadata) == "table" and metadata.EventAttributes or nil
 
 	if CarrySystem.CanCarryMore(player) then
-		local visualModel = createStackItem(player, name, mutation, eventAttributes)
+		local visualModel = createStackItem(player, name, mutation, rarity, eventAttributes)
 
 		table.insert(carryingData[player], {
 			Name = name,

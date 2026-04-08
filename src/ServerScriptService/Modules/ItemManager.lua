@@ -21,6 +21,7 @@ local TutorialService = require(ServerScriptService.Modules.TutorialService)
 local AnalyticsFunnelsService = require(ServerScriptService.Modules.AnalyticsFunnelsService)
 local ConfigItems = require(ReplicatedStorage.Modules.ItemConfigurations)
 local Constants = require(ReplicatedStorage.Modules.Constants)
+local RebirthRequirements = require(ReplicatedStorage.Modules.RebirthRequirements)
 
 -- [ LAZY DEPENDENCIES ]
 local CarrySystem 
@@ -73,12 +74,123 @@ local SPAWNER_TIERS = Constants.SPAWNER_TIERS
 
 local DEFAULT_CHANCE = Constants.DEFAULT_CHANCE
 
-local MUTATIONS = Constants.MUTATIONS
+local MUTATION_DEPTH_BANDS = Constants.MUTATION_DEPTH_BANDS or {}
 
 local MUTATION_MULTIPLIERS = Constants.MUTATION_MULTIPLIERS
 
 local ItemManager = {}
 local itemAttributes = BrainrotEventConfiguration.ItemAttributes
+local fallbackItemTemplates: {[string]: Model} = {}
+local VISUAL_ITEM_VERTICAL_OFFSET = -0.75
+local FALLBACK_ITEM_SIZE = Vector3.new(2.4, 2.4, 2.4)
+local WORLD_ITEM_PICKUP_DISTANCE = 16
+
+local function getConcreteItemTemplate(itemName: string, mutation: string?): Model?
+	local normalFolder = ItemsFolder:FindFirstChild("Normal")
+	local mutationFolder = if type(mutation) == "string" and mutation ~= "" then ItemsFolder:FindFirstChild(mutation) else nil
+
+	local mutationTemplate = mutationFolder and mutationFolder:FindFirstChild(itemName)
+	if mutationTemplate and mutationTemplate:IsA("Model") then
+		return mutationTemplate
+	end
+
+	local normalTemplate = normalFolder and normalFolder:FindFirstChild(itemName)
+	if normalTemplate and normalTemplate:IsA("Model") then
+		return normalTemplate
+	end
+
+	return nil
+end
+
+local function hasItemTemplate(itemName: string, mutation: string?): boolean
+	return getConcreteItemTemplate(itemName, mutation) ~= nil
+end
+
+local function canBuildFallbackItem(itemName: string): boolean
+	return (ItemConfigurations.GetItemData(itemName) :: any) ~= nil
+end
+
+local function getFallbackItemColor(mutation: string, rarity: string): Color3
+	local mutationConfig = (MutationConfigurations :: any)[mutation]
+	if mutation ~= "Normal" and mutationConfig and mutationConfig.TextColor then
+		return mutationConfig.TextColor
+	end
+
+	local normalizedRarity = RarityUtils.Normalize(rarity) or rarity
+	local rarityConfig = (RarityConfigurations :: any)[normalizedRarity]
+	if rarityConfig and rarityConfig.TextColor then
+		return rarityConfig.TextColor
+	end
+
+	return Color3.fromRGB(255, 255, 255)
+end
+
+local function createFallbackItemTemplate(itemName: string, mutation: string, rarity: string): Model?
+	local templateKey = `{itemName}:{mutation}:{RarityUtils.Normalize(rarity) or rarity}`
+	local cachedTemplate = fallbackItemTemplates[templateKey]
+	if cachedTemplate then
+		return cachedTemplate:Clone()
+	end
+
+	local itemData = ItemConfigurations.GetItemData(itemName) :: any
+	if not itemData then
+		return nil
+	end
+
+	local model = Instance.new("Model")
+	model.Name = itemName
+
+	local rootPart = Instance.new("Part")
+	rootPart.Name = "Root"
+	rootPart.Shape = Enum.PartType.Ball
+	rootPart.Size = FALLBACK_ITEM_SIZE
+	rootPart.Material = if mutation ~= "Normal" then Enum.Material.Neon else Enum.Material.SmoothPlastic
+	rootPart.Color = getFallbackItemColor(mutation, rarity)
+	rootPart.TopSurface = Enum.SurfaceType.Smooth
+	rootPart.BottomSurface = Enum.SurfaceType.Smooth
+	rootPart.Parent = model
+
+	model.PrimaryPart = rootPart
+	fallbackItemTemplates[templateKey] = model
+
+	return model:Clone()
+end
+
+local function createItemModel(itemName: string, mutation: string, rarity: string): Model?
+	local concreteTemplate = getConcreteItemTemplate(itemName, mutation)
+	if concreteTemplate then
+		return concreteTemplate:Clone()
+	end
+
+	return createFallbackItemTemplate(itemName, mutation, rarity)
+end
+
+local function getSpawnableItemsByRarity(rarity: string, mutation: string): {string}
+	local spawnableItems = {}
+
+	for _, itemName in ipairs(ItemConfigurations.GetItemsByRarity(rarity)) do
+		if hasItemTemplate(itemName, mutation) or canBuildFallbackItem(itemName) then
+			table.insert(spawnableItems, itemName)
+		end
+	end
+
+	return spawnableItems
+end
+
+local function validateRebirthRequirementTemplates()
+	local checkedItems: {[string]: boolean} = {}
+
+	for _, requirement in ipairs(RebirthRequirements.GetAll()) do
+		for _, itemName in ipairs(requirement.item_required or {}) do
+			if type(itemName) == "string" and itemName ~= "" and not checkedItems[itemName] then
+				checkedItems[itemName] = true
+				if not hasItemTemplate(itemName, "Normal") and not canBuildFallbackItem(itemName) then
+					warn("[ItemManager] Missing rebirth-required item configuration:", itemName)
+				end
+			end
+		end
+	end
+end
 
 local function getRemainingSessionLifetime(): number
 	local remaining = tonumber(Workspace:GetAttribute("SessionTimeRemaining"))
@@ -168,14 +280,11 @@ local function createPickupPrompt(itemModel: Model, objectText: string, maxDista
 end
 
 local function createWorldItemModel(itemName: string, mutation: string, rarity: string, level: number?, extraAttributes: {[string]: any}?): Model?
-	local mutationFolder = ItemsFolder:FindFirstChild(mutation) or ItemsFolder.Normal
-	local itemTemplate = mutationFolder:FindFirstChild(itemName) or ItemsFolder.Normal:FindFirstChild(itemName)
-
-	if not itemTemplate or not itemTemplate:IsA("Model") then
+	local newItem = createItemModel(itemName, mutation, rarity)
+	if not newItem then
 		return nil
 	end
 
-	local newItem = itemTemplate:Clone() :: Model
 	newItem.Name = "SpawnedItem"
 
 	CollectionService:AddTag(newItem, "HelicopterIgnore")
@@ -216,15 +325,55 @@ local function isInsideAnyZone(position: Vector3): boolean
 end
 
 -- Read Event State 
-local function getMutation(): string
-	local isGoldEvent = false --Workspace:GetAttribute("GoldEventActive") == true
-
-	for _, mutation in ipairs(MUTATIONS) do
-		local roll = math.random(1, mutation.Chance)
-		if roll == 1 then return mutation.Name end
+local function rollWeightedMutation(weights: {[string]: number}?): string
+	if type(weights) ~= "table" then
+		return "Normal"
 	end
 
-	-- If the event is active, the lowest possible rarity is Golden! 
+	local totalWeight = 0
+	for _, weight in pairs(weights) do
+		totalWeight += weight
+	end
+
+	if totalWeight <= 0 then
+		return "Normal"
+	end
+
+	local roll = math.random(1, totalWeight)
+	local current = 0
+
+	for mutationName, weight in pairs(weights) do
+		current += weight
+		if roll <= current then
+			return mutationName
+		end
+	end
+
+	return "Normal"
+end
+
+local function getDepthRatioForPosition(mineZonePart: BasePart, worldPosition: Vector3): number
+	local localPosition = mineZonePart.CFrame:PointToObjectSpace(worldPosition)
+	local halfHeight = mineZonePart.Size.Y * 0.5
+	if halfHeight <= 0 then
+		return 0
+	end
+
+	return math.clamp((halfHeight - localPosition.Y) / (halfHeight * 2), 0, 1)
+end
+
+local function getMutationForMinePosition(mineZonePart: BasePart, worldPosition: Vector3): string
+	local isGoldEvent = false --Workspace:GetAttribute("GoldEventActive") == true
+	local depthRatio = getDepthRatioForPosition(mineZonePart, worldPosition)
+
+	for _, band in ipairs(MUTATION_DEPTH_BANDS) do
+		local maxDepthRatio = tonumber((band :: any).MaxDepthRatio) or 1
+		if depthRatio <= maxDepthRatio then
+			return rollWeightedMutation((band :: any).Weights)
+		end
+	end
+
+	-- If the event is active, the lowest possible rarity is Golden!
 	return isGoldEvent and "Golden" or "Normal"
 end
 
@@ -315,6 +464,10 @@ local function setupItemGUI(target: Instance, level: number?, rebirths: number?,
 end
 
 -- [ TOOL CREATION ]
+function ItemManager.CreateItemModel(itemName: string, mutation: string, rarity: string): Model?
+	return createItemModel(itemName, mutation, rarity)
+end
+
 function ItemManager.GiveItemToPlayer(
 	player: Player,
 	itemName: string,
@@ -327,11 +480,12 @@ function ItemManager.GiveItemToPlayer(
 	if not itemName then return nil end
 
 	local itemConf = ItemConfigurations.GetItemData(itemName)
-	local mutationFolder = ItemsFolder:FindFirstChild(mutation) or ItemsFolder.Normal
-	local itemTemplate = mutationFolder:FindFirstChild(itemName) or ItemsFolder.Normal:FindFirstChild(itemName)
-
-	if not itemTemplate then return nil end
 	if isTemporary then return nil end
+
+	local model = createItemModel(itemName, mutation, rarity)
+	if not model then
+		return nil
+	end
 
 	local newTool = Instance.new("Tool")
 	newTool.Name = itemName
@@ -353,7 +507,6 @@ function ItemManager.GiveItemToPlayer(
 	handle.Massless = true
 	handle.Parent = newTool
 
-	local model = itemTemplate:Clone()
 	model.Name = "StackedItem"
 	model:SetAttribute("OriginalName", itemName)
 	model:SetAttribute("Mutation", mutation)
@@ -508,12 +661,11 @@ end
 
 -- [ SPAWNING LOGIC ]
 function ItemManager.SpawnVisualItem(parentPart: BasePart, itemName: string, mutation: string, rarity: string, level: number, rebirths: number?, isVip: boolean?)
-	local mutationFolder = ItemsFolder:FindFirstChild(mutation) or ItemsFolder:FindFirstChild("Normal")
-	local itemTemplate = mutationFolder:FindFirstChild(itemName) or ItemsFolder.Normal:FindFirstChild(itemName)
+	local model = createItemModel(itemName, mutation, rarity)
+	if not model then
+		return
+	end
 
-	if not itemTemplate then return end
-
-	local model = itemTemplate:Clone() :: Model
 	model.Name = "VisualItem"
 	model:SetAttribute("OriginalName", itemName)
 	model:SetAttribute("Mutation", mutation)
@@ -528,7 +680,7 @@ function ItemManager.SpawnVisualItem(parentPart: BasePart, itemName: string, mut
 	end
 
 	local extents = model:GetExtentsSize()
-	local offset = Vector3.new(0, extents.Y/2, 0)
+	local offset = Vector3.new(0, (extents.Y / 2) + VISUAL_ITEM_VERTICAL_OFFSET, 0)
 	model:PivotTo(parentPart.CFrame + offset)
 	model.Parent = parentPart
 
@@ -555,32 +707,8 @@ function ItemManager.SpawnInMine(mineZonePart: BasePart)
 
 	local tier = mineZonePart.Name 
 	local rarity = getRarityFromTier(tier)
-	local possibleItems = ItemConfigurations.GetItemsByRarity(rarity)
-	if #possibleItems == 0 then return end
 
 	for i = 1, itemsToSpawn do
-		local randomItemName = nil
-		local mutationName = getMutation()
-		local itemTemplate = nil
-
-		for j = 1, 5 do
-			randomItemName = possibleItems[math.random(1, #possibleItems)]
-			local mutationFolder = ItemsFolder:FindFirstChild(mutationName) or ItemsFolder.Normal
-			itemTemplate = mutationFolder:FindFirstChild(randomItemName) or ItemsFolder.Normal:FindFirstChild(randomItemName)
-
-			if itemTemplate then break end
-		end
-
-		if not itemTemplate then continue end
-
-		local newItem = createWorldItemModel(randomItemName, mutationName, rarity, 1, nil)
-		if not newItem then
-			continue
-		end
-
-		local itemExtents = newItem:GetExtentsSize()
-		local distToBottom = newItem:GetPivot().Position.Y - (newItem:GetBoundingBox().Position.Y - (itemExtents.Y / 2))
-
 		local maxAttempts = 15
 		local spawnCFrame
 		local randomRot = CFrame.Angles(0, math.rad(math.random(0, 360)), 0)
@@ -609,6 +737,22 @@ function ItemManager.SpawnInMine(mineZonePart: BasePart)
 		end
 
 		if spawnCFrame then
+			local mutationName = getMutationForMinePosition(mineZonePart, spawnCFrame.Position)
+			local spawnableItems = getSpawnableItemsByRarity(rarity, mutationName)
+			if #spawnableItems == 0 then
+				warn("[ItemManager] No spawnable items found for rarity:", rarity)
+				return
+			end
+
+			local randomItemName = spawnableItems[math.random(1, #spawnableItems)]
+			local newItem = createWorldItemModel(randomItemName, mutationName, rarity, 1, nil)
+			if not newItem then
+				continue
+			end
+
+			local itemExtents = newItem:GetExtentsSize()
+			local distToBottom = newItem:GetPivot().Position.Y - (newItem:GetBoundingBox().Position.Y - (itemExtents.Y / 2))
+
 			table.insert(existingPositions, spawnCFrame.Position)
 
 			newItem:PivotTo(spawnCFrame * randomRot + Vector3.new(0, distToBottom, 0))
@@ -619,7 +763,7 @@ function ItemManager.SpawnInMine(mineZonePart: BasePart)
 			CollectionService:AddTag(newItem, "FloatingItem")
 
 			if newItem.PrimaryPart then
-				createPickupPrompt(newItem, randomItemName, 8)
+				createPickupPrompt(newItem, randomItemName, WORLD_ITEM_PICKUP_DISTANCE)
 			end
 
 		end
@@ -637,7 +781,7 @@ function ItemManager.SpawnWorldItemAtPosition(
 	local parentInstance = if type(options) == "table" and typeof(options.Parent) == "Instance" then options.Parent else Workspace
 	local extraAttributes = if type(options) == "table" and type(options.ExtraAttributes) == "table" then options.ExtraAttributes else nil
 	local originPos = if type(options) == "table" and typeof(options.OriginPos) == "Vector3" then options.OriginPos else nil
-	local maxPickupDistance = if type(options) == "table" and type(options.MaxPickupDistance) == "number" then options.MaxPickupDistance else 16
+	local maxPickupDistance = if type(options) == "table" and type(options.MaxPickupDistance) == "number" then options.MaxPickupDistance else WORLD_ITEM_PICKUP_DISTANCE
 
 	local newItem = createWorldItemModel(itemName, mutation, rarity, level, extraAttributes)
 	if not newItem then
@@ -708,7 +852,7 @@ function ItemManager.SpawnDroppedItem(
 ): Model?
 	local spawnOptions = if type(options) == "table" then options else {}
 	spawnOptions.OriginPos = originPos
-	spawnOptions.MaxPickupDistance = spawnOptions.MaxPickupDistance or 16
+	spawnOptions.MaxPickupDistance = spawnOptions.MaxPickupDistance or WORLD_ITEM_PICKUP_DISTANCE
 	return ItemManager.SpawnWorldItemAtPosition(itemName, mutation, rarity, targetPos, spawnOptions)
 end
 
@@ -781,5 +925,7 @@ task.spawn(function()
 		ItemManager.SpawnAllItems()
 	end
 end)
+
+validateRebirthRequirementTemplates()
 
 return ItemManager

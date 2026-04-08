@@ -10,28 +10,29 @@ local Constants = {
 	MAX_ITEMS_PER_MINE = 45,
 	MIN_ITEM_SPACING = 4.5,
 	ZONE_ITEM_CAP_MULTIPLIERS = {
-		["Zone1"] = 4,
-		["Zone2"] = 3,
-		["Zone3"] = 3,
-		["Zone4"] = 2,
+		["Zone1"] = 6,
+		["Zone2"] = 5,
+		["Zone3"] = 4,
+		["Zone4"] = 3,
 		["Zone5"] = 2,
 	},
 	
 	SPAWNER_TIERS = {
-		["Zone1"] = { Common = 75, Uncommon = 25 },
-		["Zone2"] = { Uncommon = 60, Rare = 30, Epic = 10 },
-		["Zone3"] = { Rare = 40, Epic = 40, Legendary = 20 },
-		["Zone4"] = { Epic = 30, Legendary = 50, Mythic = 20 },
-		["Zone5"] = { Epic = 10, Legendary = 40, Mythic = 50 },
+		["Zone1"] = { Common = 70, Uncommon = 30 },
+		["Zone2"] = { Uncommon = 80, Rare = 20 },
+		["Zone3"] = { Rare = 70, Epic = 30 },
+		["Zone4"] = { Epic = 80, Legendary = 20 },
+		["Zone5"] = { Epic = 10, Legendary = 90 },
 	},
 	
 	DEFAULT_CHANCE = { Common = 100 },
 
-	MUTATIONS = {
-		{Name = "Neon", Chance = 100},
-		{Name = "Ruby", Chance = 50},
-		{Name = "Diamond", Chance = 25},
-		{Name = "Golden", Chance = 10},
+	MUTATION_DEPTH_BANDS = {
+		{ MaxDepthRatio = 0.20, Weights = { Normal = 100 } },
+		{ MaxDepthRatio = 0.40, Weights = { Normal = 85, Golden = 15 } },
+		{ MaxDepthRatio = 0.60, Weights = { Normal = 70, Golden = 20, Diamond = 10 } },
+		{ MaxDepthRatio = 0.80, Weights = { Normal = 55, Golden = 20, Diamond = 15, Ruby = 10 } },
+		{ MaxDepthRatio = 1.00, Weights = { Normal = 40, Golden = 18, Diamond = 18, Ruby = 14, Neon = 10 } },
 	},
 
 	MUTATION_MULTIPLIERS = {

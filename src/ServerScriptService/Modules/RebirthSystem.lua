@@ -10,7 +10,6 @@ local PlayerController
 local NumberFormatter = require(ReplicatedStorage.Modules.NumberFormatter)
 local ItemConfigurations = require(ReplicatedStorage.Modules.ItemConfigurations)
 local RebirthRequirements = require(ReplicatedStorage.Modules.RebirthRequirements)
-local UpgradesConfiguration = require(ReplicatedStorage.Modules.UpgradesConfigurations)
 local AnalyticsFunnelsService = require(ServerScriptService.Modules.AnalyticsFunnelsService)
 local AnalyticsEconomyService = require(ServerScriptService.Modules.AnalyticsEconomyService)
 local SlotManager
@@ -238,16 +237,10 @@ local function executeRebirth(player: Player, profile: any, suppressAnalytics: b
 	profile.Data.Rebirths += 1
 	player:SetAttribute("Rebirths", profile.Data.Rebirths)
 
-	for _, config in ipairs(UpgradesConfiguration.Upgrades) do
-		local statId = config.StatId
-		profile.Data[statId] = nil
-		player:SetAttribute(statId, nil)
-	end
-
 	local char = player.Character
 	local hum = char and char:FindFirstChild("Humanoid") :: Humanoid?
 	if hum then
-		hum.WalkSpeed = 20
+		hum.WalkSpeed = 20 + math.max(0, tonumber(profile.Data.BonusSpeed) or 0)
 	end
 
 	filterSavedInventory(profile)

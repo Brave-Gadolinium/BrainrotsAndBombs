@@ -302,6 +302,15 @@ function BombsConfigurations.GetBlastRadius(bombData: BombData, material: Enum.M
 	return bombData.ExplosionRadius * ratio
 end
 
+function BombsConfigurations.GetMaxExplosionRadius(): number
+	local maxRadius = 0
+	for _, bombData in pairs(BombsConfigurations.Bombs) do
+		maxRadius = math.max(maxRadius, tonumber(bombData.ExplosionRadius) or 0)
+	end
+
+	return maxRadius
+end
+
 for _, bombData in pairs(BombsConfigurations.Bombs) do
 	bombData.ExplosionRadius *= 2
 end

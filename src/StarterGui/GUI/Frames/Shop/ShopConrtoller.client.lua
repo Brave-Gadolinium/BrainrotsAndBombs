@@ -1,19 +1,35 @@
-local Players = game:GetService('Players')
+local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
-local ReplicatedStorage = game:GetService('ReplicatedStorage')
-local MarketplaceService = game:GetService('MarketplaceService')
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local MarketplaceService = game:GetService("MarketplaceService")
 
-local Config = require(ReplicatedStorage.Configs.Config)
-local MonetizationConfig = require(ReplicatedStorage.Configs.MonetizationConfig)
+local ProductConfigurations = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("ProductConfigurations"))
+local LuckyBlockConfiguration = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("LuckyBlockConfiguration"))
+local ItemConfigurations = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("ItemConfigurations"))
+local NumberFormatter = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("NumberFormatter"))
 
-local Remotes = ReplicatedStorage:WaitForChild('Remotes')
 local player = Players.LocalPlayer
+local events = ReplicatedStorage:WaitForChild("Events")
+local requestAutoBombState = events:WaitForChild("RequestAutoBombState")
 
 local ShopFrame = script.Parent
-local MainFrame = ShopFrame:WaitForChild('MainFrame')
+local MainFrame = ShopFrame:WaitForChild("MainFrame")
 local Content = MainFrame:WaitForChild("Content")
 
-local function waitForAnyChild(parent, childNames)
+local hoverSound = ReplicatedStorage:WaitForChild("Assets"):WaitForChild("Sounds"):WaitForChild("UIHoverSound")
+local clickSound = ReplicatedStorage:WaitForChild("Assets"):WaitForChild("Sounds"):WaitForChild("UIClickSound")
+
+local initialized = false
+local infoCache = {}
+local trackedPackFrames = {}
+local trackedBoosterCards = {}
+local refreshLoopStarted = false
+
+local function findAnyChild(parent, childNames)
+	if not parent then
+		return nil
+	end
+
 	for _, childName in ipairs(childNames) do
 		local child = parent:FindFirstChild(childName)
 		if child then
@@ -21,508 +37,616 @@ local function waitForAnyChild(parent, childNames)
 		end
 	end
 
+	return nil
+end
+
+local function findNamedDescendant(parent, childNames, className)
+	if not parent then
+		return nil
+	end
+
 	for _, childName in ipairs(childNames) do
-		local child = parent:WaitForChild(childName, 1)
-		if child then
+		local child = parent:FindFirstChild(childName, true)
+		if child and (not className or child:IsA(className)) then
 			return child
 		end
 	end
 
-	error(string.format("[ShopController] None of the expected children were found under %s: %s", parent:GetFullName(), table.concat(childNames, ", ")))
+	return nil
 end
 
-local HL_HackerLuckyblockFrame = Content:WaitForChild('HackerLuckyBlock')
-local HL_HackerButtons = HL_HackerLuckyblockFrame:WaitForChild('Content'):WaitForChild('Buttons')
-local HL_HackerButton1 = HL_HackerButtons:WaitForChild('Buy_1')
-local HL_HackerButton2 = HL_HackerButtons:WaitForChild('Buy_2')
-local HL_HackerButton10 = HL_HackerButtons:WaitForChild('Buy_10')
-local HL_ChancesFrame = HL_HackerLuckyblockFrame:WaitForChild('Content'):WaitForChild('Chances')
-
-
-local SP_StarterPackFrame = Content:WaitForChild('StarterPack')
-local SP_Buttons = SP_StarterPackFrame:WaitForChild('Content'):WaitForChild('Buttons')
-local SP_BuyButton = SP_Buttons:WaitForChild('Buy')
-
-local MP_Content = Content:WaitForChild('Moneys'):WaitForChild('Content')
-local MP_TinyPackFrame = MP_Content:WaitForChild('Tiny Pack')
-local MP_MegaPackFrame = waitForAnyChild(MP_Content, { 'Mega Pack', 'Mega  Pack' })
-local MP_UltimatePackFrame = MP_Content:WaitForChild('Ultimate Pack')
-
-local MP_TinyPackButton = MP_TinyPackFrame:WaitForChild('Button'):WaitForChild('Buy')
-local MP_MegaPackButton = MP_MegaPackFrame:WaitForChild('Button'):WaitForChild('Buy')
-local MP_UltimatePackButton = MP_UltimatePackFrame:WaitForChild('Button'):WaitForChild('Buy')
-
-local Offer2 = Content:WaitForChild('Offer2')
-local CS_BuyButton = Offer2:WaitForChild('Content'):WaitForChild('CastleSkin'):WaitForChild('Button'):WaitForChild('Buy')
-local MC_BuyButton = Offer2:WaitForChild('Content'):WaitForChild('Carpet'):WaitForChild('Button'):WaitForChild('Buy')
-
-local Offer1 = Content:WaitForChild('Offer1')
-local Skins_Chest1 = Offer1:WaitForChild("Content"):WaitForChild('Chest1')
-local Skins_Chest2 = Offer1:WaitForChild("Content"):WaitForChild('Chest2')
-
-
-local ChestOfferMap = {
-	{
-		container = Skins_Chest1,
-		chestId = "chest_1",
-		productKey = "ufo_chest_1",
-	},
-	{
-		container = Skins_Chest2,
-		chestId = "chest_2",
-		productKey = "ufo_chest_2",
-	},
-}
-
-local productPriceCache = {}
-
-local activeChestOffers = {}
-local chestSkinConnections = {}
-
-local initialized = false
-
-local hoverSound = ReplicatedStorage:WaitForChild("Assets"):WaitForChild("Sounds"):WaitForChild("UIHoverSound")
-local clickSound = ReplicatedStorage:WaitForChild("Assets"):WaitForChild("Sounds"):WaitForChild("UIClickSound")
-
-local function setupButtonEffects(button, isParent)
-	if isParent then
-		local defaultSize = button.Parent.Size
-		local hoverSize = defaultSize + UDim2.fromScale(0.03, 0.03)
-		local clickSize = defaultSize - UDim2.fromScale(0.02, 0.02)
-
-		local tweenInfo = TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-
-		local function tweenTo(size)
-			TweenService:Create(button.Parent, tweenInfo, {Size = size}):Play()
-		end
-
-		button.MouseEnter:Connect(function()
-			tweenTo(hoverSize)
-			hoverSound:Play()
-		end)
-
-		button.MouseLeave:Connect(function()
-			tweenTo(defaultSize)
-		end)
-
-		button.MouseButton1Down:Connect(function()
-			tweenTo(clickSize)
-		end)
-
-		button.MouseButton1Up:Connect(function()
-			tweenTo(hoverSize)
-			clickSound:Play()
-		end)
-	else
-		local defaultSize = button.Size
-		local hoverSize = defaultSize + UDim2.fromScale(0.03, 0.03)
-		local clickSize = defaultSize - UDim2.fromScale(0.02, 0.02)
-
-		local tweenInfo = TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-
-		local function tweenTo(size)
-			TweenService:Create(button, tweenInfo, {Size = size}):Play()
-		end
-
-		button.MouseEnter:Connect(function()
-			tweenTo(hoverSize)
-			hoverSound:Play()
-		end)
-
-		button.MouseLeave:Connect(function()
-			tweenTo(defaultSize)
-		end)
-
-		button.MouseButton1Down:Connect(function()
-			tweenTo(clickSize)
-		end)
-
-		button.MouseButton1Up:Connect(function()
-			tweenTo(hoverSize)
-			clickSound:Play()
-		end)
-	end
-end
-
-local function getProductPrice(productId)
-	if productPriceCache[productId] ~= nil then
-		return productPriceCache[productId]
-	end
-
-	local ok, info = pcall(function()
-		return MarketplaceService:GetProductInfoAsync(productId, Enum.InfoType.Product)
-	end)
-
-	if not ok or not info then
-		warn("[getProductPrice] Failed to get info for product:", productId, info)
+local function findFirstDescendantOfClass(parent, className)
+	if not parent then
 		return nil
 	end
 
-	local price = info.PriceInRobux
-	productPriceCache[productId] = price
-	return price
-end
-
-local function setRobuxPrice(label, productId)
-	local price = getProductPrice(productId)
-	if price then
-		label.Text = "\u{E002}" .. tostring(price)
-	else
-		label.Text = "\u{E002}?"
-	end
-end
-
-local function hasUFOSkin(skinId)
-	local folder = player:FindFirstChild("UFOSkins")
-	if not folder then
-		return false
-	end
-
-	local skinValue = folder:FindFirstChild(skinId)
-	if not skinValue or not skinValue:IsA("BoolValue") then
-		return false
-	end
-
-	return skinValue.Value == true
-end
-
-local function refreshChestOffer(container, chestId)
-	local chestConfig = Config.ufo_skins.chests[chestId]
-	if not chestConfig then
-		warn("[refreshChestOffer] chest config not found:", chestId)
-		return
-	end
-
-	local listFrame = container:FindFirstChild("List")
-	if not listFrame then
-		return
-	end
-
-	local skinImages = listFrame:GetChildren()
-
-	for _, image in ipairs(skinImages) do
-		if image:IsA("ImageLabel") then
-			image.Visible = false
-			image.Image = ""
+	for _, descendant in ipairs(parent:GetDescendants()) do
+		if descendant:IsA(className) then
+			return descendant
 		end
 	end
 
-	local visibleIndex = 1
+	return nil
+end
 
-	for _, skinEntry in ipairs(chestConfig.skins) do
-		local skinId = skinEntry.id
-		local skinConfig = Config.ufo_skins.skins[skinId]
+local function findGuiButton(parent, names)
+	local namedButton = names and findNamedDescendant(parent, names, "GuiButton")
+	if namedButton then
+		return namedButton
+	end
 
-		if not skinConfig then
-			warn("[refreshChestOffer] skin config not found:", skinId)
-			continue
-		end
+	return findFirstDescendantOfClass(parent, "GuiButton")
+end
 
-		if not hasUFOSkin(skinId) then
-			local skinImage = listFrame:FindFirstChild("Image" .. visibleIndex)
-				or listFrame:FindFirstChild(tostring(visibleIndex))
-				or skinImages[visibleIndex]
+local function findTextLabel(parent, names)
+	local namedLabel = names and findNamedDescendant(parent, names, "TextLabel")
+	if namedLabel then
+		return namedLabel
+	end
 
-			if skinImage and skinImage:IsA("ImageLabel") then
-				skinImage.Visible = true
-				skinImage.Image = skinConfig.img or ""
+	return findFirstDescendantOfClass(parent, "TextLabel")
+end
+
+local function findPrimaryImageLabel(target)
+	if not target then
+		return nil
+	end
+
+	if target:IsA("ImageLabel") then
+		return target
+	end
+
+	for _, descendant in ipairs(target:GetDescendants()) do
+		if descendant:IsA("ImageLabel") then
+			local name = descendant.Name
+			if name ~= "White" and name ~= "Pattern" and name ~= "Glow" and name ~= "Background" then
+				return descendant
 			end
-
-			visibleIndex += 1
 		end
 	end
 
-	container.Visible = visibleIndex > 1
+	return findFirstDescendantOfClass(target, "ImageLabel")
 end
 
-local function initStarterButtons()
-	setRobuxPrice(SP_BuyButton.Price, MonetizationConfig.products.starter_pack.product_id)
-	
-	setupButtonEffects(SP_BuyButton, false)
-	
-	SP_BuyButton.Activated:Connect(function()
-		Remotes.Purchase:FireServer('starter_pack')
+local function setText(target, text)
+	if not target then
+		return
+	end
+
+	if target:IsA("TextLabel") or target:IsA("TextButton") then
+		target.Text = text
+	end
+end
+
+local function formatRobux(price)
+	return "R$" .. tostring(price)
+end
+
+local function formatCash(amount)
+	return "$" .. NumberFormatter.Format(amount)
+end
+
+local function getCachedProductInfo(productId, infoType)
+	local cacheKey = tostring(infoType) .. ":" .. tostring(productId)
+	if infoCache[cacheKey] ~= nil then
+		return infoCache[cacheKey]
+	end
+
+	local ok, info = pcall(function()
+		return MarketplaceService:GetProductInfo(productId, infoType)
+	end)
+
+	if not ok then
+		warn("[ShopController] Failed to load product info:", productId, infoType, info)
+		infoCache[cacheKey] = false
+		return nil
+	end
+
+	infoCache[cacheKey] = info
+	return info
+end
+
+local function applyBasePriceText(label, text)
+	if not label then
+		return
+	end
+
+	label:SetAttribute("BasePriceText", text)
+	setText(label, text)
+end
+
+local function restoreBasePriceText(label)
+	if not label then
+		return
+	end
+
+	local baseText = label:GetAttribute("BasePriceText")
+	if type(baseText) == "string" and baseText ~= "" then
+		setText(label, baseText)
+	end
+end
+
+local function setRobuxPriceAsync(label, productId, infoType, onResolved)
+	if not label or type(productId) ~= "number" or productId <= 0 then
+		return
+	end
+
+	task.spawn(function()
+		local info = getCachedProductInfo(productId, infoType)
+		local price = info and info.PriceInRobux
+		local text = if type(price) == "number" then formatRobux(price) else "R$?"
+		applyBasePriceText(label, text)
+
+		if onResolved then
+			onResolved(if type(price) == "number" then price else nil)
+		end
 	end)
 end
 
-local function initChestOffer(container, chestId, productKey)
-	local chestConfig = Config.ufo_skins.chests[chestId]
-	if not chestConfig then
-		warn("[initChestOffer] chest config not found:", chestId)
+local function setupButtonEffects(button, scaleParent)
+	if not button or button:GetAttribute("ShopEffectsBound") == true then
 		return
 	end
 
-	local productConfig = MonetizationConfig.products[productKey]
-	if not productConfig then
-		warn("[initChestOffer] product config not found:", productKey)
+	button:SetAttribute("ShopEffectsBound", true)
+
+	local target = button
+	if scaleParent and button.Parent and button.Parent:IsA("GuiObject") then
+		target = button.Parent
+	end
+
+	local defaultSize = target.Size
+	local hoverSize = defaultSize + UDim2.fromScale(0.03, 0.03)
+	local clickSize = defaultSize - UDim2.fromScale(0.02, 0.02)
+	local tweenInfo = TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+
+	local function tweenTo(size)
+		TweenService:Create(target, tweenInfo, {Size = size}):Play()
+	end
+
+	button.MouseEnter:Connect(function()
+		tweenTo(hoverSize)
+		hoverSound:Play()
+	end)
+
+	button.MouseLeave:Connect(function()
+		tweenTo(defaultSize)
+	end)
+
+	button.MouseButton1Down:Connect(function()
+		tweenTo(clickSize)
+	end)
+
+	button.MouseButton1Up:Connect(function()
+		tweenTo(hoverSize)
+		clickSound:Play()
+	end)
+end
+
+local function bindButtonOnce(button, callback)
+	if not button or button:GetAttribute("ShopActionBound") == true then
 		return
 	end
 
-	local nameFrame = container:FindFirstChild("Name")
-	local iconFrame = container:FindFirstChild("Icon")
-	local buttonHolder = container:FindFirstChild("Button")
-	local buyButton = buttonHolder and buttonHolder:FindFirstChild("Buy")
+	button:SetAttribute("ShopActionBound", true)
+	button.Activated:Connect(callback)
+end
 
-	if nameFrame and nameFrame:FindFirstChild("TextLabel") then
-		nameFrame.TextLabel.Text = chestConfig.name or chestId
+local function findPriceLabel(button)
+	local priceLabel = findNamedDescendant(button, {"Price"}, "TextLabel")
+	if priceLabel then
+		return priceLabel
 	end
 
-	if iconFrame and iconFrame:FindFirstChild("ImageLabel") then
-		iconFrame.ImageLabel.Image = chestConfig.img or ""
+	if button and button:IsA("TextButton") then
+		return button
 	end
 
-	activeChestOffers[chestId] = {
-		container = container,
-		chestId = chestId,
-		productKey = productKey,
-	}
+	return findTextLabel(button)
+end
 
-	refreshChestOffer(container, chestId)
+local function setImage(target, imageId)
+	local imageLabel = findPrimaryImageLabel(target)
+	if imageLabel and type(imageId) == "string" then
+		imageLabel.Image = imageId
+	end
+end
 
-	if buyButton then
-		setRobuxPrice(buyButton.Price, productConfig.product_id)
-		setupButtonEffects(buyButton, true)
+local function getItemDisplayName(itemName)
+	local itemConfig = ItemConfigurations.GetItemData(itemName)
+	if not itemConfig then
+		return itemName
+	end
 
-		buyButton.Activated:Connect(function()
-			Remotes.Purchase:FireServer(productKey)
+	return itemConfig.DisplayName or itemName
+end
+
+local function configurePackVisuals(contentFrame, packName, title)
+	local rewards = ProductConfigurations.PackRewards[packName]
+	if not rewards then
+		return
+	end
+
+	local firstReward = rewards.Items and rewards.Items[1]
+	local secondReward = rewards.Items and rewards.Items[2]
+
+	setText(findNamedDescendant(contentFrame, {"Name"}, "TextLabel"), title)
+
+	local cashLabel = findNamedDescendant(contentFrame, {"Cash"}, "TextLabel")
+	if cashLabel then
+		cashLabel.Text = "+ " .. formatCash(rewards.Money) .. " CASH"
+	end
+
+	if firstReward then
+		setText(findNamedDescendant(contentFrame, {"BrainrotName"}, "TextLabel"), getItemDisplayName(firstReward.Name))
+		local firstConfig = ItemConfigurations.GetItemData(firstReward.Name)
+		if firstConfig then
+			setImage(findAnyChild(contentFrame, {"BrainrotImage"}), firstConfig.ImageId)
+		end
+	end
+
+	if secondReward then
+		setText(findNamedDescendant(contentFrame, {"LavaCoil", "SecondItemName"}, "TextLabel"), getItemDisplayName(secondReward.Name))
+		local secondConfig = ItemConfigurations.GetItemData(secondReward.Name)
+		if secondConfig then
+			setImage(findAnyChild(contentFrame, {"LavaCoilImage", "SecondItemImage"}), secondConfig.ImageId)
+		end
+	end
+end
+
+local function refreshPackVisibility()
+	for _, entry in ipairs(trackedPackFrames) do
+		if entry.Frame then
+			entry.Frame.Visible = player:GetAttribute(entry.Attribute) ~= true
+		end
+	end
+end
+
+local function setupPackSection(frameNames, packName, title)
+	local frame = findAnyChild(Content, frameNames)
+	if not frame then
+		return
+	end
+
+	local contentFrame = findAnyChild(frame, {"Content"}) or frame
+	local buttonsFrame = findAnyChild(contentFrame, {"Buttons"}) or contentFrame
+	local buyButton = findGuiButton(buttonsFrame, {"Buy", "Buy39Robux", "Buy149Robux"})
+	local passId = ProductConfigurations.GamePasses[packName]
+
+	configurePackVisuals(contentFrame, packName, title)
+
+	if buyButton and type(passId) == "number" and passId > 0 then
+		setupButtonEffects(buyButton, false)
+		setRobuxPriceAsync(findPriceLabel(buyButton), passId, Enum.InfoType.GamePass)
+		bindButtonOnce(buyButton, function()
+			MarketplaceService:PromptGamePassPurchase(player, passId)
 		end)
 	end
+
+	table.insert(trackedPackFrames, {
+		Frame = frame,
+		Attribute = packName,
+	})
 end
 
-local function refreshAllChestOffers()
-	for chestId, offerData in pairs(activeChestOffers) do
-		refreshChestOffer(offerData.container, chestId)
-	end
-end
-
-local function clearChestSkinConnections()
-	for _, connection in ipairs(chestSkinConnections) do
-		connection:Disconnect()
-	end
-	table.clear(chestSkinConnections)
-end
-
-local function bindUFOSkinsFolder()
-	local folder = player:FindFirstChild("UFOSkins")
-	if not folder then
+local function setupMoneySection()
+	local moneyFrame = findAnyChild(Content, {"Moneys"})
+	local moneyContent = moneyFrame and findAnyChild(moneyFrame, {"Content"})
+	if not moneyContent then
 		return
 	end
 
-	clearChestSkinConnections()
+	local moneyPacks = {
+		{FrameNames = {"Tiny Pack"}, ProductName = "CashProduct1"},
+		{FrameNames = {"Mega Pack", "Mega  Pack"}, ProductName = "CashProduct2"},
+		{FrameNames = {"Ultimate Pack"}, ProductName = "CashProduct3"},
+	}
 
-	for _, child in ipairs(folder:GetChildren()) do
-		if child:IsA("BoolValue") then
-			table.insert(chestSkinConnections, child:GetPropertyChangedSignal("Value"):Connect(function()
-				refreshAllChestOffers()
-
-				if child.Name == "castle_ufo" and child.Value == true then
-					Offer2.Content.CastleSkin.Visible = false
-				end
-			end))
+	for _, definition in ipairs(moneyPacks) do
+		local frame = findAnyChild(moneyContent, definition.FrameNames)
+		if frame then
+			local button = findGuiButton(frame, {"Buy"})
+			local productId = ProductConfigurations.Products[definition.ProductName]
+			if button and type(productId) == "number" and productId > 0 then
+				setupButtonEffects(button, true)
+				setRobuxPriceAsync(findPriceLabel(button), productId, Enum.InfoType.Product)
+				bindButtonOnce(button, function()
+					MarketplaceService:PromptProductPurchase(player, productId)
+				end)
+			end
 		end
 	end
-
-	table.insert(chestSkinConnections, folder.ChildAdded:Connect(function(child)
-		if child:IsA("BoolValue") then
-			table.insert(chestSkinConnections, child:GetPropertyChangedSignal("Value"):Connect(function()
-				refreshAllChestOffers()
-
-				if child.Name == "castle_ufo" and child.Value == true then
-					Offer2.Content.CastleSkin.Visible = false
-				end
-			end))
-		end
-
-		refreshAllChestOffers()
-
-		if child.Name == "castle_ufo" and child:IsA("BoolValue") and child.Value == true then
-			Offer2.Content.CastleSkin.Visible = false
-		end
-	end))
-
-	table.insert(chestSkinConnections, folder.ChildRemoved:Connect(function()
-		refreshAllChestOffers()
-	end))
 end
 
-local function initHackerButtons()
-	setRobuxPrice(HL_HackerButton1.Price, MonetizationConfig.products.hacker_luckyblock_1.product_id)
-	setRobuxPrice(HL_HackerButton2.Price, MonetizationConfig.products.hacker_luckyblock_2.product_id)
-	setRobuxPrice(HL_HackerButton10.Price, MonetizationConfig.products.hacker_luckyblock_10.product_id)
-
-	HL_HackerButton2.Discount.Text = "\u{E002}" .. tostring(productPriceCache[MonetizationConfig.products.hacker_luckyblock_1.product_id] * 2)
-	HL_HackerButton10.Discount.Text = "\u{E002}" .. tostring(productPriceCache[MonetizationConfig.products.hacker_luckyblock_1.product_id] * 10)
-
-	setupButtonEffects(HL_HackerButton1, false)
-	setupButtonEffects(HL_HackerButton2, false)
-	setupButtonEffects(HL_HackerButton10, false)
-	
-	-- TODO Серверно выдавать
-	HL_HackerButton1.Activated:Connect(function()
-		Remotes.Purchase:FireServer('hacker_luckyblock_1')
-	end)
-	
-	HL_HackerButton2.Activated:Connect(function()
-		Remotes.Purchase:FireServer('hacker_luckyblock_2')
-	end)
-	
-	HL_HackerButton10.Activated:Connect(function()
-		Remotes.Purchase:FireServer('hacker_luckyblock_10')
-	end)
-end
-
-local function initHackerChances()
-	local luckyBlockConfig = Config.lucky_blocks.luckyblock_hacker
-	if not luckyBlockConfig then
-		warn("[initHackerChances] luckyblock_hacker config not found")
+local function setupHackerLuckyBlockSection()
+	local hackerFrame = findAnyChild(Content, {"HackerLuckyBlock"})
+	local hackerContent = hackerFrame and findAnyChild(hackerFrame, {"Content"})
+	local hackerButtons = hackerContent and findAnyChild(hackerContent, {"Buttons"})
+	if not hackerContent or not hackerButtons then
 		return
 	end
-	
-	local bossesList = luckyBlockConfig.bosses
-	if not bossesList or #bossesList == 0 then
-		warn("[initHackerChances] brainrots list is empty")
+
+	local buttonDefinitions = {
+		{Button = findAnyChild(hackerButtons, {"Buy_1"}), ProductName = "HackerLuckyBlock", AmountLabel = "LuckyBlocksAmount_1", AmountText = "1 Lucky Block"},
+		{Button = findAnyChild(hackerButtons, {"Buy_2"}), ProductName = "HackerLuckyBlockX2", AmountLabel = "LuckyBlocksAmount_2", AmountText = "2 Lucky Blocks"},
+		{Button = findAnyChild(hackerButtons, {"Buy_10"}), ProductName = "HackerLuckyBlockX10", AmountLabel = "LuckyBlocksAmount_3", AmountText = "10 Lucky Blocks"},
+	}
+
+	for _, definition in ipairs(buttonDefinitions) do
+		local button = definition.Button
+		local productId = ProductConfigurations.Products[definition.ProductName]
+		if button and type(productId) == "number" and productId > 0 then
+			setupButtonEffects(button, false)
+			setRobuxPriceAsync(findPriceLabel(button), productId, Enum.InfoType.Product)
+			bindButtonOnce(button, function()
+				MarketplaceService:PromptProductPurchase(player, productId)
+			end)
+		end
+
+		local amountLabel = findNamedDescendant(hackerContent, {definition.AmountLabel}, "TextLabel")
+		if amountLabel then
+			amountLabel.Text = definition.AmountText
+		end
+	end
+
+	local buyTwoButton = buttonDefinitions[2].Button
+	local buyTenButton = buttonDefinitions[3].Button
+	local baseProductId = ProductConfigurations.Products.HackerLuckyBlock
+	if type(baseProductId) == "number" and baseProductId > 0 then
+		local function updateDiscount(label, multiplier)
+			if not label then
+				return
+			end
+
+			local info = getCachedProductInfo(baseProductId, Enum.InfoType.Product)
+			local price = info and info.PriceInRobux
+			if type(price) == "number" then
+				label.Text = formatRobux(price * multiplier)
+			end
+		end
+
+		task.spawn(function()
+			updateDiscount(findNamedDescendant(buyTwoButton, {"Discount"}, "TextLabel"), 2)
+			updateDiscount(findNamedDescendant(buyTenButton, {"Discount"}, "TextLabel"), 10)
+		end)
+	end
+
+	local blockConfig = LuckyBlockConfiguration.GetBlockConfig("luckyblock_hacker")
+	if not blockConfig then
+		return
+	end
+
+	setText(findNamedDescendant(hackerContent, {"Name"}, "TextLabel"), blockConfig.DisplayName)
+	setImage(findAnyChild(hackerContent, {"Image"}), blockConfig.Image)
+
+	local chancesFrame = findAnyChild(hackerContent, {"Chances"})
+	if not chancesFrame then
 		return
 	end
 
 	local totalWeight = 0
-	for _, bossData in ipairs(bossesList) do
-		totalWeight += bossData.weight or 0
+	for _, reward in ipairs(blockConfig.Rewards) do
+		totalWeight += math.max(0, reward.Weight or 0)
 	end
-	
 	if totalWeight <= 0 then
-		warn("[initHackerChances] totalWeight <= 0")
 		return
 	end
-	
-	for index, bossData in ipairs(bossesList) do
-		local chanceFrame = HL_ChancesFrame:FindFirstChild("Chance" .. index)
-		if not chanceFrame then
-			warn("[initHackerChances] Frame not found:", "Chance" .. index)
-			continue
+
+	for index, reward in ipairs(blockConfig.Rewards) do
+		local chanceFrame = findAnyChild(chancesFrame, {"Chance" .. index})
+		if chanceFrame then
+			local chanceLabel = findNamedDescendant(chanceFrame, {"Chance"}, "TextLabel")
+			local chancePercent = (math.max(0, reward.Weight or 0) / totalWeight) * 100
+			if chanceLabel then
+				chanceLabel.Text = string.format("%.1f%%", chancePercent)
+			end
+
+			local itemConfig = ItemConfigurations.GetItemData(reward.ItemName)
+			if itemConfig then
+				setImage(findAnyChild(chanceFrame, {"Icon"}), itemConfig.ImageId)
+			end
 		end
-		
-		local chanceLabel = chanceFrame:FindFirstChild("Chance")
-		local iconLabel = chanceFrame:FindFirstChild("Icon")
+	end
+end
 
-		if not chanceLabel or not iconLabel then
-			warn("[initHackerChances] Chance or Icon missing in", chanceFrame.Name)
-			continue
-		end
-		
-		local bossId = bossData.bosses_id
-		local bossConfig = Config.bosses[bossId]
+local function formatRemainingTime(endsAt)
+	local remaining = math.max(0, math.floor(endsAt - os.time()))
+	local minutes = math.floor(remaining / 60)
+	local seconds = remaining % 60
+	return string.format("%02d:%02d", minutes, seconds)
+end
 
-		if not bossConfig then
-			warn("[initHackerChances] boss config not found:", bossId)
-			continue
-		end
+local function registerTrackedCard(key, priceLabel, infoType, id)
+	if not priceLabel then
+		return
+	end
 
-		local weight = bossData.weight or 0
-		local chancePercent = (weight / totalWeight) * 100
+	trackedBoosterCards[key] = {
+		PriceLabel = priceLabel,
+		InfoType = infoType,
+		Id = id,
+	}
+end
 
-		if bossConfig.img then
-			iconLabel.Image = bossConfig.img
+local function refreshTrackedBoosterCards()
+	local megaData = trackedBoosterCards.MegaExplosion
+	if megaData and megaData.PriceLabel then
+		local endsAt = math.max(0, tonumber(player:GetAttribute("MegaExplosionEndsAt")) or 0)
+		if endsAt > os.time() then
+			setText(megaData.PriceLabel, formatRemainingTime(endsAt))
 		else
-			warn("[initHackerChances] boss img missing:", bossId)
-			iconLabel.Image = ""
+			restoreBasePriceText(megaData.PriceLabel)
 		end
+	end
 
-		chanceLabel.Text = string.format("%.1f%%", chancePercent)
+	local shieldData = trackedBoosterCards.Shield
+	if shieldData and shieldData.PriceLabel then
+		local endsAt = math.max(0, tonumber(player:GetAttribute("ShieldEndsAt")) or 0)
+		if endsAt > os.time() then
+			setText(shieldData.PriceLabel, formatRemainingTime(endsAt))
+		else
+			restoreBasePriceText(shieldData.PriceLabel)
+		end
+	end
+
+	local collectAllData = trackedBoosterCards.CollectAll
+	if collectAllData and collectAllData.PriceLabel then
+		if player:GetAttribute("HasCollectAll") == true then
+			setText(collectAllData.PriceLabel, "Owned")
+		else
+			restoreBasePriceText(collectAllData.PriceLabel)
+		end
+	end
+
+	local autoBombData = trackedBoosterCards.AutoBomb
+	if autoBombData and autoBombData.PriceLabel then
+		if player:GetAttribute("HasAutoBomb") == true then
+			setText(autoBombData.PriceLabel, if player:GetAttribute("AutoBombEnabled") == true then "On" else "Off")
+		else
+			restoreBasePriceText(autoBombData.PriceLabel)
+		end
+	end
+
+	local nukeData = trackedBoosterCards.NukeBooster
+	if nukeData and nukeData.PriceLabel then
+		restoreBasePriceText(nukeData.PriceLabel)
 	end
 end
 
-local function initChestsOffers()
-	for _, offerData in ipairs(ChestOfferMap) do
-		initChestOffer(offerData.container, offerData.chestId, offerData.productKey)
+local function setupBoosterCard(card, productName, infoType, id, onActivated)
+	if not card then
+		return
+	end
+
+	local button = findGuiButton(card, {"Buy"})
+	if not button then
+		return
+	end
+
+	setupButtonEffects(button, true)
+
+	local priceLabel = findPriceLabel(button)
+	if type(id) == "number" and id > 0 then
+		setRobuxPriceAsync(priceLabel, id, infoType)
+	end
+
+	if onActivated then
+		bindButtonOnce(button, onActivated)
+	end
+
+	registerTrackedCard(productName, priceLabel, infoType, id)
+end
+
+local function setupBoosterSections()
+	local booster2 = findAnyChild(Content, {"Booster2"})
+	local booster2Content = booster2 and findAnyChild(booster2, {"Content"})
+	if booster2Content then
+		local collectAllCard = findAnyChild(booster2Content, {"Auto Collect", "AutoCollect"})
+		setupBoosterCard(
+			collectAllCard,
+			"CollectAll",
+			Enum.InfoType.GamePass,
+			ProductConfigurations.GamePasses.CollectAll,
+			function()
+				local passId = ProductConfigurations.GamePasses.CollectAll
+				if type(passId) ~= "number" or passId <= 0 then
+					return
+				end
+
+				if player:GetAttribute("HasCollectAll") == true then
+					return
+				end
+
+				MarketplaceService:PromptGamePassPurchase(player, passId)
+			end
+		)
+
+		local autoBombCard = findAnyChild(booster2Content, {"Auto Bomb", "AutoBomb"})
+		setupBoosterCard(
+			autoBombCard,
+			"AutoBomb",
+			Enum.InfoType.GamePass,
+			ProductConfigurations.GamePasses.AutoBomb,
+			function()
+				if player:GetAttribute("HasAutoBomb") == true then
+					requestAutoBombState:FireServer(not (player:GetAttribute("AutoBombEnabled") == true))
+					return
+				end
+
+				local passId = ProductConfigurations.GamePasses.AutoBomb
+				if type(passId) == "number" and passId > 0 then
+					MarketplaceService:PromptGamePassPurchase(player, passId)
+				end
+			end
+		)
+	end
+
+	local booster3 = findAnyChild(Content, {"Booster3"})
+	local booster3Content = booster3 and findAnyChild(booster3, {"Content"})
+	if booster3Content then
+		local productCards = {
+			{CardNames = {"Mega Explosion", "MegaExplosion"}, ProductName = "MegaExplosion"},
+			{CardNames = {"Shield"}, ProductName = "Shield"},
+			{CardNames = {"Nuke Booster", "NukeBooster"}, ProductName = "NukeBooster"},
+		}
+
+		for _, definition in ipairs(productCards) do
+			local card = findAnyChild(booster3Content, definition.CardNames)
+			local productId = ProductConfigurations.Products[definition.ProductName]
+			setupBoosterCard(
+				card,
+				definition.ProductName,
+				Enum.InfoType.Product,
+				productId,
+				function()
+					if type(productId) == "number" and productId > 0 then
+						MarketplaceService:PromptProductPurchase(player, productId)
+					end
+				end
+			)
+		end
 	end
 end
 
-local function initMoneyPackButtons()
-	setRobuxPrice(MP_TinyPackButton.Price, MonetizationConfig.products.tiny_money_pack.product_id)
-	setRobuxPrice(MP_MegaPackButton.Price, MonetizationConfig.products.mega_money_pack.product_id)
-	setRobuxPrice(MP_UltimatePackButton.Price, MonetizationConfig.products.ultimate_money_pack.product_id)
-	
-	setupButtonEffects(MP_TinyPackButton, true)
-	setupButtonEffects(MP_MegaPackButton, true)
-	setupButtonEffects(MP_UltimatePackButton, true)
-	
-	MP_TinyPackButton.Activated:Connect(function()
-		Remotes.Purchase:FireServer('tiny_money_pack')
-	end)
-	
-	MP_MegaPackButton.Activated:Connect(function()
-		Remotes.Purchase:FireServer('mega_money_pack')
-	end)
-	
-	MP_UltimatePackButton.Activated:Connect(function()
-		Remotes.Purchase:FireServer('ultimate_money_pack')
-	end)
-end
+local function startRefreshLoop()
+	if refreshLoopStarted then
+		return
+	end
 
-local function initMagicCarpetButton()
-	setRobuxPrice(MC_BuyButton.Price, MonetizationConfig.products.magic_carpet.product_id)
-
-	setupButtonEffects(MC_BuyButton, true)
-
-	MC_BuyButton.Activated:Connect(function()
-		Remotes.Purchase:FireServer('magic_carpet')
-	end)
-end
-
-local function initCastleSkinButton()
-	setRobuxPrice(CS_BuyButton.Price, MonetizationConfig.products.castle_ufo_skin.product_id)
-
-	setupButtonEffects(CS_BuyButton, true)
-
-	CS_BuyButton.Activated:Connect(function()
-		Remotes.Purchase:FireServer('castle_ufo_skin')
+	refreshLoopStarted = true
+	task.spawn(function()
+		while ShopFrame.Parent do
+			refreshPackVisibility()
+			refreshTrackedBoosterCards()
+			task.wait(1)
+		end
 	end)
 end
 
 local function init()
 	if initialized then
-		refreshAllChestOffers()
 		return
 	end
 	initialized = true
 
-	initHackerButtons()
-	initHackerChances()
-	initStarterButtons()
-	initMoneyPackButtons()
-	initMagicCarpetButton()
-	initCastleSkinButton()
-	initChestsOffers()
+	setupPackSection({"StarterPack"}, "StarterPack", "Starter Pack")
+	setupPackSection({"Pro Pack", "ProPack"}, "ProPack", "Pro Pack")
+	setupHackerLuckyBlockSection()
+	setupMoneySection()
+	setupBoosterSections()
 
-	bindUFOSkinsFolder()
-	refreshAllChestOffers()
+	refreshPackVisibility()
+	refreshTrackedBoosterCards()
 
-	if player:GetAttribute('StarterPack') then
-		SP_StarterPackFrame.Visible = false
-	end
+	player:GetAttributeChangedSignal("StarterPack"):Connect(refreshPackVisibility)
+	player:GetAttributeChangedSignal("ProPack"):Connect(refreshPackVisibility)
+	player:GetAttributeChangedSignal("HasCollectAll"):Connect(refreshTrackedBoosterCards)
+	player:GetAttributeChangedSignal("HasAutoBomb"):Connect(refreshTrackedBoosterCards)
+	player:GetAttributeChangedSignal("AutoBombEnabled"):Connect(refreshTrackedBoosterCards)
+	player:GetAttributeChangedSignal("MegaExplosionEndsAt"):Connect(refreshTrackedBoosterCards)
+	player:GetAttributeChangedSignal("ShieldEndsAt"):Connect(refreshTrackedBoosterCards)
 
-	player:GetAttributeChangedSignal('StarterPack'):Connect(function()
-		if player:GetAttribute('StarterPack') then
-			SP_StarterPackFrame.Visible = false
-		end
-	end)
-
-	if player:GetAttribute('MagicCarpet') then
-		Offer2.Content.Carpet.Visible = false
-	end
-
-	player:GetAttributeChangedSignal('MagicCarpet'):Connect(function()
-		if player:GetAttribute('MagicCarpet') then
-			Offer2.Content.Carpet.Visible = false
-		end
-	end)
-
-	local folder = player:FindFirstChild("UFOSkins")
-	if folder and folder:FindFirstChild("castle_ufo") and folder.castle_ufo.Value == true then
-		Offer2.Content.CastleSkin.Visible = false
-	end
+	startRefreshLoop()
 end
 
-Remotes.InitUpgradesUI.OnClientEvent:Connect(function()
-	init()
-end)
+init()

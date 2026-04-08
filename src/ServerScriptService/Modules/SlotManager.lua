@@ -35,6 +35,7 @@ local UPGRADE_COST_MULTIPLIER = 1.5
 local DEBOUNCE_TIME = 0.5
 local INTERACTION_COOLDOWN = 0.8
 local BRAINROT_SLOT_UPGRADES_VISIBLE = false
+local LUCKY_BLOCK_VISUAL_VERTICAL_OFFSET = -0.75
 
 -- [ STATE ]
 local lastUpgradeTime = {}
@@ -95,7 +96,7 @@ local function spawnLuckyBlockVisual(spawnPart: BasePart, blockId: string)
 	end
 
 	local extents = model:GetExtentsSize()
-	local offset = Vector3.new(0, extents.Y / 2, 0)
+	local offset = Vector3.new(0, (extents.Y / 2) + LUCKY_BLOCK_VISUAL_VERTICAL_OFFSET, 0)
 	model:PivotTo(spawnPart.CFrame + offset)
 	model.Parent = spawnPart
 end

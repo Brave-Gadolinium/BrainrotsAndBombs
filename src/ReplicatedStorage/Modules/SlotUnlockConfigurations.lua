@@ -4,7 +4,7 @@
 local SlotUnlockConfigurations = {}
 
 SlotUnlockConfigurations.StartSlots = 10
-SlotUnlockConfigurations.MaxSlots = 40
+SlotUnlockConfigurations.MaxSlots = 30
 SlotUnlockConfigurations.SlotsPerUpgrade = 2
 
 SlotUnlockConfigurations.new_slots = {

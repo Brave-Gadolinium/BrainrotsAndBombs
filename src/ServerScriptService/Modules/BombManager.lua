@@ -18,6 +18,7 @@ local Utils = require(ServerScriptService.Modules.Utils)
 local PlayerController
 local PickaxeController
 local CarrySystem
+local BoosterService
 local remote: RemoteEvent
 local notificationEvent: RemoteEvent?
 local cashPopupEvent: RemoteEvent?
@@ -44,6 +45,7 @@ local BOMB_TERRAIN_STICK_PADDING = 0.05
 local BOMB_TERRAIN_MONITOR_MIN_TRAVEL = 0.05
 local BOMB_TERRAIN_DOWNWARD_PROBE_PADDING = 0.35
 local BOMB_REPAIR_ATTEMPT_COOLDOWN = 0.75
+local NUKE_BLAST_RADIUS_MULTIPLIER = 2
 
 local function isFiniteNumber(value: number): boolean
 	return value == value and value > -math.huge and value < math.huge
@@ -173,6 +175,35 @@ local function getPlayerController()
 	return PlayerController
 end
 
+local function getBoosterService()
+	if BoosterService then
+		return BoosterService
+	end
+
+	BoosterService = require(ServerScriptService.Modules.BoosterService)
+	return BoosterService
+end
+
+local function shallowClone<T>(source: T): T
+	local clone = {}
+	for key, value in pairs(source :: any) do
+		clone[key] = value
+	end
+
+	return clone :: any
+end
+
+local function getResolvedBombDataForPlayer(player: Player, bombData)
+	local resolvedBombData = bombData
+	local boosterService = getBoosterService()
+	if boosterService and boosterService:HasActiveMegaExplosion(player) then
+		resolvedBombData = shallowClone(bombData)
+		resolvedBombData.ExplosionRadius = BombsConfigurations.GetMaxExplosionRadius()
+	end
+
+	return resolvedBombData
+end
+
 local function getBombFromContainer(container: Instance?, preferredBombName: string?): (Tool?, any, string?)
 	if not container then
 		return nil, nil, nil
@@ -282,14 +313,16 @@ local function notifyPlayer(player: Player, message: string)
 	end
 end
 
-local function dropCarriedBrainrot(player: Player)
+local function dropCarriedBrainrot(player: Player): boolean
 	if not CarrySystem then
 		CarrySystem = require(game.ServerScriptService.Modules.CarrySystem)
 	end
 
 	if CarrySystem.HasCarriedItems(player) then
-		CarrySystem.DropOneItemAtFeet(player)
+		return CarrySystem.DropOneItemAtFeet(player)
 	end
+
+	return false
 end
 
 local function playExplosionSound(position: Vector3)
@@ -423,40 +456,68 @@ local function findTerrainContact(
 	return nil
 end
 
+local function applyBlastToPlayer(
+	owner: Player?,
+	plr: Player,
+	explosionPosition: Vector3,
+	blastRadius: number,
+	knockbackForce: number,
+	options: {[string]: any}?
+): boolean
+	options = options or {}
+
+	if owner and plr == owner and options.AllowSelf ~= true then
+		return false
+	end
+
+	local character = plr.Character
+	if not character then
+		return false
+	end
+
+	local root = character:FindFirstChild("HumanoidRootPart")
+	local humanoid = character:FindFirstChild("Humanoid")
+	if not root or not humanoid or humanoid.Health <= 0 then
+		return false
+	end
+
+	if options.RequireMineZone ~= false and not getBombZonePart(root.Position) then
+		return false
+	end
+
+	local boosterService = getBoosterService()
+	if owner and boosterService and boosterService:HasActiveShield(plr) then
+		return false
+	end
+
+	local offset = root.Position - explosionPosition
+	local distance = offset.Magnitude
+	if options.ForceHit ~= true and (distance > blastRadius or distance == 0) then
+		return false
+	end
+
+	local direction = if distance > 0.001 then offset.Unit else Vector3.new(0, 0, -1)
+	local force = Instance.new("BodyVelocity")
+	force.Velocity = direction * knockbackForce + Vector3.new(0, math.max(32, knockbackForce * 0.35), 0)
+	force.MaxForce = Vector3.new(1e5, 1e5, 1e5)
+	force.P = 1e4
+	force.Parent = root
+	Debris:AddItem(force, 0.2)
+
+	Utils.ApplyTemporaryRagdoll(character, BOMB_RAGDOLL_DURATION)
+	firePlayerUIEffect(plr, BOMB_HIT_EFFECT_NAME)
+
+	local lostBrainrot = dropCarriedBrainrot(plr)
+	if owner and lostBrainrot and boosterService then
+		boosterService:PromptShieldOffer(plr)
+	end
+
+	return true
+end
+
 local function affectPlayers(owner: Player, explosionPosition: Vector3, blastRadius: number, knockbackForce: number)
 	for _, plr in ipairs(Players:GetPlayers()) do
-		if plr == owner then
-			continue
-		end
-
-		local character = plr.Character
-		if not character then
-			continue
-		end
-
-		local root = character:FindFirstChild("HumanoidRootPart")
-		local humanoid = character:FindFirstChild("Humanoid")
-		if not root or not humanoid then
-			continue
-		end
-
-		local offset = root.Position - explosionPosition
-		local distance = offset.Magnitude
-		if distance > blastRadius or distance == 0 then
-			continue
-		end
-
-		local direction = offset.Unit
-		local force = Instance.new("BodyVelocity")
-		force.Velocity = direction * knockbackForce + Vector3.new(0, math.max(32, knockbackForce * 0.35), 0)
-		force.MaxForce = Vector3.new(1e5, 1e5, 1e5)
-		force.P = 1e4
-		force.Parent = root
-		Debris:AddItem(force, 0.2)
-
-		Utils.ApplyTemporaryRagdoll(character, BOMB_RAGDOLL_DURATION)
-		firePlayerUIEffect(plr, BOMB_HIT_EFFECT_NAME)
-		dropCarriedBrainrot(plr)
+		applyBlastToPlayer(owner, plr, explosionPosition, blastRadius, knockbackForce)
 	end
 end
 
@@ -481,6 +542,10 @@ local function explodeBomb(player: Player, bombPart: BasePart, hitPosition: Vect
 	if isDepthBlocked then
 		terrainRadius = 0
 		notifyPlayer(player, "Upgrade your bomb to destroy terrain on this layer")
+		local boosterService = getBoosterService()
+		if boosterService and boosterService.RecordDepthBlocked then
+			boosterService:RecordDepthBlocked(player)
+		end
 	end
 
 	local playerBlastRadius = math.max(bombData.ExplosionRadius, terrainRadius, 4)
@@ -925,46 +990,105 @@ local function getThrowOrigin(root: BasePart, horizontalDirection: Vector3): Vec
 	return desiredOrigin
 end
 
-local function tryThrowBomb(player: Player, cameraLookVector: Vector3?)
+local function tryThrowBomb(player: Player, cameraLookVector: Vector3?, options: {[string]: any}?): boolean
+	options = options or {}
+	local silent = options.Silent == true
+
 	local character = player.Character
 	if not character then
-		return
+		return false
 	end
 
 	local root = character:FindFirstChild("HumanoidRootPart")
 	if not root then
-		return
+		return false
+	end
+
+	local humanoid = character:FindFirstChild("Humanoid")
+	if not humanoid or humanoid.Health <= 0 then
+		return false
 	end
 
 	local zonePart = getBombZonePart(root.Position)
 	if not zonePart then
-		notifyPlayer(player, "You can throw bombs only inside the zone")
-		return
+		if not silent then
+			notifyPlayer(player, "You can throw bombs only inside the zone")
+		end
+		return false
 	end
 
 	local bombTool, bombData, bombName = resolveAvailableBomb(player)
 	if not bombTool or not bombData then
 		tryRepairMissingBomb(player)
-		notifyPlayer(player, "Bomb unavailable, try again")
-		return
+		if not silent then
+			notifyPlayer(player, "Bomb unavailable, try again")
+		end
+		return false
 	end
 
 	local now = tick()
 	local cooldownStartedAt = playerCooldowns[player]
 	if cooldownStartedAt and now - cooldownStartedAt < bombData.Cooldown then
-		notifyPlayer(player, "Wait to blast here")
-		return
+		if not silent then
+			notifyPlayer(player, "Wait to blast here")
+		end
+		return false
 	end
 
+	local resolvedBombData = getResolvedBombDataForPlayer(player, bombData)
 	playerCooldowns[player] = now
-	markBombCooldown(bombTool, bombData.Cooldown)
+	markBombCooldown(bombTool, resolvedBombData.Cooldown)
 
-	local throwDirection, horizontalDirection = resolveThrowDirection(root, cameraLookVector, bombData)
+	local throwDirection, horizontalDirection = resolveThrowDirection(root, cameraLookVector, resolvedBombData)
 	local origin = getThrowOrigin(root, horizontalDirection)
-	local throwVelocity = getThrowVelocity(root, throwDirection, bombData)
-	createThrownBomb(player, bombTool, origin, throwVelocity, bombData, bombName or bombTool.Name, zonePart)
+	local throwVelocity = getThrowVelocity(root, throwDirection, resolvedBombData)
+	createThrownBomb(player, bombTool, origin, throwVelocity, resolvedBombData, bombName or bombTool.Name, zonePart)
 	TutorialService:HandleBombThrown(player)
 	AnalyticsFunnelsService:HandleMineBombThrown(player)
+	return true
+end
+
+local function triggerNukeBlast(player: Player): boolean
+	local character = player.Character
+	if not character then
+		return false
+	end
+
+	local root = character:FindFirstChild("HumanoidRootPart")
+	if not root then
+		return false
+	end
+
+	local zonePart = getBombZonePart(root.Position)
+	if not zonePart then
+		return false
+	end
+
+	local _, bombData = resolveAvailableBomb(player)
+	if not bombData then
+		return false
+	end
+
+	local resolvedBombData = getResolvedBombDataForPlayer(player, bombData)
+	local blastRadius = math.max(6, (tonumber(resolvedBombData.ExplosionRadius) or 0) * NUKE_BLAST_RADIUS_MULTIPLIER)
+	local knockbackForce = tonumber(resolvedBombData.KnockbackForce) or 0
+	local hitAny = false
+
+	for _, plr in ipairs(Players:GetPlayers()) do
+		if plr ~= player then
+			local hit = applyBlastToPlayer(player, plr, root.Position, blastRadius, knockbackForce, {
+				AllowSelf = false,
+				RequireMineZone = true,
+			})
+			hitAny = hitAny or hit
+		end
+	end
+
+	if hitAny then
+		playExplosionSound(root.Position)
+	end
+
+	return hitAny
 end
 
 function BombManager:Init()
@@ -988,6 +1112,14 @@ function BombManager:Start()
 		playerCooldowns[player] = nil
 		missingBombRepairAttempts[player] = nil
 	end)
+end
+
+function BombManager.TryThrowBomb(player: Player, cameraLookVector: Vector3?, options: {[string]: any}?): boolean
+	return tryThrowBomb(player, cameraLookVector, options)
+end
+
+function BombManager.TriggerNukeBlast(player: Player): boolean
+	return triggerNukeBlast(player)
 end
 
 return BombManager

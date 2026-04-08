@@ -90,4 +90,12 @@ function FrameManager.connect(button: TextButton | ImageButton, frameName: strin
 	end)
 end
 
+function FrameManager.getCurrentFrameName(): string?
+	return currentlyOpenFrame and currentlyOpenFrame.Name or nil
+end
+
+function FrameManager.isAnyFrameOpen(): boolean
+	return currentlyOpenFrame ~= nil
+end
+
 return FrameManager

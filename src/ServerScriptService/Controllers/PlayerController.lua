@@ -73,6 +73,10 @@ type PlayerData = {
 	DiscoveredItems: {[string]: boolean},
 	ClaimedPacks: {[string]: boolean},
 	RedeemedCodes: {[string]: boolean},
+	Boosters: {
+		MegaExplosionEndsAt: number,
+		ShieldEndsAt: number,
+	},
 	[string]: any 
 }
 
@@ -102,6 +106,10 @@ local Template: PlayerData = {
 	DiscoveredItems = {},
 	ClaimedPacks = {},
 	RedeemedCodes = {},
+	Boosters = {
+		MegaExplosionEndsAt = 0,
+		ShieldEndsAt = 0,
+	},
 	OwnedPickaxes = { ["Bomb 1"] = true },
 	EquippedPickaxe = "Bomb 1",
 }
@@ -292,7 +300,10 @@ end
 local function grantPackRewards(player: Player, packName: string)
 	local profile = profiles[player]
 	if not profile then return end
-	if profile.Data.ClaimedPacks[packName] then return end
+	if profile.Data.ClaimedPacks[packName] then
+		player:SetAttribute(packName, true)
+		return
+	end
 
 	local rewards = ProductConfigurations.PackRewards[packName]
 	if not rewards then return end
@@ -300,6 +311,7 @@ local function grantPackRewards(player: Player, packName: string)
 	local transactionTypes = analyticsEconomyService and analyticsEconomyService:GetTransactionTypes() or nil
 
 	profile.Data.ClaimedPacks[packName] = true
+	player:SetAttribute(packName, true)
 	if analyticsEconomyService and rewards.Money > 0 then
 		analyticsEconomyService:FlushBombIncome(player)
 	end
@@ -354,7 +366,10 @@ end
 
 local function checkVIP(player: Player)
 	local passId = ProductConfigurations.GamePasses.VIP
-	if not passId then return end
+	if not passId or passId <= 0 then
+		player:SetAttribute("IsVIP", false)
+		return
+	end
 
 	local success, hasPass = pcall(function()
 		return MarketplaceService:UserOwnsGamePassAsync(player.UserId, passId)
@@ -364,6 +379,19 @@ local function checkVIP(player: Player)
 		vipCache[player] = true
 		player:SetAttribute("IsVIP", true) -- Set attribute for client HUD
 	end
+end
+
+local function syncEntitlementAttribute(player: Player, attributeName: string, passId: number?)
+	if type(passId) ~= "number" or passId <= 0 then
+		player:SetAttribute(attributeName, false)
+		return
+	end
+
+	local success, hasPass = pcall(function()
+		return MarketplaceService:UserOwnsGamePassAsync(player.UserId, passId)
+	end)
+
+	player:SetAttribute(attributeName, success and hasPass or false)
 end
 
 local function setupVIPTouch(part: BasePart)
@@ -565,6 +593,8 @@ function PlayerController:SetupSharedInstances()
 	createRemote("RemoteEvent", "ShowPostTutorialCompletion")
 	createRemote("RemoteEvent", "RequestRewardedAd")
 	createRemote("RemoteEvent", "RewardedAdResult")
+	createRemote("RemoteEvent", "RequestAutoBombState")
+	createRemote("RemoteEvent", "ShowContextualOffer")
 end
 
 local function toolToData(tool: Tool): ItemData?
@@ -692,6 +722,12 @@ local function createLeaderstats(player: Player, data: PlayerData)
 	player:SetAttribute("TimePlayed", data.TimePlayed or 0)
 	player:SetAttribute("TotalMoneyEarned", data.TotalMoneyEarned or 0)
 	player:SetAttribute("TotalBrainrotsCollected", data.TotalBrainrotsCollected or 0)
+	local boosters = if type(data.Boosters) == "table" then data.Boosters else {}
+	player:SetAttribute("MegaExplosionEndsAt", math.max(0, tonumber(boosters.MegaExplosionEndsAt) or 0))
+	player:SetAttribute("ShieldEndsAt", math.max(0, tonumber(boosters.ShieldEndsAt) or 0))
+	player:SetAttribute("HasAutoBomb", player:GetAttribute("HasAutoBomb") == true)
+	player:SetAttribute("HasCollectAll", player:GetAttribute("HasCollectAll") == true)
+	player:SetAttribute("AutoBombEnabled", false)
 
 	ensureUpgradeDefaults(data)
 	for _, config in ipairs(UpgradesConfiguration.Upgrades) do
@@ -702,6 +738,8 @@ local function createLeaderstats(player: Player, data: PlayerData)
 	end
 
 	local claimedPacks = if type(data.ClaimedPacks) == "table" then data.ClaimedPacks else {}
+	player:SetAttribute("StarterPack", claimedPacks["StarterPack"] == true)
+	player:SetAttribute("ProPack", claimedPacks["ProPack"] == true)
 	player:SetAttribute("GroupRewardClaimed", claimedPacks["GroupItemReward"] == true)
 end
 
@@ -777,6 +815,18 @@ local function onPlayerAdded(player: Player)
 	if type(profile.Data.TotalMoneyEarned) ~= "number" then
 		profile.Data.TotalMoneyEarned = math.max(0, tonumber(profile.Data.Money) or 0)
 	end
+	if type(profile.Data.Boosters) ~= "table" then
+		profile.Data.Boosters = {
+			MegaExplosionEndsAt = 0,
+			ShieldEndsAt = 0,
+		}
+	end
+	if type(profile.Data.Boosters.MegaExplosionEndsAt) ~= "number" then
+		profile.Data.Boosters.MegaExplosionEndsAt = 0
+	end
+	if type(profile.Data.Boosters.ShieldEndsAt) ~= "number" then
+		profile.Data.Boosters.ShieldEndsAt = 0
+	end
 
 	profile.OnSessionEnd:Connect(function() 
 		profiles[player] = nil
@@ -804,6 +854,8 @@ local function onPlayerAdded(player: Player)
 		end
 		local bp = player:WaitForChild("Backpack")
 		setupBackpackTracking(bp)
+		syncEntitlementAttribute(player, "HasCollectAll", ProductConfigurations.GamePasses.CollectAll)
+		syncEntitlementAttribute(player, "HasAutoBomb", ProductConfigurations.GamePasses.AutoBomb)
 
 		player.CharacterAdded:Connect(function(char)
 			deadPlayers[player] = false
@@ -833,7 +885,10 @@ local function onPlayerAdded(player: Player)
 				if packName == "StarterPack" or packName == "ProPack" then
 					if not profile.Data.ClaimedPacks[packName] then
 						local success, hasPass = pcall(function() return MarketplaceService:UserOwnsGamePassAsync(player.UserId, passId) end)
-						if success and hasPass then grantPackRewards(player, packName) end
+						if success and hasPass then
+							player:SetAttribute(packName, true)
+							grantPackRewards(player, packName)
+						end
 					end
 				end
 			end
@@ -1106,16 +1161,32 @@ function PlayerController:Init(controllers)
 					})
 				end
 			end
-			if passId == COLLECT_ALL_GAMEPASS and analyticsEconomyService then
-				analyticsEconomyService:LogEntitlementGranted(player, "CollectAll", "CollectAll", nil, {
-					feature = "collect_all",
-					content_id = "CollectAll",
-					context = "shop",
-				})
+			if passId == COLLECT_ALL_GAMEPASS then
+				player:SetAttribute("HasCollectAll", true)
+				if analyticsEconomyService then
+					analyticsEconomyService:LogEntitlementGranted(player, "CollectAll", "CollectAll", nil, {
+						feature = "collect_all",
+						content_id = "CollectAll",
+						context = "shop",
+					})
+				end
+			end
+			if passId == ProductConfigurations.GamePasses.AutoBomb then
+				player:SetAttribute("HasAutoBomb", true)
+				if analyticsEconomyService then
+					analyticsEconomyService:LogEntitlementGranted(player, "AutoBomb", "AutoBomb", nil, {
+						feature = "auto_bomb",
+						content_id = "AutoBomb",
+						context = "shop",
+					})
+				end
 			end
 
 			local packName = ProductConfigurations.GetGamePassById(passId)
-			if packName and (packName == "StarterPack" or packName == "ProPack") then grantPackRewards(player, packName) end
+			if packName and (packName == "StarterPack" or packName == "ProPack") then
+				player:SetAttribute(packName, true)
+				grantPackRewards(player, packName)
+			end
 			playPurchaseEffects(player) 
 		end
 	end)

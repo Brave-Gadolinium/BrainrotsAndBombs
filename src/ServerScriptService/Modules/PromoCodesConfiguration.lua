@@ -15,7 +15,20 @@ export type ItemReward = {
 	Level: number?,
 }
 
-export type Reward = MoneyReward | ItemReward
+export type RandomItemsReward = {
+	Type: "RandomItems",
+	Rarity: string,
+	Count: number,
+	Mutation: string?,
+	Level: number?,
+}
+
+export type BundleReward = {
+	Type: "Bundle",
+	Rewards: {Reward},
+}
+
+export type Reward = MoneyReward | ItemReward | RandomItemsReward | BundleReward
 
 export type PromoCodeEntry = {
 	Id: string,
@@ -34,104 +47,46 @@ end
 
 local entries: {PromoCodeEntry} = {
 	{
-		Id = "hello",
-		Code = "hello",
+		Id = "release",
+		Code = "RELEASE",
 		Reward = {
-			Type = "Item",
-			ItemName = "blueberrinni_octopusini",
-			Mutation = "Normal",
-			Level = 1,
+			Type = "Bundle",
+			Rewards = {
+				{
+					Type = "Money",
+					Amount = 100000,
+				},
+				{
+					Type = "RandomItems",
+					Rarity = "Legendary",
+					Count = 3,
+					Mutation = "Normal",
+					Level = 1,
+				},
+			},
 		},
-		SuccessText = "Code redeemed! You got Blueberrinni Octopusini.",
+		SuccessText = "Code redeemed! You got $100,000 and 3 random Legendary Brainrots.",
 	},
 	{
-		Id = "digdigdig",
-		Code = "digdigdig",
+		Id = "deepexplorer",
+		Code = "DEEPEXPLORER",
 		Reward = {
-			Type = "Money",
-			Amount = 10000000,
+			Type = "Bundle",
+			Rewards = {
+				{
+					Type = "Money",
+					Amount = 100000000,
+				},
+				{
+					Type = "RandomItems",
+					Rarity = "Mythic",
+					Count = 3,
+					Mutation = "Normal",
+					Level = 1,
+				},
+			},
 		},
-		SuccessText = "Code redeemed! You got $10,000,000.",
-	},
-	{
-		Id = "startergift",
-		Code = "startergift",
-		Reward = {
-			Type = "Money",
-			Amount = 50000,
-		},
-		SuccessText = "Code redeemed! You got $50,000.",
-	},
-	{
-		Id = "cavecash",
-		Code = "cavecash",
-		Reward = {
-			Type = "Money",
-			Amount = 250000,
-		},
-		SuccessText = "Code redeemed! You got $250,000.",
-	},
-	{
-		Id = "boomday",
-		Code = "boomday",
-		Reward = {
-			Type = "Money",
-			Amount = 1000000,
-		},
-		SuccessText = "Code redeemed! You got $1,000,000.",
-	},
-	{
-		Id = "legenddrop",
-		Code = "legenddrop",
-		Reward = {
-			Type = "Item",
-			ItemName = "chimpanzini_bananini",
-			Mutation = "Normal",
-			Level = 1,
-		},
-		SuccessText = "Code redeemed! You got Chimpanzini Bananini.",
-	},
-	{
-		Id = "mythrush",
-		Code = "mythrush",
-		Reward = {
-			Type = "Item",
-			ItemName = "bombardiro_crocodilo",
-			Mutation = "Normal",
-			Level = 1,
-		},
-		SuccessText = "Code redeemed! You got Bombardiro Crocodilo.",
-	},
-	{
-		Id = "luckybrain",
-		Code = "luckybrain",
-		Reward = {
-			Type = "Item",
-			ItemName = "cocofanto_elefanto",
-			Mutation = "Normal",
-			Level = 1,
-		},
-		SuccessText = "Code redeemed! You got Cocofanto Elefanto.",
-	},
-	{
-		Id = "secretstash",
-		Code = "secretstash",
-		Reward = {
-			Type = "Item",
-			ItemName = "chillin_chili",
-			Mutation = "Normal",
-			Level = 1,
-		},
-		SuccessText = "Code redeemed! You got Chillin Chili.",
-	},
-	{
-		Id = "richmine",
-		Code = "richmine",
-		Reward = {
-			Type = "Money",
-			Amount = 5000000,
-		},
-		SuccessText = "Code redeemed! You got $5,000,000.",
+		SuccessText = "Code redeemed! You got $100,000,000 and 3 random Mythic Brainrots.",
 	},
 }
 

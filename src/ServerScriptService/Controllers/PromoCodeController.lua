@@ -23,7 +23,20 @@ type ItemReward = {
 	Level: number?,
 }
 
-type Reward = MoneyReward | ItemReward
+type RandomItemsReward = {
+	Type: "RandomItems",
+	Rarity: string,
+	Count: number,
+	Mutation: string?,
+	Level: number?,
+}
+
+type BundleReward = {
+	Type: "Bundle",
+	Rewards: {Reward},
+}
+
+type Reward = MoneyReward | ItemReward | RandomItemsReward | BundleReward
 type PromoCodeEntry = {
 	Id: string,
 	Code: string,
@@ -43,6 +56,7 @@ local PlayerController: any = nil
 local ItemManager: any = nil
 local redeemRemote: RemoteFunction? = nil
 local redeemLocks: {[Player]: boolean} = {}
+local grantReward: (player: Player, reward: Reward) -> (boolean, string?, string?)
 
 local function log(message: string)
 	print(`${LOG_PREFIX} {message}`)
@@ -140,7 +154,56 @@ local function grantItemReward(player: Player, reward: ItemReward): (boolean, st
 	return true, nil
 end
 
-local function grantReward(player: Player, reward: Reward): (boolean, string?, string?)
+local function grantRandomItemsReward(player: Player, reward: RandomItemsReward): (boolean, string?)
+	local rarity = tostring(reward.Rarity or "")
+	local count = math.max(1, math.floor(tonumber(reward.Count) or 0))
+	local itemPool = ItemConfigurations.GetItemsByRarity(rarity)
+	if #itemPool == 0 then
+		warnLog(`No items found for promo code rarity "{rarity}".`)
+		return false, "RewardGrantFailed"
+	end
+
+	local mutation = if type(reward.Mutation) == "string" and reward.Mutation ~= "" then reward.Mutation else "Normal"
+	local level = math.max(1, math.floor(tonumber(reward.Level) or 1))
+
+	for _ = 1, count do
+		local itemName = itemPool[math.random(1, #itemPool)]
+		local itemData = ItemConfigurations.GetItemData(itemName)
+		if not itemData then
+			warnLog(`Missing item configuration for random reward "{itemName}".`)
+			return false, "RewardGrantFailed"
+		end
+
+		local tool = ItemManager.GiveItemToPlayer(player, itemName, mutation, itemData.Rarity, level)
+		if not tool then
+			warnLog(`ItemManager failed to grant random reward "{itemName}" to {player.Name}.`)
+			return false, "RewardGrantFailed"
+		end
+
+		PlayerController:IncrementBrainrotsCollected(player, 1)
+	end
+
+	log(`Granted random item reward to {player.Name}: Rarity={rarity} Count={count}`)
+	return true, nil
+end
+
+local function grantBundleReward(player: Player, reward: BundleReward): (boolean, string?)
+	if type(reward.Rewards) ~= "table" or #reward.Rewards == 0 then
+		warnLog(`Invalid bundle reward for {player.Name}.`)
+		return false, "RewardGrantFailed"
+	end
+
+	for _, nestedReward in ipairs(reward.Rewards) do
+		local success, errorCode = grantReward(player, nestedReward)
+		if not success then
+			return false, errorCode
+		end
+	end
+
+	return true, nil
+end
+
+function grantReward(player: Player, reward: Reward): (boolean, string?, string?)
 	if reward.Type == "Money" then
 		local success, errorCode = grantMoneyReward(player, reward)
 		return success, errorCode, reward.Type
@@ -148,6 +211,16 @@ local function grantReward(player: Player, reward: Reward): (boolean, string?, s
 
 	if reward.Type == "Item" then
 		local success, errorCode = grantItemReward(player, reward)
+		return success, errorCode, reward.Type
+	end
+
+	if reward.Type == "RandomItems" then
+		local success, errorCode = grantRandomItemsReward(player, reward)
+		return success, errorCode, reward.Type
+	end
+
+	if reward.Type == "Bundle" then
+		local success, errorCode = grantBundleReward(player, reward)
 		return success, errorCode, reward.Type
 	end
 

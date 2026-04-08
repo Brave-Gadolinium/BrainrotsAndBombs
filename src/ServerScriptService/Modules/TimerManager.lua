@@ -6,6 +6,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local Workspace = game:GetService("Workspace")
 
 local Constants = require(ReplicatedStorage.Modules.Constants)
+local DepthLevelUtils = require(ServerScriptService.Modules.DepthLevelUtils)
 local SpawnUtils = require(ServerScriptService.Modules.SpawnUtils)
 
 local function ensureTimerFolder(): Folder
@@ -54,6 +55,10 @@ local FinishTime = ensureTimerFinishEvent()
 local RoundStarted = ensureRoundStartedEvent()
 local currentRoundId = 0
 
+local function isInsideMineZone(position: Vector3): boolean
+	return DepthLevelUtils.GetDepthLevelAtPosition(position) > 0
+end
+
 local function teleportPlayerToBase(player: Player)
 	local character = player.Character
 	if not character then
@@ -62,6 +67,10 @@ local function teleportPlayerToBase(player: Player)
 
 	local root = character:FindFirstChild("HumanoidRootPart")
 	if not root then
+		return
+	end
+
+	if not isInsideMineZone(root.Position) then
 		return
 	end
 

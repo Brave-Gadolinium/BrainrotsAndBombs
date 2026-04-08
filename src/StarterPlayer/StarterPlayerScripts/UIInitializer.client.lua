@@ -33,6 +33,161 @@ local hudGui = mainGui:WaitForChild("HUD")
 local lastInteraction = 0
 local OWN_BASE_INTERACTION_RADIUS = 100
 
+local function ensureGuiCorner(target: Instance, radius: UDim)
+	if target:FindFirstChildOfClass("UICorner") then
+		return
+	end
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = radius
+	corner.Parent = target
+end
+
+local function ensureBoostersButton()
+	local rightPanel = hudGui:FindFirstChild("Right")
+	if not rightPanel then
+		return
+	end
+
+	local existingButton = rightPanel:FindFirstChild("BoostersButton")
+	if existingButton and existingButton:IsA("GuiButton") then
+		return
+	end
+
+	local button = Instance.new("TextButton")
+	button.Name = "BoostersButton"
+	button.Size = UDim2.fromOffset(120, 40)
+	button.Position = UDim2.new(1, -124, 0, 56)
+	button.AnchorPoint = Vector2.new(0, 0)
+	button.BackgroundColor3 = Color3.fromRGB(255, 170, 64)
+	button.TextColor3 = Color3.fromRGB(20, 20, 20)
+	button.TextScaled = true
+	button.Font = Enum.Font.GothamBold
+	button.Text = "Boosters"
+	button.Parent = rightPanel
+	ensureGuiCorner(button, UDim.new(0, 10))
+
+	local stroke = Instance.new("UIStroke")
+	stroke.Thickness = 1.25
+	stroke.Color = Color3.fromRGB(255, 255, 255)
+	stroke.Transparency = 0.2
+	stroke.Parent = button
+end
+
+local function createBoosterCard(parent: Instance, order: number, title: string, descriptionText: string): Frame
+	local card = Instance.new("Frame")
+	card.Name = title:gsub("%s+", "")
+	card.LayoutOrder = order
+	card.Size = UDim2.new(1, -18, 0, 96)
+	card.BackgroundColor3 = Color3.fromRGB(36, 36, 44)
+	card.BorderSizePixel = 0
+	card.Parent = parent
+	ensureGuiCorner(card, UDim.new(0, 10))
+
+	local titleLabel = Instance.new("TextLabel")
+	titleLabel.Name = "Title"
+	titleLabel.Size = UDim2.new(1, -170, 0, 26)
+	titleLabel.Position = UDim2.fromOffset(10, 6)
+	titleLabel.BackgroundTransparency = 1
+	titleLabel.Font = Enum.Font.GothamBold
+	titleLabel.TextSize = 18
+	titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+	titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+	titleLabel.Text = title
+	titleLabel.Parent = card
+
+	local descriptionLabel = Instance.new("TextLabel")
+	descriptionLabel.Name = "Description"
+	descriptionLabel.Size = UDim2.new(1, -20, 0, 38)
+	descriptionLabel.Position = UDim2.fromOffset(10, 34)
+	descriptionLabel.BackgroundTransparency = 1
+	descriptionLabel.Font = Enum.Font.Gotham
+	descriptionLabel.TextSize = 14
+	descriptionLabel.TextWrapped = true
+	descriptionLabel.TextXAlignment = Enum.TextXAlignment.Left
+	descriptionLabel.TextYAlignment = Enum.TextYAlignment.Top
+	descriptionLabel.TextColor3 = Color3.fromRGB(210, 210, 210)
+	descriptionLabel.Text = descriptionText
+	descriptionLabel.Parent = card
+
+	local buyButton = Instance.new("TextButton")
+	buyButton.Name = "Buy"
+	buyButton.Size = UDim2.fromOffset(140, 36)
+	buyButton.Position = UDim2.new(1, -150, 1, -46)
+	buyButton.BackgroundColor3 = Color3.fromRGB(255, 170, 64)
+	buyButton.TextColor3 = Color3.fromRGB(20, 20, 20)
+	buyButton.TextScaled = true
+	buyButton.Font = Enum.Font.GothamBold
+	buyButton.Text = "Buy"
+	buyButton.Parent = card
+	ensureGuiCorner(buyButton, UDim.new(0, 8))
+
+	return card
+end
+
+local function ensureBoostersFrame()
+	local existing = framesContainer:FindFirstChild("Boosters")
+	if existing and existing:IsA("GuiObject") then
+		return
+	end
+
+	local frame = Instance.new("Frame")
+	frame.Name = "Boosters"
+	frame.Size = UDim2.fromOffset(560, 500)
+	frame.Position = UDim2.new(0.5, -280, 0.5, -250)
+	frame.BackgroundColor3 = Color3.fromRGB(24, 24, 28)
+	frame.BorderSizePixel = 0
+	frame.Visible = false
+	frame.Parent = framesContainer
+	ensureGuiCorner(frame, UDim.new(0, 14))
+
+	local title = Instance.new("TextLabel")
+	title.Name = "Title"
+	title.Size = UDim2.new(1, -120, 0, 40)
+	title.Position = UDim2.fromOffset(14, 10)
+	title.BackgroundTransparency = 1
+	title.Font = Enum.Font.GothamBold
+	title.TextSize = 28
+	title.TextColor3 = Color3.fromRGB(255, 255, 255)
+	title.TextXAlignment = Enum.TextXAlignment.Left
+	title.Text = "Boosters"
+	title.Parent = frame
+
+	local closeButton = Instance.new("TextButton")
+	closeButton.Name = "Close"
+	closeButton.Size = UDim2.fromOffset(36, 36)
+	closeButton.Position = UDim2.new(1, -46, 0, 10)
+	closeButton.BackgroundColor3 = Color3.fromRGB(52, 52, 60)
+	closeButton.Font = Enum.Font.GothamBold
+	closeButton.TextScaled = true
+	closeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+	closeButton.Text = "X"
+	closeButton.Parent = frame
+	ensureGuiCorner(closeButton, UDim.new(1, 0))
+
+	local scrolling = Instance.new("ScrollingFrame")
+	scrolling.Name = "Content"
+	scrolling.Size = UDim2.new(1, -20, 1, -64)
+	scrolling.Position = UDim2.fromOffset(10, 54)
+	scrolling.BackgroundTransparency = 1
+	scrolling.BorderSizePixel = 0
+	scrolling.ScrollBarThickness = 6
+	scrolling.AutomaticCanvasSize = Enum.AutomaticSize.Y
+	scrolling.CanvasSize = UDim2.new()
+	scrolling.Parent = frame
+
+	local list = Instance.new("UIListLayout")
+	list.Padding = UDim.new(0, 10)
+	list.HorizontalAlignment = Enum.HorizontalAlignment.Center
+	list.SortOrder = Enum.SortOrder.LayoutOrder
+	list.Parent = scrolling
+
+	createBoosterCard(scrolling, 1, "Mega Explosion", "10 minutes. Sets your bomb explosion radius to max.")
+	createBoosterCard(scrolling, 2, "Shield", "10 minutes. Blocks bomb knockback, ragdoll and carried brainrot loss.")
+	createBoosterCard(scrolling, 3, "Nuke Booster", "Instantly hits other players in the mining zone.")
+	createBoosterCard(scrolling, 4, "Auto Bomb", "Permanent gamepass with On/Off toggle.")
+end
+
 local function getPlayerPlot(): Model?
 	local plot = Workspace:FindFirstChild("Plot_" .. player.Name)
 	if plot and plot:IsA("Model") then
@@ -186,6 +341,8 @@ function UIInitializer:Init()
 	pcall(function() StarterGui:SetCore("ResetButtonCallback", false) end)
 
 	-- 2. Initialize Frames (Use IsA("GuiObject") to catch ScrollingFrames too!)
+	ensureBoostersFrame()
+	ensureBoostersButton()
 	for _, child in ipairs(framesContainer:GetChildren()) do
 		if child:IsA("GuiObject") then
 

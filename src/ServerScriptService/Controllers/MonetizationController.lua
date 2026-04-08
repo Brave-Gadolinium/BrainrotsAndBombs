@@ -21,6 +21,7 @@ local LimitedProductStockService = require(ServerScriptService.Modules.LimitedPr
 local RebirthSystem
 local ItemManager
 local PlayerController
+local BoosterService
 local PlaytimeRewardController
 local DailyRewardController
 local TutorialService
@@ -130,31 +131,47 @@ local function grantItemProductReward(player: Player, productName: string, itemR
 	return true
 end
 
-local function grantLuckyBlockProductReward(player: Player, productName: string, blockId: string, notif: RemoteEvent?): boolean
+local function grantLuckyBlockProductReward(player: Player, productName: string, blockId: string, quantity: number?, notif: RemoteEvent?): boolean
 	if not ItemManager then
 		ItemManager = require(ServerScriptService.Modules.ItemManager)
 	end
 
-	local tool = ItemManager.GiveLuckyBlockToPlayer(player, blockId)
-	if not tool then
+	local grantCount = math.max(1, math.floor(tonumber(quantity) or 1))
+	local successCount = 0
+	local firstTool: Tool? = nil
+
+	for _ = 1, grantCount do
+		local tool = ItemManager.GiveLuckyBlockToPlayer(player, blockId)
+		if tool then
+			successCount += 1
+			firstTool = firstTool or tool
+			AnalyticsEconomyService:LogItemValueSourceForLuckyBlock(
+				player,
+				blockId,
+				TRANSACTION_TYPES.IAP,
+				`LuckyBlockIAP:{productName}`,
+				{
+					feature = "iap_lucky_block",
+					content_id = blockId,
+					context = "shop",
+					quantity = grantCount,
+				}
+			)
+		end
+	end
+
+	if successCount <= 0 then
 		warn("[MonetizationController] Failed to grant lucky block reward for product:", productName, blockId)
 		return false
 	end
 
-	AnalyticsEconomyService:LogItemValueSourceForLuckyBlock(
-		player,
-		blockId,
-		TRANSACTION_TYPES.IAP,
-		`LuckyBlockIAP:{productName}`,
-		{
-			feature = "iap_lucky_block",
-			content_id = blockId,
-			context = "shop",
-		}
-	)
-
 	if notif then
-		notif:FireClient(player, "You got " .. tool.Name .. "!", "Success")
+		local blockDisplayName = firstTool and firstTool.Name or blockId
+		if successCount == 1 then
+			notif:FireClient(player, "You got " .. blockDisplayName .. "!", "Success")
+		else
+			notif:FireClient(player, string.format("You got %dx %s!", successCount, blockDisplayName), "Success")
+		end
 	end
 
 	playPurchaseEffects(player)
@@ -286,6 +303,38 @@ function MonetizationController.ProcessReceipt(receiptInfo)
 		return Enum.ProductPurchaseDecision.PurchaseGranted
 	end
 
+	if productName == "MegaExplosion" or productName == "Shield" then
+		if not BoosterService then
+			BoosterService = require(ServerScriptService.Modules.BoosterService)
+		end
+
+		local endsAt = BoosterService:ActivateTimedBooster(player, productName)
+		if endsAt > 0 then
+			if notif then
+				notif:FireClient(player, productName .. " activated for 10 minutes!", "Success")
+			end
+			playPurchaseEffects(player)
+			return Enum.ProductPurchaseDecision.PurchaseGranted
+		end
+
+		return Enum.ProductPurchaseDecision.NotProcessedYet
+	end
+
+	if productName == "NukeBooster" then
+		if not BoosterService then
+			BoosterService = require(ServerScriptService.Modules.BoosterService)
+		end
+
+		local success = BoosterService:TriggerNukeBooster(player)
+		if notif then
+			notif:FireClient(player, if success then "Nuke detonated!" else "Nuke failed: enter mining zone", if success then "Success" else "Error")
+		end
+		if success then
+			playPurchaseEffects(player)
+		end
+		return Enum.ProductPurchaseDecision.PurchaseGranted
+	end
+
 	if productName == "PlaytimeRewardsSkipAll" then
 		if not PlaytimeRewardController then
 			PlaytimeRewardController = require(ServerScriptService.Controllers.PlaytimeRewardController)
@@ -347,8 +396,17 @@ function MonetizationController.ProcessReceipt(receiptInfo)
 	end
 
 	local luckyBlockReward = ProductConfigurations.LuckyBlockProductRewards[productName]
-	if type(luckyBlockReward) == "string" and luckyBlockReward ~= "" then
-		if grantLuckyBlockProductReward(player, productName, luckyBlockReward, notif) then
+	if luckyBlockReward then
+		local rewardBlockId: string? = nil
+		local rewardQuantity: number = 1
+		if type(luckyBlockReward) == "string" then
+			rewardBlockId = luckyBlockReward
+		elseif type(luckyBlockReward) == "table" then
+			rewardBlockId = luckyBlockReward.BlockId
+			rewardQuantity = luckyBlockReward.Quantity
+		end
+
+		if type(rewardBlockId) == "string" and rewardBlockId ~= "" and grantLuckyBlockProductReward(player, productName, rewardBlockId, rewardQuantity, notif) then
 			return Enum.ProductPurchaseDecision.PurchaseGranted
 		end
 

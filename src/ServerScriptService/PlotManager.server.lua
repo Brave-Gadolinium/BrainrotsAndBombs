@@ -17,6 +17,7 @@ local TutorialService = require(ServerScriptService.Modules.TutorialService)
 local NumberFormatter = require(ReplicatedStorage.Modules.NumberFormatter)
 local SlotUnlockConfigurations = require(ReplicatedStorage.Modules.SlotUnlockConfigurations)
 local ProductConfigurations = require(ReplicatedStorage.Modules.ProductConfigurations)
+local BoosterService = require(ServerScriptService.Modules.BoosterService)
 
 -- Assets
 local Templates = ReplicatedStorage:WaitForChild("Templates")
@@ -223,6 +224,9 @@ local function connectCollectAllButton(plotModel: Model, owner: Player)
 		if success and ownsPass then
 			collectAllFromPlot(owner, plotModel)
 		else
+			if BoosterService and BoosterService.RecordManualCollect then
+				BoosterService:RecordManualCollect(owner)
+			end
 			MarketplaceService:PromptGamePassPurchase(owner, COLLECT_ALL_GAMEPASS)
 		end
 	end)
@@ -280,6 +284,7 @@ local function getUpgradeSlotsFrame(plotModel: Model): Frame?
 end
 
 local function updateUpgradeSlotsButton(player: Player, plotModel: Model)
+	
 	local frame = getUpgradeSlotsFrame(plotModel)
 	if not frame then
 		return
@@ -310,7 +315,7 @@ local function updateUpgradeSlotsButton(player: Player, plotModel: Model)
 		upgradeButton.AutoButtonColor = false
 		upgradeButton.Text = "MAX"
 		if costLabel and costLabel:IsA("TextLabel") then
-			costLabel.Text = "MAX SLOTS"
+			--costLabel.Text = "MAX SLOTS"
 		end
 		return
 	end
