@@ -18,6 +18,10 @@ local hud = gui:WaitForChild("HUD")
 
 local autoBombFrame: GuiObject? = nil
 local toggleButton: GuiButton? = nil
+local backButton: GuiButton? = nil
+local backButtonVisibleConnection: RBXScriptConnection? = nil
+local backButtonActiveConnection: RBXScriptConnection? = nil
+local refreshHudAutoBomb: () -> ()
 
 local function reportStorePromptFailed(reason: string)
 	reportAnalyticsIntent:FireServer("StorePromptFailed", {
@@ -57,6 +61,15 @@ local function findAutoBombFrame(): GuiObject?
 	return nil
 end
 
+local function findBackButton(): GuiButton?
+	local button = hud:FindFirstChild("Back")
+	if button and button:IsA("GuiButton") then
+		return button
+	end
+
+	return nil
+end
+
 local function findToggleButton(frame: GuiObject?): GuiButton?
 	if not frame then
 		return nil
@@ -70,7 +83,43 @@ local function findToggleButton(frame: GuiObject?): GuiButton?
 	return nil
 end
 
-local function refreshHudAutoBomb()
+local function shouldShowAutoBomb(): boolean
+	if not backButton then
+		return true
+	end
+
+	return backButton.Visible and backButton.Active
+end
+
+local function disconnectBackButtonConnections()
+	if backButtonVisibleConnection then
+		backButtonVisibleConnection:Disconnect()
+		backButtonVisibleConnection = nil
+	end
+
+	if backButtonActiveConnection then
+		backButtonActiveConnection:Disconnect()
+		backButtonActiveConnection = nil
+	end
+end
+
+local function bindBackButton(button: GuiButton?)
+	if backButton == button then
+		return
+	end
+
+	disconnectBackButtonConnections()
+	backButton = button
+
+	if not button then
+		return
+	end
+
+	backButtonVisibleConnection = button:GetPropertyChangedSignal("Visible"):Connect(refreshHudAutoBomb)
+	backButtonActiveConnection = button:GetPropertyChangedSignal("Active"):Connect(refreshHudAutoBomb)
+end
+
+function refreshHudAutoBomb()
 	if not autoBombFrame then
 		return
 	end
@@ -78,7 +127,7 @@ local function refreshHudAutoBomb()
 	local hasAutoBomb = player:GetAttribute("HasAutoBomb") == true
 	local isEnabled = player:GetAttribute("AutoBombEnabled") == true
 
-	autoBombFrame.Visible = true
+	autoBombFrame.Visible = shouldShowAutoBomb()
 
 	if toggleButton then
 		toggleButton.Active = true
@@ -134,12 +183,13 @@ end
 local function resolveHudAutoBomb()
 	autoBombFrame = findAutoBombFrame()
 	toggleButton = findToggleButton(autoBombFrame)
+	bindBackButton(findBackButton())
 	bindToggleButton(toggleButton)
 	refreshHudAutoBomb()
 end
 
 hud.ChildAdded:Connect(function(child)
-	if child.Name == "Autobomb" then
+	if child.Name == "Autobomb" or child.Name == "Back" then
 		task.defer(resolveHudAutoBomb)
 	end
 end)
@@ -148,6 +198,10 @@ hud.ChildRemoved:Connect(function(child)
 	if child == autoBombFrame then
 		autoBombFrame = nil
 		toggleButton = nil
+	elseif child == backButton then
+		disconnectBackButtonConnections()
+		backButton = nil
+		task.defer(refreshHudAutoBomb)
 	end
 end)
 

@@ -29,6 +29,7 @@ local CLICK_SCALE = 0.95
 local TWEEN_INFO = TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 local DISABLED_BUTTON_BACKGROUND_TRANSPARENCY_OFFSET = 0.14
 local DISABLED_BUTTON_TEXT_TRANSPARENCY_OFFSET = 0.18
+local ACTION_BUTTON_GREEN = Color3.fromRGB(66, 191, 110)
 
 type TextVisualSnapshot = {
 	TextColor3: Color3,
@@ -39,6 +40,7 @@ type ButtonVisualSnapshot = {
 	AutoButtonColor: boolean,
 	BackgroundColor3: Color3,
 	BackgroundTransparency: number,
+	ImageColor3: Color3?,
 	TextElements: {[GuiObject]: TextVisualSnapshot},
 }
 
@@ -105,6 +107,7 @@ local function getButtonVisualSnapshot(button: GuiButton): ButtonVisualSnapshot
 		AutoButtonColor = button.AutoButtonColor,
 		BackgroundColor3 = button.BackgroundColor3,
 		BackgroundTransparency = button.BackgroundTransparency,
+		ImageColor3 = if button:IsA("ImageButton") then button.ImageColor3 else nil,
 		TextElements = textElements,
 	}
 	buttonVisualSnapshots[button] = snapshot
@@ -124,11 +127,27 @@ local function restoreButtonVisuals(button: GuiButton)
 	button.BackgroundColor3 = snapshot.BackgroundColor3
 	button.BackgroundTransparency = snapshot.BackgroundTransparency
 
+	if button:IsA("ImageButton") and snapshot.ImageColor3 then
+		button.ImageColor3 = snapshot.ImageColor3
+	end
+
 	for textElement, textSnapshot in pairs(snapshot.TextElements) do
 		if textElement.Parent and (textElement:IsA("TextLabel") or textElement:IsA("TextButton")) then
 			textElement.TextColor3 = textSnapshot.TextColor3
 			textElement.TextTransparency = textSnapshot.TextTransparency
 		end
+	end
+end
+
+local function applyActionButtonStyle(button: GuiButton?)
+	if not button then
+		return
+	end
+
+	button.BackgroundColor3 = ACTION_BUTTON_GREEN
+
+	if button:IsA("ImageButton") then
+		button.ImageColor3 = ACTION_BUTTON_GREEN
 	end
 end
 
@@ -396,6 +415,9 @@ local function updateShowcase(pickaxesFrame: Frame, pickaxeId: string, shouldRep
 		if isOwned then
 			setButtonText(softBuyButton, if isEquipped then "EQUIPPED" else "OWNED")
 			setButtonEnabled(softBuyButton, false)
+			if isEquipped then
+				applyActionButtonStyle(softBuyButton)
+			end
 		elseif isLockedForSoftPurchase then
 			setButtonText(softBuyButton, "LOCKED")
 			setButtonEnabled(softBuyButton, false)
@@ -406,6 +428,7 @@ local function updateShowcase(pickaxesFrame: Frame, pickaxeId: string, shouldRep
 				setButtonText(softBuyButton, "FREE")
 			end
 			setButtonEnabled(softBuyButton, true)
+			applyActionButtonStyle(softBuyButton)
 		end
 	end
 
@@ -591,6 +614,7 @@ local function initializeUI()
 			if isOwned then
 				setButtonText(equipButton, if isEquipped then "EQUIPPED" else "EQUIP")
 				setButtonEnabled(equipButton, not isEquipped)
+				applyActionButtonStyle(equipButton)
 			else
 				setButtonText(equipButton, "LOCKED")
 				setButtonEnabled(equipButton, false)

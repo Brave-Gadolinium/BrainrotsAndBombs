@@ -17,8 +17,8 @@ local ShopFrame = script.Parent
 local MainFrame = ShopFrame:WaitForChild("MainFrame")
 local Content = MainFrame:WaitForChild("Content")
 
-local hoverSound = ReplicatedStorage:WaitForChild("Assets"):WaitForChild("Sounds"):WaitForChild("UIHoverSound")
-local clickSound = ReplicatedStorage:WaitForChild("Assets"):WaitForChild("Sounds"):WaitForChild("UIClickSound")
+-- local hoverSound = ReplicatedStorage:WaitForChild("Assets"):WaitForChild("Sounds"):WaitForChild("UIHoverSound")
+-- local clickSound = ReplicatedStorage:WaitForChild("Assets"):WaitForChild("Sounds"):WaitForChild("UIClickSound")
 
 local initialized = false
 local infoCache = {}
@@ -228,7 +228,7 @@ local function setupButtonEffects(button, scaleParent)
 
 	button.MouseEnter:Connect(function()
 		tweenTo(hoverSize)
-		hoverSound:Play()
+		--hoverSound:Play()
 	end)
 
 	button.MouseLeave:Connect(function()
@@ -241,7 +241,7 @@ local function setupButtonEffects(button, scaleParent)
 
 	button.MouseButton1Up:Connect(function()
 		tweenTo(hoverSize)
-		clickSound:Play()
+		--clickSound:Play()
 	end)
 end
 
