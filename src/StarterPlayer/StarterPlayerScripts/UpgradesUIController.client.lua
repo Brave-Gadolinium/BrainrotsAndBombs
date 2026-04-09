@@ -1,4 +1,3 @@
---!strict
 -- LOCATION: StarterPlayerScripts/UpgradesUIController
 
 local Players = game:GetService("Players")
@@ -25,8 +24,9 @@ local CLICK_SCALE = 0.95
 local TWEEN_INFO = TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 local MAX_CARRY_CAPACITY = 4
 
-local uiReferences = {} 
+local uiReferences = {}
 local lastUpgradeUiData = {}
+local robuxPriceCache = {}
 
 local function isTutorialFreeUpgrade(upgradeId: string, upgradeData: any): boolean
 	return upgradeId == TutorialConfiguration.TutorialCharacterUpgradeId
@@ -49,8 +49,25 @@ end
 
 local function findTextLabel(parent: Instance): TextLabel?
 	local label = parent:FindFirstChild("Text") or parent:FindFirstChild("Price")
-	if label and label:IsA("TextLabel") then return label end
+	if label and label:IsA("TextLabel") then
+		return label
+	end
 	return parent:FindFirstChildWhichIsA("TextLabel", true)
+end
+
+local function getUpgradesFrame(): Frame
+	local playerGui = player:WaitForChild("PlayerGui")
+	local mainGui = playerGui:WaitForChild("GUI")
+	local frames = mainGui:WaitForChild("Frames")
+	return frames:WaitForChild("Upgrades") :: Frame
+end
+
+local function isUpgradesFrameVisible(): boolean
+	local playerGui = player:FindFirstChild("PlayerGui")
+	local mainGui = playerGui and playerGui:FindFirstChild("GUI")
+	local frames = mainGui and mainGui:FindFirstChild("Frames")
+	local upgradesFrame = frames and frames:FindFirstChild("Upgrades")
+	return upgradesFrame ~= nil and upgradesFrame:IsA("GuiObject") and upgradesFrame.Visible
 end
 
 local function reportStoreOpened(surface: string)
@@ -74,15 +91,41 @@ local function reportStorePromptFailed(upgradeId: string, productId: number?, re
 	})
 end
 
+local function trySetRobuxPrice(label: TextLabel?, productId: number?)
+	if not label or type(productId) ~= "number" or productId <= 0 then
+		return
+	end
+
+	local cachedPrice = robuxPriceCache[productId]
+	if cachedPrice then
+		label.Text = cachedPrice
+		return
+	end
+
+	if not isUpgradesFrameVisible() then
+		return
+	end
+
+	task.spawn(function()
+		local success, info = pcall(function()
+			return MarketplaceService:GetProductInfo(productId, Enum.InfoType.Product)
+		end)
+		if success and info and label.Parent then
+			local priceText = "R$" .. tostring(info.PriceInRobux)
+			robuxPriceCache[productId] = priceText
+			label.Text = priceText
+		end
+	end)
+end
+
 local function initializeUI()
-	local playerGui = player:WaitForChild("PlayerGui")
-	local mainGui = playerGui:WaitForChild("GUI")
-	local frames = mainGui:WaitForChild("Frames")
-	local upgradesFrame = frames:WaitForChild("Upgrades")
+	local upgradesFrame = getUpgradesFrame()
 	local scrollingFrame = upgradesFrame:WaitForChild("Scrolling")
 
 	for _, child in ipairs(scrollingFrame:GetChildren()) do
-		if child:IsA("Frame") then child:Destroy() end
+		if child:IsA("Frame") then
+			child:Destroy()
+		end
 	end
 
 	table.clear(uiReferences)
@@ -96,18 +139,19 @@ local function initializeUI()
 		newUpgrade.Name = upgrade.Id
 		newUpgrade.Visible = true
 
-		-- Main Title
 		local titleLabel = newUpgrade:FindFirstChild("Text") :: TextLabel
-		if titleLabel then titleLabel.Text = upgrade.DisplayName end
+		if titleLabel then
+			titleLabel.Text = upgrade.DisplayName
+		end
 
-		-- Design (Image)
 		local designFrame = newUpgrade:FindFirstChild("Design")
 		if designFrame then
 			local img = designFrame:FindFirstChild("Image") or designFrame:FindFirstChildWhichIsA("ImageLabel") :: ImageLabel
-			if img then img.Image = upgrade.ImageId end
+			if img then
+				img.Image = upgrade.ImageId
+			end
 		end
 
-		-- Buttons
 		local buttonsFrame = newUpgrade:FindFirstChild("Buttons")
 		local moneyBtn = buttonsFrame and buttonsFrame:FindFirstChild("Money") :: TextButton
 		local robuxBtn = buttonsFrame and buttonsFrame:FindFirstChild("Robux") :: TextButton
@@ -115,7 +159,6 @@ local function initializeUI()
 		local moneyPriceLabel = moneyBtn and findTextLabel(moneyBtn)
 		local robuxPriceLabel = robuxBtn and findTextLabel(robuxBtn)
 
-		-- Stats
 		local statsFrame = newUpgrade:FindFirstChild("Stats")
 		local beforeFrame = statsFrame and statsFrame:FindFirstChild("Before")
 		local afterFrame = statsFrame and statsFrame:FindFirstChild("After")
@@ -123,7 +166,6 @@ local function initializeUI()
 		local beforeLabel = beforeFrame and beforeFrame:FindFirstChild("Text") :: TextLabel
 		local afterLabel = afterFrame and afterFrame:FindFirstChild("Text") :: TextLabel
 
-		-- Money Button Logic
 		if moneyBtn then
 			setupButtonAnimation(moneyBtn)
 			moneyBtn.MouseButton1Click:Connect(function()
@@ -134,17 +176,11 @@ local function initializeUI()
 			end)
 		end
 
-		-- Robux Button Logic
 		if robuxBtn then
 			local robuxId = upgrade.RobuxProductId
 			if robuxId then
 				setupButtonAnimation(robuxBtn)
-				task.spawn(function()
-					local success, info = pcall(function() return MarketplaceService:GetProductInfo(robuxId, Enum.InfoType.Product) end)
-					if success and info and robuxPriceLabel then
-						robuxPriceLabel.Text = "⏣" .. tostring(info.PriceInRobux)
-					end
-				end)
+				trySetRobuxPrice(robuxPriceLabel, robuxId)
 				robuxBtn.MouseButton1Click:Connect(function()
 					reportAnalyticsIntent:FireServer("UpgradePurchaseRequested", {
 						upgradeId = upgrade.Id,
@@ -168,7 +204,7 @@ local function initializeUI()
 			MoneyPriceLabel = moneyPriceLabel,
 			BeforeLabel = beforeLabel,
 			AfterLabel = afterLabel,
-			Amount = upgrade.Amount
+			Amount = upgrade.Amount,
 		}
 
 		newUpgrade.Parent = scrollingFrame
@@ -206,13 +242,11 @@ local function refreshUpgradeVisuals()
 end
 
 task.spawn(function()
-	local playerGui = player:WaitForChild("PlayerGui")
-	local mainGui = playerGui:WaitForChild("GUI")
-	local frames = mainGui:WaitForChild("Frames")
-	local upgradesFrame = frames:WaitForChild("Upgrades")
+	local upgradesFrame = getUpgradesFrame()
 
 	upgradesFrame:GetPropertyChangedSignal("Visible"):Connect(function()
 		if upgradesFrame.Visible then
+			initializeUI()
 			reportAnalyticsIntent:FireServer("UpgradesOpened")
 			reportStoreOpened("upgrades")
 			updateEvent:FireServer()
@@ -224,7 +258,7 @@ end)
 local function onServerUpdate(data: any)
 	lastUpgradeUiData = data or {}
 
-	for upgradeId, upgradeData in pairs(data) do
+	for upgradeId, upgradeData in pairs(data or {}) do
 		refreshUpgradeVisual(upgradeId, upgradeData)
 	end
 end
@@ -234,7 +268,7 @@ initializeUI()
 player.CharacterAdded:Connect(function()
 	task.wait(0.5)
 	initializeUI()
-	updateEvent:FireServer() 
+	updateEvent:FireServer()
 end)
 
 updateEvent.OnClientEvent:Connect(onServerUpdate)

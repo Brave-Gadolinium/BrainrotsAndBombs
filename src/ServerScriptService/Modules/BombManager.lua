@@ -103,6 +103,33 @@ local function ensureBombRemote(): RemoteEvent
 	return placeBombRemote :: RemoteEvent
 end
 
+local function ensureTimerFinishEvent(): BindableEvent
+	local remotesFolder = ReplicatedStorage:FindFirstChild("Remotes")
+	if not remotesFolder then
+		remotesFolder = Instance.new("Folder")
+		remotesFolder.Name = "Remotes"
+		remotesFolder.Parent = ReplicatedStorage
+	end
+
+	local timerFolder = remotesFolder:FindFirstChild("Timer")
+	if not timerFolder then
+		timerFolder = Instance.new("Folder")
+		timerFolder.Name = "Timer"
+		timerFolder.Parent = remotesFolder
+	end
+
+	local finishTime = timerFolder:FindFirstChild("FinishTime")
+	if not finishTime then
+		finishTime = Instance.new("BindableEvent")
+		finishTime.Name = "FinishTime"
+		finishTime.Parent = timerFolder
+	end
+
+	return finishTime :: BindableEvent
+end
+
+local FinishTime = ensureTimerFinishEvent()
+
 local function getBombZonePart(position: Vector3): BasePart?
 	for _, zonePart in ipairs(zonesFolder:GetChildren()) do
 		if zonePart:IsA("BasePart") and zonePart.Name == "ZonePart" then
@@ -120,6 +147,11 @@ local function getBombZonePart(position: Vector3): BasePart?
 	end
 
 	return nil
+end
+
+local function isBombUseBlocked(): boolean
+	return Workspace:GetAttribute("SessionEnded") == true
+		or Workspace:GetAttribute("TerrainResetInProgress") == true
 end
 
 local function getTriggerUIEffectEvent(): RemoteEvent?
@@ -375,6 +407,26 @@ local function disconnectTouchMonitor(state)
 	end
 
 	state.TouchConnections = nil
+end
+
+local function destroyActiveBombState(bombPart: BasePart, state)
+	disconnectTerrainMonitor(state)
+	disconnectTouchMonitor(state)
+
+	activeBombs[bombPart] = nil
+
+	local bombInstance = state and state.Instance
+	if bombInstance and bombInstance.Parent then
+		bombInstance:Destroy()
+	end
+end
+
+local function clearActiveBombs()
+	for bombPart, state in pairs(activeBombs) do
+		if bombPart and state then
+			destroyActiveBombState(bombPart, state)
+		end
+	end
 end
 
 local function setBombAnchored(bombInstance: Instance, anchored: boolean)
@@ -994,6 +1046,13 @@ local function tryThrowBomb(player: Player, cameraLookVector: Vector3?, options:
 	options = options or {}
 	local silent = options.Silent == true
 
+	if isBombUseBlocked() then
+		if not silent then
+			notifyPlayer(player, "Bombs are unavailable right now")
+		end
+		return false
+	end
+
 	local character = player.Character
 	if not character then
 		return false
@@ -1049,6 +1108,10 @@ local function tryThrowBomb(player: Player, cameraLookVector: Vector3?, options:
 end
 
 local function triggerNukeBlast(player: Player): boolean
+	if isBombUseBlocked() then
+		return false
+	end
+
 	local character = player.Character
 	if not character then
 		return false
@@ -1108,6 +1171,8 @@ function BombManager:Init()
 end
 
 function BombManager:Start()
+	FinishTime.Event:Connect(clearActiveBombs)
+
 	Players.PlayerRemoving:Connect(function(player)
 		playerCooldowns[player] = nil
 		missingBombRepairAttempts[player] = nil

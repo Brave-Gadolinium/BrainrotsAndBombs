@@ -7,15 +7,16 @@ local Constants = {
 	SESSION_DURATION = 5 * 60,
 	SESSION_END_MESSAGE_DURATION = 2,
 	SESSION_WARNING_THRESHOLD = 10,
-	MAX_ITEMS_PER_MINE = 45,
 	MIN_ITEM_SPACING = 4.5,
-	ZONE_ITEM_CAP_MULTIPLIERS = {
-		["Zone1"] = 6,
-		["Zone2"] = 5,
-		["Zone3"] = 4,
-		["Zone4"] = 3,
-		["Zone5"] = 2,
+	ZONE_ITEM_CAPS = {
+		["Zone1"] = 55,
+		["Zone2"] = 45,
+		["Zone3"] = 35,
+		["Zone4"] = 25,
+		["Zone5"] = 20,
 	},
+	ITEM_SPAWN_BATCH_SIZE = 8,
+	ITEM_SPAWN_BATCH_YIELD = 0.03,
 	
 	SPAWNER_TIERS = {
 		["Zone1"] = { Common = 70, Uncommon = 30 },

@@ -3,9 +3,13 @@
 local ServerScriptService = game:GetService("ServerScriptService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
 
 local Modules = ServerScriptService.Modules
 local Controllers = ServerScriptService.Controllers
+
+Workspace:SetAttribute("ServerSystemsReady", false)
+Workspace:SetAttribute("TerrainResetInProgress", false)
 
 -- 1. LOAD PLAYER CONTROLLER FIRST
 local PlayerController = require(Controllers.PlayerController)
@@ -64,33 +68,54 @@ end
 -- 2. INITIALIZE (Init)
 print("[ServerMain] Initializing Systems...")
 
-if PlayerController.Init then PlayerController:Init(SharedControllers) end
-
-for name, system in pairs(SystemModules) do
-	if type(system) == "table" and system.Init then
-		task.spawn(function()
-			system:Init(SharedControllers)
-		end)
+if PlayerController.Init then
+	local success, err = pcall(function()
+		PlayerController:Init(SharedControllers)
+	end)
+	if not success then
+		warn("   X FAILED to initialize PlayerController:", err)
 	end
 end
 
-task.wait(0.5)
+for name, system in pairs(SystemModules) do
+	if type(system) == "table" and system.Init then
+		local success, err = pcall(function()
+			system:Init(SharedControllers)
+		end)
+		if not success then
+			warn("   X FAILED to initialize system:", name, err)
+		end
+	end
+end
 
 -- 3. START (Start)
 print("[ServerMain] Starting Systems...")
 
-if PlayerController.Start then PlayerController:Start() end
-
-for name, system in pairs(SystemModules) do
-	if type(system) == "table" and system.Start then
-		task.spawn(function()
-			system:Start()
-		end)
+if PlayerController.Start then
+	local success, err = pcall(function()
+		PlayerController:Start()
+	end)
+	if not success then
+		warn("   X FAILED to start PlayerController:", err)
 	end
 end
 
+for name, system in pairs(SystemModules) do
+	if type(system) == "table" and system.Start then
+		local success, err = pcall(function()
+			system:Start()
+		end)
+		if not success then
+			warn("   X FAILED to start system:", name, err)
+		end
+	end
+end
+
+Workspace:SetAttribute("ServerSystemsReady", true)
+
 -- 4. HANDLE SHUTDOWN
 game:BindToClose(function()
+	Workspace:SetAttribute("ServerSystemsReady", false)
 	if PlayerController.OnClose then
 		PlayerController:OnClose()
 	end

@@ -6,12 +6,12 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Debris = game:GetService("Debris")
 local Workspace = game:GetService("Workspace")
 local TweenService = game:GetService("TweenService")
-local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService") -- ## ADDED ##
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local BombToolClient = require(Modules:WaitForChild("BombToolClient"))
 local FrameManager = require(Modules:WaitForChild("FrameManager"))
+local ClientZoneService = require(Modules:WaitForChild("ClientZoneService"))
 local PickaxesConfigurations = require(Modules:WaitForChild("PickaxesConfigurations"))
 
 -- References for Animation, Sounds & UI
@@ -25,9 +25,13 @@ local player = Players.LocalPlayer
 
 local MINING_RANGE = 25 
 local lastSwingTime = 0
-local activeToolConnection: RBXScriptConnection? = nil
 local currentAnimationTrack: AnimationTrack? = nil 
 local currentTool: Tool? = nil
+local currentToolConnections: {RBXScriptConnection} = {}
+local backpackConnections: {RBXScriptConnection} = {}
+local cameraViewportConnection: RBXScriptConnection? = nil
+local currentCameraConnection: RBXScriptConnection? = nil
+local mobileBombCooldownToken = 0
 
 local activeHighlights: {[BasePart]: SelectionBox} = {}
 local highlightLoop: RBXScriptConnection? = nil
@@ -51,6 +55,14 @@ local mobileBombButtonScale: UIScale? = nil
 local mobileBombButtonIcon: ImageLabel? = nil
 local trackedFrames: {[Instance]: RBXScriptConnection} = {}
 local attemptMine: (tool: Tool) -> ()
+local updateMobileBombButtonState: () -> ()
+
+local function disconnectConnections(connections: {RBXScriptConnection})
+	for _, connection in ipairs(connections) do
+		connection:Disconnect()
+	end
+	table.clear(connections)
+end
 
 local function getCharacterBombTool(): Tool?
 	local character = player.Character
@@ -146,6 +158,7 @@ local function shouldShowMobileBombButton(): boolean
 	return UserInputService.TouchEnabled
 		and not UserInputService.KeyboardEnabled
 		and not UserInputService.MouseEnabled
+		and ClientZoneService.IsInMineZone()
 		and not isAnyBlockingFrameVisible()
 end
 
@@ -191,6 +204,88 @@ local function layoutMobileBombButton()
 	button.Position = UDim2.new(1, safeAreaRightInset - marginRight - MOBILE_BOMB_EXTRA_LEFT_OFFSET, 1, safeAreaBottomInset - marginBottom - MOBILE_BOMB_EXTRA_UP_OFFSET)
 end
 
+local function scheduleMobileBombButtonCooldownRefresh(delaySeconds: number)
+	mobileBombCooldownToken += 1
+	local refreshToken = mobileBombCooldownToken
+	task.delay(math.max(0, delaySeconds), function()
+		if refreshToken == mobileBombCooldownToken then
+			updateMobileBombButtonState()
+		end
+	end)
+end
+
+local function bindTrackedBombTool(tool: Tool?)
+	if currentTool == tool then
+		return
+	end
+
+	disconnectConnections(currentToolConnections)
+	currentTool = tool
+
+	if not tool then
+		mobileBombCooldownToken += 1
+		return
+	end
+
+	table.insert(currentToolConnections, tool:GetAttributeChangedSignal("CooldownEndsAt"):Connect(updateMobileBombButtonState))
+	table.insert(currentToolConnections, tool:GetAttributeChangedSignal("CooldownDuration"):Connect(updateMobileBombButtonState))
+	table.insert(currentToolConnections, tool.AncestryChanged:Connect(function()
+		if not tool.Parent then
+			updateMobileBombButtonState()
+		end
+	end))
+end
+
+local function bindBackpackTracking()
+	disconnectConnections(backpackConnections)
+
+	local backpack = player:FindFirstChildOfClass("Backpack")
+	if not backpack then
+		return
+	end
+
+	table.insert(backpackConnections, backpack.ChildAdded:Connect(function(child)
+		if child:IsA("Tool") and PickaxesConfigurations.Pickaxes[child.Name] then
+			updateMobileBombButtonState()
+		end
+	end))
+
+	table.insert(backpackConnections, backpack.ChildRemoved:Connect(function(child)
+		if child:IsA("Tool") and PickaxesConfigurations.Pickaxes[child.Name] then
+			updateMobileBombButtonState()
+		end
+	end))
+end
+
+local function bindCameraViewportTracking()
+	if cameraViewportConnection then
+		cameraViewportConnection:Disconnect()
+		cameraViewportConnection = nil
+	end
+
+	local camera = Workspace.CurrentCamera
+	if not camera then
+		return
+	end
+
+	cameraViewportConnection = camera:GetPropertyChangedSignal("ViewportSize"):Connect(function()
+		updateMobileBombButtonState()
+	end)
+end
+
+local function bindCurrentCameraTracking()
+	if currentCameraConnection then
+		currentCameraConnection:Disconnect()
+	end
+
+	currentCameraConnection = Workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
+		bindCameraViewportTracking()
+		updateMobileBombButtonState()
+	end)
+
+	bindCameraViewportTracking()
+end
+
 local function animateMobileBombButtonPress()
 	local scale = mobileBombButtonScale
 	if not scale then
@@ -206,7 +301,7 @@ local function animateMobileBombButtonPress()
 	end)
 end
 
-local function updateMobileBombButtonState()
+function updateMobileBombButtonState()
 	local button = mobileBombButton
 	local icon = mobileBombButtonIcon
 	if not button or not icon then
@@ -218,14 +313,15 @@ local function updateMobileBombButtonState()
 	local tool = currentTool
 	if not tool or not tool.Parent then
 		tool = getAvailableBombTool()
-		currentTool = tool
 	end
+	bindTrackedBombTool(tool)
 
 	local config = tool and PickaxesConfigurations.Pickaxes[tool.Name] or nil
 	local shouldShow = shouldShowMobileBombButton()
 
 	button.Visible = shouldShow
 	if not shouldShow then
+		mobileBombCooldownToken += 1
 		return
 	end
 
@@ -247,6 +343,12 @@ local function updateMobileBombButtonState()
 	local glow = button:FindFirstChild("Glow")
 	if glow and glow:IsA("Frame") then
 		glow.BackgroundTransparency = if isReady then 0.82 else if hasBomb then 0.9 else 0.93
+	end
+
+	if hasBomb and remainingCooldown > 0.02 then
+		scheduleMobileBombButtonCooldownRefresh(remainingCooldown + 0.05)
+	else
+		mobileBombCooldownToken += 1
 	end
 end
 
@@ -288,7 +390,7 @@ local function bindFrameVisibilityTracking()
 end
 
 local function tryActivateBombFromButton(tool: Tool)
-	currentTool = tool
+	bindTrackedBombTool(tool)
 	if BombToolClient.TryActivate(tool) then
 		animateMobileBombButtonPress()
 	end
@@ -747,13 +849,13 @@ end
 local function onCharacterAdded(character: Model)
 	local humanoid = character:WaitForChild("Humanoid") :: Humanoid
 	local animator = humanoid:WaitForChild("Animator") :: Animator
-	currentTool = nil
+	bindTrackedBombTool(nil)
 	updateMobileBombButtonState()
 	ensureMobileBombButton()
 
 	local function handleToolEquipped(child: Instance)
 		if child:IsA("Tool") and PickaxesConfigurations.Pickaxes[child.Name] then
-			currentTool = child
+			bindTrackedBombTool(child)
 			updateMobileBombButtonState()
 
 			local handle = child:WaitForChild("Handle", 2) :: BasePart
@@ -767,9 +869,6 @@ local function onCharacterAdded(character: Model)
 					existingTimer.Enabled = false
 				end
 			end
-
-			if activeToolConnection then activeToolConnection:Disconnect() end
-			activeToolConnection = nil
 
 			if currentAnimationTrack then
 				currentAnimationTrack:Stop()
@@ -790,14 +889,10 @@ local function onCharacterAdded(character: Model)
 	character.ChildRemoved:Connect(function(child)
 		if child:IsA("Tool") then
 			if child == currentTool then
-				currentTool = nil
+				bindTrackedBombTool(nil)
 				updateMobileBombButtonState()
 			end
 
-			if activeToolConnection then 
-				activeToolConnection:Disconnect() 
-				activeToolConnection = nil 
-			end
 			if currentAnimationTrack then
 				currentAnimationTrack:Stop()
 				currentAnimationTrack:Destroy()
@@ -821,13 +916,27 @@ player.CharacterAdded:Connect(onCharacterAdded)
 if player.Character then onCharacterAdded(player.Character) end
 
 bindFrameVisibilityTracking()
-
-RunService.RenderStepped:Connect(function()
-	if shouldShowMobileBombButton() then
-		ensureMobileBombButton()
-	end
-
+bindBackpackTracking()
+bindCurrentCameraTracking()
+ClientZoneService.Changed:Connect(function()
 	updateMobileBombButtonState()
 end)
+
+player.CharacterAdded:Connect(function()
+	task.defer(function()
+		bindBackpackTracking()
+		updateMobileBombButtonState()
+	end)
+end)
+
+player.CharacterRemoving:Connect(function()
+	bindTrackedBombTool(nil)
+	updateMobileBombButtonState()
+end)
+
+if shouldShowMobileBombButton() then
+	ensureMobileBombButton()
+end
+updateMobileBombButtonState()
 
 print("[MiningController] Juiced Mining + Mobile Tap Support Active!")

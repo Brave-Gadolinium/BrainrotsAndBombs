@@ -41,6 +41,7 @@ local hudWheelNotification = hudWheel:FindFirstChild("Notification") :: Frame
 local RequestSpin = ReplicatedStorage:WaitForChild("Events"):WaitForChild("RequestSpin") :: RemoteFunction
 local ReportAnalyticsIntent = ReplicatedStorage:WaitForChild("Events"):WaitForChild("ReportAnalyticsIntent") :: RemoteEvent
 local isSpinning = false
+local productLabelsLoaded = false
 local FREE_SPIN_COOLDOWN_SECONDS = math.max(0, tonumber(Config.FreeSpinCooldownSeconds) or (15 * 60))
 local DEFAULT_REWARD_IMAGE_COLOR = Color3.new(1, 1, 1)
 local ITEM_REWARD_IMAGE_COLOR = Color3.new(0, 0, 0)
@@ -229,13 +230,15 @@ spinButton.MouseButton1Click:Connect(function()
 end)
 
 local function updateProductLabels()
+	if productLabelsLoaded then
+		return
+	end
+
+	productLabelsLoaded = true
+
 	task.spawn(function()
 		local s1, p1 = pcall(function() return MarketplaceService:GetProductInfo(ProductConfigs.Products["SpinsX3"], Enum.InfoType.Product) end)
 		local s2, p2 = pcall(function() return MarketplaceService:GetProductInfo(ProductConfigs.Products["SpinsX9"], Enum.InfoType.Product) end)
-
-
-		print("Product Info - SpinsX3:", s1, p1)
-		print("Product Info - SpinsX9:", s2, p2)
 		
 		if s1 and robuxButton1 then
 			local btnText = robuxButton1:FindFirstChild("Text") :: TextLabel
@@ -271,7 +274,6 @@ robuxButton2.Activated:Connect(function()
 end)
 
 -- [ INIT ]
-updateProductLabels()
 task.spawn(function()
 	while player:GetAttribute("SpinNumber") == nil do task.wait(0.5) end
 	while true do 
@@ -286,8 +288,13 @@ wheelFrame:GetPropertyChangedSignal("Visible"):Connect(function()
 	if wheelFrame.Visible then
 		ReportAnalyticsIntent:FireServer("DailySpinWheelOpened")
 		reportStoreOpened("daily_spin")
+		updateProductLabels()
 	end
 end)
+
+if wheelFrame.Visible then
+	updateProductLabels()
+end
 
 local totalWeight = Config.GetTotalWeight() 
 

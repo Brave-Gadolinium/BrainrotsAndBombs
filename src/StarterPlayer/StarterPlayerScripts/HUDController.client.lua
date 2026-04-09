@@ -14,8 +14,10 @@ local ItemConfigurations = require(ReplicatedStorage:WaitForChild("Modules"):Wai
 local ProductConfigurations = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("ProductConfigurations"))
 local NotificationManager = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("NotificationManager")) 
 local Constants = require(ReplicatedStorage.Modules.Constants)
+local FrameManager = require(ReplicatedStorage.Modules.FrameManager)
 
 local player = Players.LocalPlayer
+local hudInitialized = false
 
 -- Animation Config
 local HOVER_SCALE = 1.05
@@ -40,6 +42,11 @@ local function setupButtonAnimation(button: GuiButton)
 end
 
 local function setupHUD()
+	if hudInitialized then
+		return
+	end
+	hudInitialized = true
+
 	local playerGui = player:WaitForChild("PlayerGui")
 	local gui = playerGui:WaitForChild("GUI")
 	local hud = gui:WaitForChild("HUD")
@@ -91,6 +98,8 @@ local function setupHUD()
 	end
 
 	local function updateSessionTimer()
+		timeLabel.Visible = not FrameManager.isAnyFrameOpen()
+
 		local isEnded = Workspace:GetAttribute("SessionEnded") == true
 		local message = Workspace:GetAttribute("SessionMessage")
 		local remaining = Workspace:GetAttribute("SessionTimeRemaining")
@@ -117,50 +126,127 @@ local function setupHUD()
 	Workspace:GetAttributeChangedSignal("SessionTimeRemaining"):Connect(updateSessionTimer)
 	Workspace:GetAttributeChangedSignal("SessionEnded"):Connect(updateSessionTimer)
 	Workspace:GetAttributeChangedSignal("SessionMessage"):Connect(updateSessionTimer)
+	FrameManager.Changed:Connect(updateSessionTimer)
 	updateSessionTimer()
 
-	-- Start loop to calculate Offline/Hour dynamically
-	task.spawn(function()
-		while true do
-			local totalIncomePerSec = 0
-			local plotName = "Plot_" .. player.Name
-			local plot = Workspace:FindFirstChild(plotName)
+	local trackedVisualItems: {[Model]: number} = {}
+	local plotConnections: {RBXScriptConnection} = {}
+	local watchedPlot: Model? = nil
+	local baseIncomePerSec = 0
 
-			if plot then
-				-- Read all spawned physical items to calculate true income
-				for _, desc in ipairs(plot:GetDescendants()) do
-					if desc:IsA("Model") and desc.Name == "VisualItem" then
-						local name = desc:GetAttribute("OriginalName")
-						local mut = desc:GetAttribute("Mutation") or "Normal"
-						local lvl = desc:GetAttribute("Level") or 1
+	local function disconnectConnections(connections: {RBXScriptConnection})
+		for _, connection in ipairs(connections) do
+			connection:Disconnect()
+		end
+		table.clear(connections)
+	end
 
-						local itemData = ItemConfigurations.GetItemData(name)
-						if itemData then
-							local base = itemData.Income or 0
-							local mutMult = MUTATION_MULTIPLIERS[mut] or 1
-							local lvlMult = INCOME_SCALING ^ (lvl - 1)
-							totalIncomePerSec += (base * mutMult * lvlMult)
-						end
-					end
-				end
+	local function getVisualItemIncome(model: Model): number
+		local name = model:GetAttribute("OriginalName")
+		local mut = model:GetAttribute("Mutation") or "Normal"
+		local lvl = model:GetAttribute("Level") or 1
+		local itemData = ItemConfigurations.GetItemData(name)
+		if not itemData then
+			return 0
+		end
+
+		local base = itemData.Income or 0
+		local mutMult = MUTATION_MULTIPLIERS[mut] or 1
+		local lvlMult = INCOME_SCALING ^ (lvl - 1)
+		return base * mutMult * lvlMult
+	end
+
+	local function updateOfflineIncomeLabel()
+		local reb = player:GetAttribute("Rebirths") or 0
+		local rebMult = 1 + (reb * 0.5)
+		local isVip = player:GetAttribute("IsVIP") == true
+		local vipMult = isVip and 1.5 or 1
+		local offlinePerHour = baseIncomePerSec * rebMult * vipMult * 3600
+
+		if offlineLabel then
+			offlineLabel.Text = "Offline/Hour: $" .. NumberFormatter.Format(offlinePerHour)
+		end
+	end
+
+	local function trackVisualItem(model: Model)
+		if trackedVisualItems[model] ~= nil then
+			return
+		end
+
+		local incomePerSec = getVisualItemIncome(model)
+		trackedVisualItems[model] = incomePerSec
+		baseIncomePerSec += incomePerSec
+		updateOfflineIncomeLabel()
+	end
+
+	local function untrackVisualItem(model: Model)
+		local incomePerSec = trackedVisualItems[model]
+		if incomePerSec == nil then
+			return
+		end
+
+		trackedVisualItems[model] = nil
+		baseIncomePerSec = math.max(0, baseIncomePerSec - incomePerSec)
+		updateOfflineIncomeLabel()
+	end
+
+	local function bindPlot(plot: Model?)
+		disconnectConnections(plotConnections)
+		watchedPlot = plot
+		baseIncomePerSec = 0
+		table.clear(trackedVisualItems)
+
+		if not plot then
+			updateOfflineIncomeLabel()
+			return
+		end
+
+		table.insert(plotConnections, plot.DescendantAdded:Connect(function(descendant)
+			if descendant:IsA("Model") and descendant.Name == "VisualItem" then
+				trackVisualItem(descendant)
 			end
+		end))
 
-			-- Apply Global Multipliers
-			local reb = player:GetAttribute("Rebirths") or 0
-			local rebMult = 1 + (reb * 0.5)
-			local isVip = player:GetAttribute("IsVIP") == true
-			local vipMult = isVip and 1.5 or 1
-
-			totalIncomePerSec = totalIncomePerSec * rebMult * vipMult
-			local offlinePerHour = totalIncomePerSec * 3600
-
-			if offlineLabel then
-				offlineLabel.Text = "Offline/Hour: $" .. NumberFormatter.Format(offlinePerHour)
+		table.insert(plotConnections, plot.DescendantRemoving:Connect(function(descendant)
+			if descendant:IsA("Model") and descendant.Name == "VisualItem" then
+				untrackVisualItem(descendant)
 			end
+		end))
 
-			task.wait(2) -- Recalculate every 2 seconds to be highly efficient
+		for _, descendant in ipairs(plot:GetDescendants()) do
+			if descendant:IsA("Model") and descendant.Name == "VisualItem" then
+				trackVisualItem(descendant)
+			end
+		end
+
+		updateOfflineIncomeLabel()
+	end
+
+	local plotName = "Plot_" .. player.Name
+	local function refreshPlotBinding()
+		local plot = Workspace:FindFirstChild(plotName)
+		if plot and plot:IsA("Model") then
+			bindPlot(plot)
+		else
+			bindPlot(nil)
+		end
+	end
+
+	Workspace.ChildAdded:Connect(function(child)
+		if child.Name == plotName then
+			refreshPlotBinding()
 		end
 	end)
+
+	Workspace.ChildRemoved:Connect(function(child)
+		if child == watchedPlot or child.Name == plotName then
+			refreshPlotBinding()
+		end
+	end)
+
+	player:GetAttributeChangedSignal("Rebirths"):Connect(updateOfflineIncomeLabel)
+	player:GetAttributeChangedSignal("IsVIP"):Connect(updateOfflineIncomeLabel)
+	refreshPlotBinding()
 
 	-- 2. SETUP RANDOM ITEM BUTTON (GACHA)
 	local rightPanel = hud:WaitForChild("Right")

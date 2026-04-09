@@ -4,6 +4,8 @@
 local GuiService = game:GetService("GuiService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
+local Debris = game:GetService("Debris")
 
 local FrameManager = require(ReplicatedStorage.Modules:WaitForChild("FrameManager"))
 
@@ -11,6 +13,7 @@ local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 local gui = playerGui:WaitForChild("GUI")
 local frames = gui:WaitForChild("Frames")
+local globalSounds = Workspace:FindFirstChild("Sounds")
 
 local playtimeRewardsRemotes = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("PlaytimeRewards")
 local getStatusRemote = playtimeRewardsRemotes:WaitForChild("GetStatus") :: RemoteFunction
@@ -26,6 +29,22 @@ local cachedFrame: GuiObject? = nil
 local hasInterceptedThisSession = false
 local pendingMenuIntercept = false
 local menuOpenedAt = 0
+
+local function playRewardPromptSound()
+	if not globalSounds or globalSounds.Parent == nil then
+		globalSounds = Workspace:FindFirstChild("Sounds")
+	end
+
+	local soundTemplate = globalSounds and globalSounds:FindFirstChild("Reward")
+	if not soundTemplate or not soundTemplate:IsA("Sound") then
+		return
+	end
+
+	local rewardSound = soundTemplate:Clone()
+	rewardSound.Parent = Workspace.CurrentCamera or Workspace
+	rewardSound:Play()
+	Debris:AddItem(rewardSound, math.max(rewardSound.TimeLength, 0.1) + 0.1)
+end
 
 local function isTextInstance(instance: Instance?): boolean
 	return instance ~= nil and (instance:IsA("TextLabel") or instance:IsA("TextButton"))
@@ -291,6 +310,7 @@ local function showPromptIfEligible()
 	end
 
 	ensureBindings()
+	playRewardPromptSound()
 	FrameManager.open(rewardFrame.Name)
 end
 

@@ -1,77 +1,70 @@
-local Cache = {}
-
-local MarketplaceService = game:GetService("MarketplaceService")
-local RunService = game:GetService("RunService")
-local LocalizationService = game:GetService("LocalizationService")
 local CollectionService = game:GetService("CollectionService")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
 
-local Player = game.Players.LocalPlayer
-local Character = Player.Character or Player.CharacterAdded:Wait()
-local Humanoid = Character:WaitForChild("Humanoid")
+local ROTATE_DISTANCE_CULL = 200
+local ROTATION_SPEED = 0.03
+local FLOAT_SPEED = 2
+local FLOAT_HEIGHT = 0.5
 
-local checkCount = 10
-local checkLoading = false
-local debounce = false
+type RotateState = {
+	StartingCFrame: CFrame,
+	Rotation: number,
+	Time: number,
+}
 
-while not checkLoading do
-	for i, v in pairs(CollectionService:GetTagged("Rotate")) do
-		if i == checkCount then
-			checkLoading = true
-		end
+local rotateStates: {[Model]: RotateState} = {}
+
+local function addRotateModel(instance: Instance)
+	if not instance:IsA("Model") or rotateStates[instance] then
+		return
 	end
-	task.wait(1)
+
+	rotateStates[instance] = {
+		StartingCFrame = instance:GetPivot(),
+		Rotation = 0,
+		Time = 0,
+	}
 end
 
-for i, v in pairs(CollectionService:GetTagged("Rotate")) do
-	
-	-- local ProductId = v:GetAttribute("Product")
-	--if not ProductId then continue end
+local function removeRotateModel(instance: Instance)
+	if instance:IsA("Model") then
+		rotateStates[instance] = nil
+	end
+end
 
-	local BikeModel = v
-	local StartingCFrame = BikeModel:GetPivot()
+for _, instance in ipairs(CollectionService:GetTagged("Rotate")) do
+	addRotateModel(instance)
+end
 
-	-- v.PrimaryPart.Touched:Connect(function(HitPart)
+CollectionService:GetInstanceAddedSignal("Rotate"):Connect(addRotateModel)
+CollectionService:GetInstanceRemovedSignal("Rotate"):Connect(removeRotateModel)
 
-	-- 	if HitPart.Parent:FindFirstChild("Humanoid") == nil then return end
+RunService.RenderStepped:Connect(function(deltaTime)
+	local camera = Workspace.CurrentCamera
+	if not camera then
+		return
+	end
 
-	-- 	local Player = game.Players:GetPlayerFromCharacter(HitPart.Parent)
-	-- 	if not Cache[Player] then 
-	-- 		Cache[Player] = 0
-	-- 	end
-		
-	-- 	if debounce == false then
-	-- 		debounce = true
-	-- 	else
-	-- 		return
-	-- 	end
+	local cameraPosition = camera.CFrame.Position
 
-
-	-- 	if Player == game.Players.LocalPlayer then
-	-- 		debounce = true
-	-- 		MarketplaceService:PromptProductPurchase(Player, ProductId)
-	-- 	end
-		
-	-- 	task.delay(1, function()
-	-- 		debounce = false
-	-- 	end)
-	-- end)
-
-	local Rotation = 0
-	local Time = 0
-
-	game:GetService("RunService").RenderStepped:Connect(function(deltaTime)
-		if (game.Workspace.Camera.CFrame.Position - StartingCFrame.Position).Magnitude <= 200 then
-			Rotation = Rotation + 0.03
-			Time += deltaTime
-			local FloatHeight = math.sin(Time * 2) * 0.5
-
-			local NewCFrame =
-				CFrame.new(
-					StartingCFrame.Position + Vector3.new(0, FloatHeight, 0)
-				)
-				* CFrame.Angles(0, Rotation, 0)
-
-			BikeModel:PivotTo(NewCFrame)
+	for model, state in pairs(rotateStates) do
+		if not model.Parent then
+			rotateStates[model] = nil
+			continue
 		end
-	end)
-end
+
+		if (cameraPosition - state.StartingCFrame.Position).Magnitude > ROTATE_DISTANCE_CULL then
+			continue
+		end
+
+		state.Rotation += ROTATION_SPEED
+		state.Time += deltaTime
+
+		local floatHeight = math.sin(state.Time * FLOAT_SPEED) * FLOAT_HEIGHT
+		local nextCFrame = CFrame.new(state.StartingCFrame.Position + Vector3.new(0, floatHeight, 0))
+			* CFrame.Angles(0, state.Rotation, 0)
+
+		model:PivotTo(nextCFrame)
+	end
+end)

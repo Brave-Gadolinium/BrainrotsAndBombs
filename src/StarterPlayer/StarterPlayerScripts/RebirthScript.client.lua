@@ -491,13 +491,25 @@ local function setRobuxPrice()
 		return
 	end
 
+	if rootUI.Visible ~= true then
+		return
+	end
+
+	local cachedPrice = robuxPriceLabel:GetAttribute("CachedRobuxPrice")
+	if type(cachedPrice) == "string" and cachedPrice ~= "" then
+		robuxPriceLabel.Text = cachedPrice
+		return
+	end
+
 	task.spawn(function()
 		local ok, info = pcall(function()
 			return MarketplaceService:GetProductInfo(skipProductId, Enum.InfoType.Product)
 		end)
 
 		if ok and info and info.PriceInRobux then
-			robuxPriceLabel.Text = tostring(info.PriceInRobux)
+			local priceText = tostring(info.PriceInRobux)
+			robuxPriceLabel:SetAttribute("CachedRobuxPrice", priceText)
+			robuxPriceLabel.Text = priceText
 		end
 	end)
 end
@@ -636,6 +648,7 @@ end)
 
 rootUI:GetPropertyChangedSignal("Visible"):Connect(function()
 	if rootUI.Visible then
+		setRobuxPrice()
 		ReportAnalyticsIntent:FireServer("RebirthUIOpened")
 		reportStoreOpened("rebirth")
 		queueRefresh()

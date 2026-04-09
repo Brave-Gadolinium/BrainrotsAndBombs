@@ -213,6 +213,14 @@ local function setButtonText(button: GuiButton?, text: string)
 	end
 end
 
+local function isPickaxesFrameVisible(): boolean
+	local playerGui = player:FindFirstChild("PlayerGui")
+	local mainGui = playerGui and playerGui:FindFirstChild("GUI")
+	local frames = mainGui and mainGui:FindFirstChild("Frames")
+	local pickaxesFrame = frames and frames:FindFirstChild("Pickaxes")
+	return pickaxesFrame ~= nil and pickaxesFrame:IsA("GuiObject") and pickaxesFrame.Visible
+end
+
 local function getRobuxPriceText(productId: number?): string?
 	if type(productId) ~= "number" or productId <= 0 then
 		return nil
@@ -221,6 +229,10 @@ local function getRobuxPriceText(productId: number?): string?
 	local cachedPrice = robuxPriceCache[productId]
 	if cachedPrice then
 		return cachedPrice
+	end
+
+	if not isPickaxesFrameVisible() then
+		return nil
 	end
 
 	local success, info = pcall(function()
@@ -264,17 +276,17 @@ local function getPickaxesFrame(): Frame
 	return frames:WaitForChild("Pickaxes") :: Frame
 end
 
-local function getScrollingFrame(pickaxesFrame: Frame): Frame
+local function getScrollingFrame(pickaxesFrame: Frame): ScrollingFrame
 	local scrollingFrame = pickaxesFrame:FindFirstChild("ScrollingFrame") or pickaxesFrame:FindFirstChild("Scrolling")
-	return scrollingFrame :: Frame
+	return scrollingFrame :: ScrollingFrame
 end
 
-local function getShowcaseFrame(pickaxesFrame: Frame, scrollingFrame: Frame): Frame
+local function getShowcaseFrame(pickaxesFrame: Frame, scrollingFrame: GuiObject): Frame
 	local showcaseFrame = scrollingFrame:FindFirstChild("Showcase") or pickaxesFrame:FindFirstChild("Showcase")
 	return showcaseFrame :: Frame
 end
 
-local function getTemplate(scrollingFrame: Frame): GuiObject
+local function getTemplate(scrollingFrame: GuiObject): GuiObject
 	return scrollingFrame:WaitForChild("PickaxeTemplate") :: GuiObject
 end
 
@@ -317,14 +329,31 @@ local function getNextAvailableId(ownedPickaxes: {[string]: boolean}): string?
 	return nil
 end
 
+local function getHighestOwnedPickaxeId(sortedPickaxes: {{Id: string, Data: any}}): string?
+	for index = #sortedPickaxes, 1, -1 do
+		local pickaxeId = sortedPickaxes[index].Id
+		if currentOwnedPickaxes[pickaxeId] == true then
+			return pickaxeId
+		end
+	end
+
+	return nil
+end
+
 local function shouldPreferNextAvailablePickaxe(): boolean
 	local onboardingStep = tonumber(player:GetAttribute("OnboardingStep")) or 0
 	return onboardingStep >= 7 and onboardingStep <= 8
 end
 
-local function resolveAutoSelectedPickaxeId(sortedPickaxes: {{Id: string, Data: any}}): string
+local function resolveAutoSelectedPickaxeId(sortedPickaxes: {{Id: string, Data: any}}, preferHighestOwned: boolean?): string
+	local highestOwnedPickaxeId = getHighestOwnedPickaxeId(sortedPickaxes)
+
 	if shouldPreferNextAvailablePickaxe() and currentNextAvailableId and PickaxesConfigurations.Pickaxes[currentNextAvailableId] then
 		return currentNextAvailableId
+	end
+
+	if preferHighestOwned and highestOwnedPickaxeId and PickaxesConfigurations.Pickaxes[highestOwnedPickaxeId] then
+		return highestOwnedPickaxeId
 	end
 
 	if selectedPickaxeId and PickaxesConfigurations.Pickaxes[selectedPickaxeId] then
@@ -335,7 +364,30 @@ local function resolveAutoSelectedPickaxeId(sortedPickaxes: {{Id: string, Data: 
 		return currentEquippedPickaxe
 	end
 
-	return currentNextAvailableId or sortedPickaxes[#sortedPickaxes].Id
+	return highestOwnedPickaxeId or currentNextAvailableId or sortedPickaxes[#sortedPickaxes].Id
+end
+
+local function scrollToPickaxeEntry(scrollingFrame: ScrollingFrame, entry: GuiObject)
+	local function applyScroll()
+		if not scrollingFrame.Parent or not entry.Parent then
+			return
+		end
+
+		local windowHeight = scrollingFrame.AbsoluteWindowSize.Y
+		if windowHeight <= 0 then
+			windowHeight = scrollingFrame.AbsoluteSize.Y
+		end
+
+		local entryTop = entry.AbsolutePosition.Y - scrollingFrame.AbsolutePosition.Y + scrollingFrame.CanvasPosition.Y
+		local maxCanvasY = math.max(0, scrollingFrame.AbsoluteCanvasSize.Y - windowHeight)
+		local targetY = math.clamp(math.floor(entryTop - 12 + 0.5), 0, maxCanvasY)
+		scrollingFrame.CanvasPosition = Vector2.new(scrollingFrame.CanvasPosition.X, targetY)
+	end
+
+	task.defer(function()
+		applyScroll()
+		task.defer(applyScroll)
+	end)
 end
 
 local function bindTemplateSelection(template: GuiObject, onSelected: () -> ())
@@ -526,7 +578,7 @@ local function bindShowcaseButtons(pickaxesFrame: Frame)
 	end
 end
 
-local function initializeUI()
+local function initializeUI(preferHighestOwned: boolean?)
 	local pickaxesFrame = getPickaxesFrame()
 	local scrollingFrame = getScrollingFrame(pickaxesFrame)
 	local template = getTemplate(scrollingFrame)
@@ -562,7 +614,9 @@ local function initializeUI()
 		return
 	end
 
-	local pickaxeToAutoSelect = resolveAutoSelectedPickaxeId(sortedPickaxes)
+	local pickaxeToAutoSelect = resolveAutoSelectedPickaxeId(sortedPickaxes, preferHighestOwned)
+	local pickaxeToScrollTo = if preferHighestOwned then getHighestOwnedPickaxeId(sortedPickaxes) or pickaxeToAutoSelect else nil
+	local scrollTargetEntry: GuiObject? = nil
 
 	for index, pickaxe in ipairs(sortedPickaxes) do
 		local newTemplate = template:Clone()
@@ -636,16 +690,24 @@ local function initializeUI()
 		if pickaxe.Id == pickaxeToAutoSelect then
 			updateShowcase(pickaxesFrame, pickaxe.Id, false)
 		end
+
+		if pickaxe.Id == pickaxeToScrollTo then
+			scrollTargetEntry = newTemplate
+		end
 	end
 
 	bindShowcaseButtons(pickaxesFrame)
+
+	if scrollTargetEntry then
+		scrollToPickaxeEntry(scrollingFrame, scrollTargetEntry)
+	end
 end
 
 task.spawn(function()
 	local pickaxesFrame = getPickaxesFrame()
 	pickaxesFrame:GetPropertyChangedSignal("Visible"):Connect(function()
 		if pickaxesFrame.Visible then
-			initializeUI()
+			initializeUI(true)
 			reportAnalyticsIntent:FireServer("BombShopOpened")
 			reportStoreOpened("pickaxes")
 		end
@@ -654,12 +716,12 @@ end)
 
 local updateUIEvent = Events:WaitForChild("UpdatePickaxeUI") :: RemoteEvent
 updateUIEvent.OnClientEvent:Connect(function()
-	initializeUI()
+	initializeUI(false)
 end)
 
-initializeUI()
+initializeUI(false)
 
 player.CharacterAdded:Connect(function()
 	task.wait(0.5)
-	initializeUI()
+	initializeUI(false)
 end)

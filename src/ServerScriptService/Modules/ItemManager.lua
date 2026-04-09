@@ -60,15 +60,42 @@ local function ensureTimerFinishEvent(): BindableEvent
 	return finishTime :: BindableEvent
 end
 
+local function ensureRoundStartedEvent(): BindableEvent
+	local remotesFolder = ReplicatedStorage:FindFirstChild("Remotes")
+	if not remotesFolder then
+		remotesFolder = Instance.new("Folder")
+		remotesFolder.Name = "Remotes"
+		remotesFolder.Parent = ReplicatedStorage
+	end
+
+	local timerFolder = remotesFolder:FindFirstChild("Timer")
+	if not timerFolder then
+		timerFolder = Instance.new("Folder")
+		timerFolder.Name = "Timer"
+		timerFolder.Parent = remotesFolder
+	end
+
+	local roundStarted = timerFolder:FindFirstChild("RoundStarted")
+	if not roundStarted then
+		roundStarted = Instance.new("BindableEvent")
+		roundStarted.Name = "RoundStarted"
+		roundStarted.Parent = timerFolder
+	end
+
+	return roundStarted :: BindableEvent
+end
+
 -- [ CONFIGURATION ]
 local INCOME_SCALING = Constants.INCOME_SCALING
 local RESPAWN_TIME = Constants.RESPAWN_TIME
 local SESSION_DURATION = Constants.SESSION_DURATION
 local SESSION_END_MESSAGE_DURATION = Constants.SESSION_END_MESSAGE_DURATION
-local MAX_ITEMS_PER_MINE = Constants.MAX_ITEMS_PER_MINE 
 local MIN_ITEM_SPACING = Constants.MIN_ITEM_SPACING
-local ZONE_ITEM_CAP_MULTIPLIERS = Constants.ZONE_ITEM_CAP_MULTIPLIERS or {}
+local ZONE_ITEM_CAPS = Constants.ZONE_ITEM_CAPS or {}
+local ITEM_SPAWN_BATCH_SIZE = math.max(1, tonumber(Constants.ITEM_SPAWN_BATCH_SIZE) or 8)
+local ITEM_SPAWN_BATCH_YIELD = math.max(0, tonumber(Constants.ITEM_SPAWN_BATCH_YIELD) or 0.03)
 local FinishTime = ensureTimerFinishEvent()
+local RoundStarted = ensureRoundStartedEvent()
 
 local SPAWNER_TIERS = Constants.SPAWNER_TIERS
 
@@ -84,6 +111,11 @@ local fallbackItemTemplates: {[string]: Model} = {}
 local VISUAL_ITEM_VERTICAL_OFFSET = -0.75
 local FALLBACK_ITEM_SIZE = Vector3.new(2.4, 2.4, 2.4)
 local WORLD_ITEM_PICKUP_DISTANCE = 16
+local EVENT_WORLD_ITEM_TAG = "EventBrainrotWorldItem"
+local queuedMineZones: {[BasePart]: boolean} = {}
+local mineSpawnQueue: {BasePart} = {}
+local spawnWorkerRunning = false
+local pendingRoundRefill = false
 
 local function getConcreteItemTemplate(itemName: string, mutation: string?): Model?
 	local normalFolder = ItemsFolder:FindFirstChild("Normal")
@@ -207,6 +239,14 @@ local function isSpawnedWorldItem(instance: Instance): boolean
 		and instance:GetAttribute("IsSpawnedItem") == true
 end
 
+local function syncWorldItemTags(itemModel: Model)
+	if itemModel:GetAttribute(itemAttributes.IsEventBrainrot) == true then
+		CollectionService:AddTag(itemModel, EVENT_WORLD_ITEM_TAG)
+	else
+		CollectionService:RemoveTag(itemModel, EVENT_WORLD_ITEM_TAG)
+	end
+end
+
 local function clearSessionWorldItems()
 	for _, mineZonePart in ipairs(MinesFolder:GetChildren()) do
 		if mineZonePart:IsA("BasePart") then
@@ -296,6 +336,7 @@ local function createWorldItemModel(itemName: string, mutation: string, rarity: 
 	newItem:SetAttribute("Level", level or 1)
 	newItem:SetAttribute("ExpiresAt", Workspace:GetServerTimeNow() + getRemainingSessionLifetime())
 	applyExtraAttributes(newItem, extraAttributes)
+	syncWorldItemTags(newItem)
 
 	for _, part in ipairs(newItem:GetDescendants()) do
 		if part:IsA("BasePart") then
@@ -394,8 +435,7 @@ local function getRarityFromTier(tierName: string): string
 end
 
 local function getTargetItemCountForMine(mineZonePart: BasePart): number
-	local multiplier = tonumber(ZONE_ITEM_CAP_MULTIPLIERS[mineZonePart.Name]) or 1
-	return math.max(0, math.floor(MAX_ITEMS_PER_MINE * multiplier))
+	return math.max(0, math.floor(tonumber(ZONE_ITEM_CAPS[mineZonePart.Name]) or 0))
 end
 
 -- [ VISUALS & GUI ]
@@ -707,6 +747,7 @@ function ItemManager.SpawnInMine(mineZonePart: BasePart)
 
 	local tier = mineZonePart.Name 
 	local rarity = getRarityFromTier(tier)
+	local spawnedThisPass = 0
 
 	for i = 1, itemsToSpawn do
 		local maxAttempts = 15
@@ -760,10 +801,13 @@ function ItemManager.SpawnInMine(mineZonePart: BasePart)
 
 			setupItemGUI(newItem, 1, 0, false)
 
-			CollectionService:AddTag(newItem, "FloatingItem")
-
 			if newItem.PrimaryPart then
 				createPickupPrompt(newItem, randomItemName, WORLD_ITEM_PICKUP_DISTANCE)
+			end
+
+			spawnedThisPass += 1
+			if spawnedThisPass % ITEM_SPAWN_BATCH_SIZE == 0 then
+				task.wait(ITEM_SPAWN_BATCH_YIELD)
 			end
 
 		end
@@ -821,11 +865,9 @@ function ItemManager.SpawnWorldItemAtPosition(
 
 		tween.Completed:Connect(function() 
 			cfValue:Destroy() 
-			CollectionService:AddTag(newItem, "FloatingItem")
 		end)
 	else
 		newItem:PivotTo(finalCFrame)
-		CollectionService:AddTag(newItem, "FloatingItem")
 	end
 
 	setupItemGUI(newItem, level, 0, false)
@@ -856,28 +898,103 @@ function ItemManager.SpawnDroppedItem(
 	return ItemManager.SpawnWorldItemAtPosition(itemName, mutation, rarity, targetPos, spawnOptions)
 end
 
-function ItemManager.RespawnItem(mineZonePart: BasePart)
-	task.delay(RESPAWN_TIME, function() ItemManager.SpawnInMine(mineZonePart) end)
+local function ensureSpawnWorker()
+	if spawnWorkerRunning or Workspace:GetAttribute("TerrainResetInProgress") == true then
+		return
+	end
+
+	spawnWorkerRunning = true
+
+	task.spawn(function()
+		while #mineSpawnQueue > 0 do
+			local mineZonePart = table.remove(mineSpawnQueue, 1)
+			if mineZonePart and mineZonePart.Parent and mineZonePart:IsA("BasePart") then
+				queuedMineZones[mineZonePart] = nil
+				ItemManager.SpawnInMine(mineZonePart)
+			end
+
+			task.wait()
+		end
+
+		spawnWorkerRunning = false
+	end)
 end
 
-function ItemManager.SpawnAllItems()
+local function queueMineSpawn(mineZonePart: BasePart?)
+	if not mineZonePart or not mineZonePart.Parent then
+		return
+	end
+
+	if queuedMineZones[mineZonePart] then
+		return
+	end
+
+	queuedMineZones[mineZonePart] = true
+	table.insert(mineSpawnQueue, mineZonePart)
+	ensureSpawnWorker()
+end
+
+local function queueAllMineSpawns()
 	for _, spawner in ipairs(MinesFolder:GetChildren()) do
-		if spawner:IsA("BasePart") then ItemManager.SpawnInMine(spawner) end
+		if spawner:IsA("BasePart") then
+			queueMineSpawn(spawner)
+		end
 	end
 end
 
-Players.PlayerAdded:Connect(function(player) if not RunService:IsRunning() then return end ItemManager.SpawnAllItems() end)
+local function flushPendingRoundRefill()
+	if not pendingRoundRefill then
+		return
+	end
 
-FinishTime.Event:Connect(function()
-	clearSessionWorldItems()
+	if Workspace:GetAttribute("SessionEnded") == true then
+		return
+	end
 
-	task.delay(SESSION_END_MESSAGE_DURATION + 0.1, function()
+	if Workspace:GetAttribute("TerrainResetInProgress") == true then
+		return
+	end
+
+	pendingRoundRefill = false
+	queueAllMineSpawns()
+end
+
+function ItemManager.RespawnItem(mineZonePart: BasePart)
+	task.delay(RESPAWN_TIME, function()
 		if not RunService:IsRunning() then
 			return
 		end
 
-		ItemManager.SpawnAllItems()
+		if Workspace:GetAttribute("SessionEnded") == true then
+			return
+		end
+
+		queueMineSpawn(mineZonePart)
 	end)
+end
+
+function ItemManager.SpawnAllItems()
+	queueAllMineSpawns()
+end
+
+FinishTime.Event:Connect(function()
+	clearSessionWorldItems()
+end)
+
+RoundStarted.Event:Connect(function()
+	if not RunService:IsRunning() then
+		return
+	end
+
+	pendingRoundRefill = true
+	flushPendingRoundRefill()
+end)
+
+Workspace:GetAttributeChangedSignal("TerrainResetInProgress"):Connect(function()
+	if Workspace:GetAttribute("TerrainResetInProgress") == false then
+		ensureSpawnWorker()
+		flushPendingRoundRefill()
+	end
 end)
 
 -- =========================================================================
@@ -916,13 +1033,16 @@ task.spawn(function()
 end)
 
 -- =========================================================================
--- ## MAINTENANCE LOOP (Guarantees mines stay perfectly full) ##
+-- ## INITIAL ROUND FILL ##
 -- =========================================================================
-task.spawn(function()
-	if not RunService:IsRunning() then return end
-	while true do
-		task.wait(10) -- Checks all mines every 10 seconds
-		ItemManager.SpawnAllItems()
+task.defer(function()
+	if not RunService:IsRunning() then
+		return
+	end
+
+	if type(Workspace:GetAttribute("SessionRoundId")) == "number" and Workspace:GetAttribute("SessionEnded") ~= true then
+		pendingRoundRefill = true
+		flushPendingRoundRefill()
 	end
 end)
 

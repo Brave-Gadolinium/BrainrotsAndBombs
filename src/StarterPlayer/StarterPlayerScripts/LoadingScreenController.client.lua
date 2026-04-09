@@ -3,17 +3,16 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
+local Workspace = game:GetService("Workspace")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
-local FRAME_INFO = TweenInfo.new(1.6, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
-local ICON_SLIDE_INFO = TweenInfo.new(0.2, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
-local DOT_FINISH_INFO = TweenInfo.new(0.2, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, 0, true)
-local DOT_LOAD_INFO = TweenInfo.new(0.2, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true)
-local SLIDER_INFO_IN = TweenInfo.new(0.7, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
-local SLIDER_INFO_OUT = TweenInfo.new(0.7, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-local ROTATION_INFO = TweenInfo.new(5, Enum.EasingStyle.Linear, Enum.EasingDirection.Out, -1)
+local FADE_IN_INFO = TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+local FADE_OUT_INFO = TweenInfo.new(0.22, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+local MIN_VISIBLE_TIME = 0.35
+local HARD_TIMEOUT = 8
+local READINESS_POLL_INTERVAL = 0.05
 
 local function playTween(target: Instance, tweenInfo: TweenInfo, goal: {[string]: any}): Tween
 	local tween = TweenService:Create(target, tweenInfo, goal)
@@ -38,113 +37,76 @@ local function getLoadingScreen(): ScreenGui
 	return loadingScreen
 end
 
-local function getSortedDots(dotHolder: Instance): {Frame}
-	local dots: {Frame} = {}
-
-	for _, child in ipairs(dotHolder:GetChildren()) do
-		if child:IsA("Frame") then
-			table.insert(dots, child)
-		end
+local function isCharacterReady(): boolean
+	local character = player.Character
+	if not character then
+		return false
 	end
 
-	table.sort(dots, function(a, b)
-		local aOrder = tonumber(a.Name) or a.LayoutOrder
-		local bOrder = tonumber(b.Name) or b.LayoutOrder
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	local root = character:FindFirstChild("HumanoidRootPart")
+	return humanoid ~= nil and root ~= nil
+end
 
-		if aOrder == bOrder then
-			return a.Name < b.Name
-		end
+local function isClientReady(): boolean
+	if Workspace:GetAttribute("ServerSystemsReady") ~= true then
+		return false
+	end
 
-		return aOrder < bOrder
-	end)
+	if Workspace:GetAttribute("TerrainResetInProgress") == true then
+		return false
+	end
 
-	return dots
+	if type(Workspace:GetAttribute("SessionRoundId")) ~= "number" then
+		return false
+	end
+
+	local gui = playerGui:FindFirstChild("GUI")
+	if not gui or not gui:IsA("ScreenGui") then
+		return false
+	end
+
+	return isCharacterReady()
 end
 
 local function playLoadingScreen()
+	local startedAt = os.clock()
 	local loadingScreen = getLoadingScreen()
 	local background = loadingScreen:WaitForChild("Background") :: GuiObject
-	local slider = loadingScreen:WaitForChild("Slider") :: GuiObject
 	local canvasGroup = loadingScreen:WaitForChild("Frame") :: CanvasGroup
-	local dotHolder = canvasGroup:WaitForChild("Dots")
-	local frontFrame = background:WaitForChild("Front")
-	local gradient = frontFrame:WaitForChild("UIGradient") :: UIGradient
-	local dots = getSortedDots(dotHolder)
-	local loopTweens: {[number]: Tween} = {}
+	local slider = loadingScreen:FindFirstChild("Slider")
 
 	canvasGroup.GroupTransparency = 1
+	background.Visible = true
+	canvasGroup.Visible = true
+	if slider and slider:IsA("GuiObject") then
+		slider.Visible = false
+	end
 
-	local rotationTween = playTween(gradient, ROTATION_INFO, {
-		Rotation = 360,
-	})
-
-	task.wait(0.65)
-
-	local frameTween = playTween(canvasGroup, FRAME_INFO, {
+	local fadeInTween = playTween(canvasGroup, FADE_IN_INFO, {
 		GroupTransparency = 0,
 	})
-	frameTween.Completed:Wait()
-	frameTween:Destroy()
+	fadeInTween.Completed:Wait()
+	fadeInTween:Destroy()
 
-	for index, dotFrame in ipairs(dots) do
-		local icon = dotFrame:WaitForChild("Icon") :: ImageLabel
-
-		loopTweens[index] = playTween(icon, DOT_LOAD_INFO, {
-			Position = UDim2.fromScale(0.5, 0),
-		})
-
-		task.wait(0.1)
-	end
-
-	for index, dotFrame in ipairs(dots) do
-		local icon = dotFrame:WaitForChild("Icon") :: ImageLabel
-		local loopTween = loopTweens[index]
-
-		task.wait(0.2)
-
-		icon.Position = UDim2.fromScale(0.5, -0.5)
-		icon.ImageColor3 = Color3.new(1, 1, 1)
-
-		if loopTween then
-			loopTween:Cancel()
-			loopTween:Destroy()
-			loopTweens[index] = nil
+	while true do
+		local elapsed = os.clock() - startedAt
+		if isClientReady() and elapsed >= MIN_VISIBLE_TIME then
+			break
 		end
 
-		playTween(icon, ICON_SLIDE_INFO, {
-			Position = UDim2.fromScale(0.5, 0.5),
-		})
+		if elapsed >= HARD_TIMEOUT then
+			break
+		end
+
+		task.wait(READINESS_POLL_INTERVAL)
 	end
 
-	task.wait(0.4)
-
-	for _, dotFrame in ipairs(dots) do
-		local icon = dotFrame:WaitForChild("Icon") :: ImageLabel
-
-		playTween(icon, DOT_FINISH_INFO, {
-			Position = UDim2.fromScale(0.5, 0),
-		})
-
-		task.wait(0.1)
-	end
-
-	local sliderTweenIn = playTween(slider, SLIDER_INFO_IN, {
-		Position = UDim2.fromScale(0.5, 0.5),
+	local fadeOutTween = playTween(canvasGroup, FADE_OUT_INFO, {
+		GroupTransparency = 1,
 	})
-	sliderTweenIn.Completed:Wait()
-	sliderTweenIn:Destroy()
-
-	background.Visible = false
-	canvasGroup.Visible = false
-
-	local sliderTweenOut = playTween(slider, SLIDER_INFO_OUT, {
-		Position = UDim2.fromScale(-1.5, 0.5),
-	})
-	sliderTweenOut.Completed:Wait()
-	sliderTweenOut:Destroy()
-
-	rotationTween:Cancel()
-	rotationTween:Destroy()
+	fadeOutTween.Completed:Wait()
+	fadeOutTween:Destroy()
 
 	loadingScreen:Destroy()
 end

@@ -24,7 +24,9 @@ local initialized = false
 local infoCache = {}
 local trackedPackFrames = {}
 local trackedBoosterCards = {}
-local refreshLoopStarted = false
+local pendingPriceRequests = {}
+local shopPricingActivated = false
+local shopCountdownRefreshToken = 0
 
 local function findAnyChild(parent, childNames)
 	if not parent then
@@ -188,7 +190,7 @@ local function restoreBasePriceText(label)
 	end
 end
 
-local function setRobuxPriceAsync(label, productId, infoType, onResolved)
+local function applyResolvedRobuxPrice(label, productId, infoType, onResolved)
 	if not label or type(productId) ~= "number" or productId <= 0 then
 		return
 	end
@@ -203,6 +205,33 @@ local function setRobuxPriceAsync(label, productId, infoType, onResolved)
 			onResolved(if type(price) == "number" then price else nil)
 		end
 	end)
+end
+
+local function activateShopPricing()
+	if shopPricingActivated then
+		return
+	end
+
+	shopPricingActivated = true
+
+	for _, callback in ipairs(pendingPriceRequests) do
+		callback()
+	end
+
+	table.clear(pendingPriceRequests)
+end
+
+local function setRobuxPriceAsync(label, productId, infoType, onResolved)
+	local function resolvePrice()
+		applyResolvedRobuxPrice(label, productId, infoType, onResolved)
+	end
+
+	if shopPricingActivated or ShopFrame.Visible then
+		resolvePrice()
+		return
+	end
+
+	table.insert(pendingPriceRequests, resolvePrice)
 end
 
 local function setupButtonEffects(button, scaleParent)
@@ -568,10 +597,13 @@ end
 
 local function refreshTrackedBoosterCards()
 	local megaData = trackedBoosterCards.MegaExplosion
+	local nextCountdownRefreshDelay: number? = nil
+
 	if megaData and megaData.PriceLabel then
 		local endsAt = math.max(0, tonumber(player:GetAttribute("MegaExplosionEndsAt")) or 0)
 		if endsAt > os.time() then
 			setText(megaData.PriceLabel, formatRemainingTime(endsAt))
+			nextCountdownRefreshDelay = 1
 		else
 			restoreBasePriceText(megaData.PriceLabel)
 		end
@@ -582,6 +614,7 @@ local function refreshTrackedBoosterCards()
 		local endsAt = math.max(0, tonumber(player:GetAttribute("ShieldEndsAt")) or 0)
 		if endsAt > os.time() then
 			setText(shieldData.PriceLabel, formatRemainingTime(endsAt))
+			nextCountdownRefreshDelay = 1
 		else
 			restoreBasePriceText(shieldData.PriceLabel)
 		end
@@ -608,6 +641,16 @@ local function refreshTrackedBoosterCards()
 	local nukeData = trackedBoosterCards.NukeBooster
 	if nukeData and nukeData.PriceLabel then
 		restoreBasePriceText(nukeData.PriceLabel)
+	end
+
+	shopCountdownRefreshToken += 1
+	local countdownToken = shopCountdownRefreshToken
+	if ShopFrame.Visible and nextCountdownRefreshDelay then
+		task.delay(nextCountdownRefreshDelay, function()
+			if countdownToken == shopCountdownRefreshToken and ShopFrame.Parent and ShopFrame.Visible then
+				refreshTrackedBoosterCards()
+			end
+		end)
 	end
 end
 
@@ -709,21 +752,6 @@ local function setupBoosterSections()
 	end
 end
 
-local function startRefreshLoop()
-	if refreshLoopStarted then
-		return
-	end
-
-	refreshLoopStarted = true
-	task.spawn(function()
-		while ShopFrame.Parent do
-			refreshPackVisibility()
-			refreshTrackedBoosterCards()
-			task.wait(1)
-		end
-	end)
-end
-
 local function init()
 	if initialized then
 		return
@@ -739,10 +767,16 @@ local function init()
 	ShopFrame:GetPropertyChangedSignal("Visible"):Connect(function()
 		if ShopFrame.Visible then
 			reportStoreOpened("shop_frame")
+			activateShopPricing()
+			refreshPackVisibility()
+			refreshTrackedBoosterCards()
+		else
+			shopCountdownRefreshToken += 1
 		end
 	end)
 	if ShopFrame.Visible then
 		reportStoreOpened("shop_frame")
+		activateShopPricing()
 	end
 
 	refreshPackVisibility()
@@ -755,8 +789,6 @@ local function init()
 	player:GetAttributeChangedSignal("AutoBombEnabled"):Connect(refreshTrackedBoosterCards)
 	player:GetAttributeChangedSignal("MegaExplosionEndsAt"):Connect(refreshTrackedBoosterCards)
 	player:GetAttributeChangedSignal("ShieldEndsAt"):Connect(refreshTrackedBoosterCards)
-
-	startRefreshLoop()
 end
 
 init()

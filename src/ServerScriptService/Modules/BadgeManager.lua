@@ -10,7 +10,10 @@ local BadgeConfigurations = require(ServerScriptService.Modules.BadgeConfigurati
 local TutorialConfiguration = require(game:GetService("ReplicatedStorage").Modules.TutorialConfiguration)
 
 local BadgeManager = {}
-local bottomTouchConnection: RBXScriptConnection? = nil
+local bottomTouchConnections: {[BasePart]: RBXScriptConnection} = {}
+local deepExplorerDescendantConnection: RBXScriptConnection? = nil
+local deepExplorerAwardTimestamps: {[Player]: number} = {}
+local DEEP_EXPLORER_TOUCH_DEBOUNCE = 1
 
 local function getBadgeDefinition(badgeKey: string)
 	return BadgeConfigurations.Badges[badgeKey]
@@ -25,28 +28,49 @@ local function getPlayerFromTouchedPart(hit: BasePart): Player?
 	return Players:GetPlayerFromCharacter(character)
 end
 
-local function connectDeepExplorerTouch(self)
-	local map = Workspace:FindFirstChild("Map")
-	if not map then
-		warn("[BadgeManager] Workspace.Map not found, Deep Explorer touch badge is disabled.")
+local function connectBottomTouch(self, bottomPart: BasePart)
+	if bottomTouchConnections[bottomPart] then
 		return
 	end
 
-	local bottomPart = map:FindFirstChild("Bottom")
-	if not bottomPart or not bottomPart:IsA("BasePart") then
-		warn("[BadgeManager] Workspace.Map.Bottom not found or is not a BasePart, Deep Explorer touch badge is disabled.")
-		return
-	end
-
-	if bottomTouchConnection then
-		bottomTouchConnection:Disconnect()
-		bottomTouchConnection = nil
-	end
-
-	bottomTouchConnection = bottomPart.Touched:Connect(function(hit)
+	bottomTouchConnections[bottomPart] = bottomPart.Touched:Connect(function(hit)
 		local player = getPlayerFromTouchedPart(hit)
-		if player then
-			self:AwardBadge(player, "DeepExplorer")
+		if not player then
+			return
+		end
+
+		local now = os.clock()
+		local lastAwardAt = deepExplorerAwardTimestamps[player]
+		if lastAwardAt and (now - lastAwardAt) < DEEP_EXPLORER_TOUCH_DEBOUNCE then
+			return
+		end
+
+		deepExplorerAwardTimestamps[player] = now
+		self:AwardBadge(player, "DeepExplorer")
+	end)
+end
+
+local function connectDeepExplorerTouch(self)
+	local foundBottomPart = false
+
+	for _, descendant in ipairs(Workspace:GetDescendants()) do
+		if descendant:IsA("BasePart") and descendant.Name == "Bottom" then
+			foundBottomPart = true
+			connectBottomTouch(self, descendant)
+		end
+	end
+
+	if not foundBottomPart then
+		warn("[BadgeManager] No Bottom BasePart found in Workspace, waiting for it to appear.")
+	end
+
+	if deepExplorerDescendantConnection then
+		deepExplorerDescendantConnection:Disconnect()
+	end
+
+	deepExplorerDescendantConnection = Workspace.DescendantAdded:Connect(function(descendant)
+		if descendant:IsA("BasePart") and descendant.Name == "Bottom" then
+			connectBottomTouch(self, descendant)
 		end
 	end)
 end

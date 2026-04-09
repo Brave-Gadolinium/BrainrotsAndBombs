@@ -6,6 +6,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
+local CollectionService = game:GetService("CollectionService")
 
 local BrainrotEventConfiguration = require(ReplicatedStorage.Modules.BrainrotEventConfiguration)
 local ItemConfigurations = require(ReplicatedStorage.Modules.ItemConfigurations)
@@ -64,13 +65,15 @@ local totalRange = 100
 
 local markerByPlayer: {[Player]: Frame} = {}
 local workspaceAttributes = BrainrotEventConfiguration.WorkspaceAttributes
+local itemAttributes = BrainrotEventConfiguration.ItemAttributes
+local EVENT_WORLD_ITEM_TAG = "EventBrainrotWorldItem"
 local currentEventToken: string? = nil
 local eventMarker: Frame? = nil
 local eventMarkerScale: UIScale? = nil
 local eventMarkerIcon: ImageLabel? = nil
 local eventMarkerPulseLoopId = 0
-local cachedEventWorldItem: Model? = nil
-local nextEventWorldSearchAt = 0
+local eventWorldItemsByToken: {[string]: Model} = {}
+local rebuildQueued = false
 
 local function roundToTenth(value: number): number
 	return math.floor(value * 10 + 0.5) / 10
@@ -503,8 +506,30 @@ local function destroyEventMarker()
 	end
 	eventMarkerScale = nil
 	eventMarkerIcon = nil
-	cachedEventWorldItem = nil
-	nextEventWorldSearchAt = 0
+end
+
+local function unregisterEventWorldItem(instance: Instance)
+	if not instance:IsA("Model") then
+		return
+	end
+
+	local token = instance:GetAttribute(itemAttributes.Token)
+	if type(token) == "string" and eventWorldItemsByToken[token] == instance then
+		eventWorldItemsByToken[token] = nil
+	end
+end
+
+local function registerEventWorldItem(instance: Instance)
+	if not instance:IsA("Model") then
+		return
+	end
+
+	unregisterEventWorldItem(instance)
+
+	local token = instance:GetAttribute(itemAttributes.Token)
+	if type(token) == "string" and token ~= "" then
+		eventWorldItemsByToken[token] = instance
+	end
 end
 
 local function startEventMarkerPulseLoop(marker: Frame, scale: UIScale)
@@ -609,28 +634,12 @@ local function ensureEventMarker(): Frame?
 end
 
 local function findActiveEventWorldItem(token: string): Model?
-	if cachedEventWorldItem and cachedEventWorldItem.Parent and cachedEventWorldItem:GetAttribute("EventBrainrotToken") == token then
-		return cachedEventWorldItem
+	local worldItem = eventWorldItemsByToken[token]
+	if worldItem and worldItem.Parent then
+		return worldItem
 	end
 
-	local now = tick()
-	if now < nextEventWorldSearchAt then
-		return nil
-	end
-
-	nextEventWorldSearchAt = now + EVENT_MARKER_SEARCH_INTERVAL
-
-	for _, descendant in ipairs(Workspace:GetDescendants()) do
-		if descendant:IsA("Model")
-			and descendant.Name == "SpawnedItem"
-			and descendant:GetAttribute("EventBrainrotToken") == token
-		then
-			cachedEventWorldItem = descendant
-			return descendant
-		end
-	end
-
-	cachedEventWorldItem = nil
+	eventWorldItemsByToken[token] = nil
 	return nil
 end
 
@@ -663,8 +672,6 @@ local function refreshEventMarkerState()
 
 	if currentEventToken ~= token then
 		currentEventToken = token
-		cachedEventWorldItem = nil
-		nextEventWorldSearchAt = 0
 
 		if not currentEventToken then
 			destroyEventMarker()
@@ -705,6 +712,21 @@ local function applyRightEdgeLayout()
 	rootFrame.Position = UDim2.new(1, -EDGE_PADDING, 0.5, 0)
 end
 
+local function scheduleBarRebuild()
+	if rebuildQueued then
+		return
+	end
+
+	rebuildQueued = true
+	task.defer(function()
+		rebuildQueued = false
+		buildBarUI()
+		for _, player in ipairs(Players:GetPlayers()) do
+			ensureMarker(player)
+		end
+	end)
+end
+
 buildBarUI()
 refreshEventMarkerState()
 
@@ -724,18 +746,32 @@ for _, attributeName in pairs(workspaceAttributes) do
 	Workspace:GetAttributeChangedSignal(attributeName):Connect(refreshEventMarkerState)
 end
 
-local rebuildTimer = 0
+for _, instance in ipairs(CollectionService:GetTagged(EVENT_WORLD_ITEM_TAG)) do
+	registerEventWorldItem(instance)
+end
+
+CollectionService:GetInstanceAddedSignal(EVENT_WORLD_ITEM_TAG):Connect(registerEventWorldItem)
+CollectionService:GetInstanceRemovedSignal(EVENT_WORLD_ITEM_TAG):Connect(unregisterEventWorldItem)
+
+map.DescendantAdded:Connect(function(descendant)
+	if descendant:IsA("BasePart") or descendant:IsA("SurfaceGui") then
+		scheduleBarRebuild()
+	end
+end)
+
+map.DescendantRemoving:Connect(function(descendant)
+	if descendant:IsA("BasePart") or descendant:IsA("SurfaceGui") then
+		scheduleBarRebuild()
+	end
+end)
+
+local itemSpawns = Workspace:FindFirstChild("ItemSpawns")
+if itemSpawns then
+	itemSpawns.ChildAdded:Connect(scheduleBarRebuild)
+	itemSpawns.ChildRemoved:Connect(scheduleBarRebuild)
+end
 
 RunService.Heartbeat:Connect(function(dt)
-	rebuildTimer += dt
-	if rebuildTimer >= REBUILD_INTERVAL then
-		rebuildTimer = 0
-		buildBarUI()
-		for _, player in ipairs(Players:GetPlayers()) do
-			ensureMarker(player)
-		end
-	end
-
 	--applyRightEdgeLayout()
 
 	local stackByBucket: {[number]: number} = {}

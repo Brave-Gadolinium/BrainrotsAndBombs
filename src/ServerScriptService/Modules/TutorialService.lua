@@ -2,6 +2,7 @@
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
+local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 
 local PostTutorialConfiguration = require(ReplicatedStorage.Modules.PostTutorialConfiguration)
@@ -21,6 +22,9 @@ local PlayerController: PlayerControllerType? = nil
 local reportActionEvent: RemoteEvent? = nil
 local postTutorialCompletionEvent: RemoteEvent? = nil
 local CURRENT_TUTORIAL_VERSION = 2
+local STEP_ONE_MIN_DISPLAY_TIME = 1.5
+local stepActivatedAt: {[Player]: number} = {}
+local stepOneEvaluationTokens: {[Player]: number} = {}
 
 local function getUpgradeConfig(upgradeId: string)
 	for _, config in ipairs(UpgradesConfigurations.Upgrades) do
@@ -62,6 +66,27 @@ end
 
 local function syncStepAttribute(player: Player, step: number)
 	player:SetAttribute("OnboardingStep", step)
+end
+
+local function markStepActivated(player: Player)
+	stepActivatedAt[player] = tick()
+end
+
+local function invalidateScheduledStepOneEvaluation(player: Player)
+	stepOneEvaluationTokens[player] = (stepOneEvaluationTokens[player] or 0) + 1
+end
+
+local function getRemainingInitialStepOneDisplayTime(player: Player, step: number): number
+	if step ~= 1 then
+		return 0
+	end
+
+	local activatedAt = stepActivatedAt[player]
+	if type(activatedAt) ~= "number" then
+		return 0
+	end
+
+	return math.max(0, STEP_ONE_MIN_DISPLAY_TIME - (tick() - activatedAt))
 end
 
 local function getCurrentPostTutorialStage(player: Player): number
@@ -256,6 +281,8 @@ local function setCurrentStep(player: Player, profile: any, step: number)
 	local clampedStep = math.clamp(step, 1, TutorialConfiguration.FinalStep)
 	profile.Data.OnboardingStep = clampedStep
 	syncStepAttribute(player, clampedStep)
+	markStepActivated(player)
+	invalidateScheduledStepOneEvaluation(player)
 	AnalyticsFunnelsService:SyncTutorial(player, clampedStep)
 
 	if PlayerController and PlayerController.OnTutorialStepChanged then
@@ -382,6 +409,8 @@ function TutorialService:SyncPlayer(player: Player)
 	if not profile or not profile.Data then
 		local step = getCurrentStep(player)
 		syncStepAttribute(player, step)
+		markStepActivated(player)
+		invalidateScheduledStepOneEvaluation(player)
 		syncPostTutorialStageAttribute(player, PostTutorialConfiguration.Stages.Completed)
 		AnalyticsFunnelsService:SyncTutorial(player, step)
 		return step
@@ -391,6 +420,8 @@ function TutorialService:SyncPlayer(player: Player)
 
 	local step = reconcileStepWithCurrentState(player, profile)
 	syncStepAttribute(player, step)
+	markStepActivated(player)
+	invalidateScheduledStepOneEvaluation(player)
 	syncPostTutorialStageAttribute(player, PostTutorialConfiguration.Stages.Completed)
 	AnalyticsFunnelsService:SyncTutorial(player, step)
 
@@ -446,7 +477,10 @@ function TutorialService:EvaluateCurrentStep(player: Player)
 		local nextStep: number? = nil
 
 		if currentStep == 1 then
-			if rootPart and isInsideAnyMineZone(rootPart.Position) then
+			if rootPart
+				and isInsideAnyMineZone(rootPart.Position)
+				and getRemainingInitialStepOneDisplayTime(player, currentStep) <= 0
+			then
 				nextStep = 2
 			end
 		elseif currentStep == 3 then
@@ -497,6 +531,23 @@ end
 
 function TutorialService:HandleMineZoneEntered(player: Player)
 	if getCurrentStep(player) == 1 then
+		local remainingDisplayTime = getRemainingInitialStepOneDisplayTime(player, 1)
+		if remainingDisplayTime > 0 then
+			local token = (stepOneEvaluationTokens[player] or 0) + 1
+			stepOneEvaluationTokens[player] = token
+			task.delay(remainingDisplayTime, function()
+				if stepOneEvaluationTokens[player] ~= token then
+					return
+				end
+
+				stepOneEvaluationTokens[player] = nil
+				if player.Parent and getCurrentStep(player) == 1 then
+					self:EvaluateCurrentStep(player)
+				end
+			end)
+			return
+		end
+
 		self:AdvanceToStep(player, 2)
 	end
 end
@@ -620,6 +671,11 @@ function TutorialService:Init(controllers)
 		if type(actionId) == "string" then
 			self:ReportAction(player, actionId)
 		end
+	end)
+
+	Players.PlayerRemoving:Connect(function(player)
+		stepActivatedAt[player] = nil
+		stepOneEvaluationTokens[player] = nil
 	end)
 end
 

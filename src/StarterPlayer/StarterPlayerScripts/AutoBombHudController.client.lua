@@ -4,8 +4,10 @@
 local MarketplaceService = game:GetService("MarketplaceService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
 
 local ProductConfigurations = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("ProductConfigurations"))
+local FrameManager = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("FrameManager"))
 
 local player = Players.LocalPlayer
 local events = ReplicatedStorage:WaitForChild("Events")
@@ -16,12 +18,49 @@ local playerGui = player:WaitForChild("PlayerGui")
 local gui = playerGui:WaitForChild("GUI")
 local hud = gui:WaitForChild("HUD")
 
+local TOGGLE_TWEEN_INFO = TweenInfo.new(0.18, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
+local TOGGLE_BUSY_TIMEOUT = 1.5
+local TOGGLE_POINT_ON_COLOR = Color3.fromRGB(92, 226, 120)
+local TOGGLE_POINT_OFF_COLOR = Color3.fromRGB(255, 84, 84)
+
 local autoBombFrame: GuiObject? = nil
 local toggleButton: GuiButton? = nil
-local backButton: GuiButton? = nil
-local backButtonVisibleConnection: RBXScriptConnection? = nil
-local backButtonActiveConnection: RBXScriptConnection? = nil
+local toggleTrack: GuiObject? = nil
+local togglePoint: GuiObject? = nil
+local toggleTrackSizeConnection: RBXScriptConnection? = nil
+local hudVisibilityConnection: RBXScriptConnection? = nil
+local pointPositionTween: Tween? = nil
+local pointColorTween: Tween? = nil
+local toggleBusy = false
+local pendingToggleState: boolean? = nil
+
 local refreshHudAutoBomb: () -> ()
+
+local function disconnectToggleTrackConnection()
+	if toggleTrackSizeConnection then
+		toggleTrackSizeConnection:Disconnect()
+		toggleTrackSizeConnection = nil
+	end
+end
+
+local function disconnectHudVisibilityConnection()
+	if hudVisibilityConnection then
+		hudVisibilityConnection:Disconnect()
+		hudVisibilityConnection = nil
+	end
+end
+
+local function cancelToggleTweens()
+	if pointPositionTween then
+		pointPositionTween:Cancel()
+		pointPositionTween = nil
+	end
+
+	if pointColorTween then
+		pointColorTween:Cancel()
+		pointColorTween = nil
+	end
+end
 
 local function reportStorePromptFailed(reason: string)
 	reportAnalyticsIntent:FireServer("StorePromptFailed", {
@@ -52,19 +91,30 @@ local function setButtonText(button: GuiButton?, text: string)
 	end
 end
 
-local function findAutoBombFrame(): GuiObject?
-	local frame = hud:FindFirstChild("Autobomb")
-	if frame and frame:IsA("GuiObject") then
-		return frame
+local function setPointColorInstant(point: GuiObject, color: Color3)
+	if point:IsA("ImageLabel") or point:IsA("ImageButton") then
+		point.ImageColor3 = color
+	elseif point:IsA("Frame") or point:IsA("TextButton") or point:IsA("TextLabel") then
+		point.BackgroundColor3 = color
 	end
-
-	return nil
 end
 
-local function findBackButton(): GuiButton?
-	local button = hud:FindFirstChild("Back")
-	if button and button:IsA("GuiButton") then
-		return button
+local function tweenPointColor(point: GuiObject, color: Color3)
+	if point:IsA("ImageLabel") or point:IsA("ImageButton") then
+		pointColorTween = TweenService:Create(point, TOGGLE_TWEEN_INFO, {ImageColor3 = color})
+		pointColorTween:Play()
+	elseif point:IsA("Frame") or point:IsA("TextButton") or point:IsA("TextLabel") then
+		pointColorTween = TweenService:Create(point, TOGGLE_TWEEN_INFO, {BackgroundColor3 = color})
+		pointColorTween:Play()
+	end
+end
+
+local function findAutoBombFrame(): GuiObject?
+	local left = hud:FindFirstChild("Left")
+	local buttons = left and left:FindFirstChild("Buttons1")
+	local frame = buttons and buttons:FindFirstChild("Autobomb")
+	if frame and frame:IsA("GuiObject") then
+		return frame
 	end
 
 	return nil
@@ -83,40 +133,95 @@ local function findToggleButton(frame: GuiObject?): GuiButton?
 	return nil
 end
 
-local function shouldShowAutoBomb(): boolean
-	if not backButton then
-		return true
-	end
-
-	return backButton.Visible and backButton.Active
-end
-
-local function disconnectBackButtonConnections()
-	if backButtonVisibleConnection then
-		backButtonVisibleConnection:Disconnect()
-		backButtonVisibleConnection = nil
-	end
-
-	if backButtonActiveConnection then
-		backButtonActiveConnection:Disconnect()
-		backButtonActiveConnection = nil
-	end
-end
-
-local function bindBackButton(button: GuiButton?)
-	if backButton == button then
-		return
-	end
-
-	disconnectBackButtonConnections()
-	backButton = button
-
+local function findToggleTrack(button: GuiButton?): GuiObject?
 	if not button then
+		return nil
+	end
+
+	local mainFrame = button:FindFirstChild("MainFrame")
+	local base = mainFrame and mainFrame:FindFirstChild("Base")
+	local back = base and base:FindFirstChild("back")
+	if back and back:IsA("GuiObject") then
+		return back
+	end
+
+	return nil
+end
+
+local function findTogglePoint(track: GuiObject?): GuiObject?
+	if not track then
+		return nil
+	end
+
+	local point = track:FindFirstChild("Point")
+	if point and point:IsA("GuiObject") then
+		return point
+	end
+
+	return nil
+end
+
+local function shouldShowAutoBomb(): boolean
+	if FrameManager.isAnyFrameOpen() then
+		return false
+	end
+
+	if not autoBombFrame then
+		return false
+	end
+
+	return autoBombFrame:GetAttribute("HUDModeVisible") == true
+end
+
+local function getTogglePointPositions(): (UDim2?, UDim2?)
+	local track = toggleTrack
+	local point = togglePoint
+	if not track or not point then
+		return nil, nil
+	end
+
+	local trackSize = track.AbsoluteSize
+	local pointSize = point.AbsoluteSize
+	if trackSize.X <= 0 or trackSize.Y <= 0 or pointSize.X <= 0 or pointSize.Y <= 0 then
+		return nil, nil
+	end
+
+	local horizontalPadding = math.max(2, math.floor((trackSize.Y - pointSize.Y) * 0.5))
+	local availableOffset = math.max(horizontalPadding, trackSize.X - pointSize.X - horizontalPadding)
+	local leftPosition = UDim2.new(0, horizontalPadding, 0.5, 0)
+	local rightPosition = UDim2.new(0, availableOffset, 0.5, 0)
+
+	return leftPosition, rightPosition
+end
+
+local function applyToggleVisualState(isEnabled: boolean, instant: boolean?)
+	local track = toggleTrack
+	local point = togglePoint
+	if not track or not point then
 		return
 	end
 
-	backButtonVisibleConnection = button:GetPropertyChangedSignal("Visible"):Connect(refreshHudAutoBomb)
-	backButtonActiveConnection = button:GetPropertyChangedSignal("Active"):Connect(refreshHudAutoBomb)
+	point.AnchorPoint = Vector2.new(0, 0.5)
+
+	local leftPosition, rightPosition = getTogglePointPositions()
+	if not leftPosition or not rightPosition then
+		return
+	end
+
+	local targetPosition = if isEnabled then rightPosition else leftPosition
+	local targetColor = if isEnabled then TOGGLE_POINT_ON_COLOR else TOGGLE_POINT_OFF_COLOR
+
+	cancelToggleTweens()
+
+	if instant then
+		point.Position = targetPosition
+		setPointColorInstant(point, targetColor)
+		return
+	end
+
+	pointPositionTween = TweenService:Create(point, TOGGLE_TWEEN_INFO, {Position = targetPosition})
+	pointPositionTween:Play()
+	tweenPointColor(point, targetColor)
 end
 
 function refreshHudAutoBomb()
@@ -125,18 +230,37 @@ function refreshHudAutoBomb()
 	end
 
 	local hasAutoBomb = player:GetAttribute("HasAutoBomb") == true
-	local isEnabled = player:GetAttribute("AutoBombEnabled") == true
+	local actualState = player:GetAttribute("AutoBombEnabled") == true
+	local displayedState = if pendingToggleState ~= nil then pendingToggleState else actualState
+	local shouldShow = shouldShowAutoBomb()
 
-	autoBombFrame.Visible = shouldShowAutoBomb()
+	autoBombFrame.Visible = shouldShow
 
 	if toggleButton then
-		toggleButton.Active = true
+		toggleButton.Active = not toggleBusy
+		toggleButton.AutoButtonColor = not toggleBusy
 		if hasAutoBomb then
-			setButtonText(toggleButton, if isEnabled then "On" else "Off")
+			setButtonText(toggleButton, if displayedState then "On" else "Off")
 		else
 			setButtonText(toggleButton, "Buy")
 		end
 	end
+
+	applyToggleVisualState(displayedState, not shouldShow)
+end
+
+local function beginToggleRequest(nextState: boolean)
+	toggleBusy = true
+	pendingToggleState = nextState
+	refreshHudAutoBomb()
+
+	task.delay(TOGGLE_BUSY_TIMEOUT, function()
+		if pendingToggleState == nextState then
+			toggleBusy = false
+			pendingToggleState = nil
+			refreshHudAutoBomb()
+		end
+	end)
 end
 
 local function bindToggleButton(button: GuiButton?)
@@ -146,8 +270,14 @@ local function bindToggleButton(button: GuiButton?)
 
 	button:SetAttribute("AutoBombHudBound", true)
 	button.Activated:Connect(function()
+		if toggleBusy then
+			return
+		end
+
 		if player:GetAttribute("HasAutoBomb") == true then
 			local nextState = not (player:GetAttribute("AutoBombEnabled") == true)
+			beginToggleRequest(nextState)
+
 			reportAnalyticsIntent:FireServer("AutoBombToggleRequested", {
 				surface = "autobomb_hud",
 				enabled = nextState,
@@ -180,38 +310,65 @@ local function bindToggleButton(button: GuiButton?)
 	end)
 end
 
+local function bindToggleTrack(track: GuiObject?)
+	if toggleTrack == track then
+		return
+	end
+
+	disconnectToggleTrackConnection()
+	toggleTrack = track
+
+	if toggleTrack then
+		toggleTrackSizeConnection = toggleTrack:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
+			refreshHudAutoBomb()
+		end)
+	end
+end
+
+local function bindHudVisibility(frame: GuiObject?)
+	if autoBombFrame == frame and hudVisibilityConnection then
+		return
+	end
+
+	disconnectHudVisibilityConnection()
+	autoBombFrame = frame
+
+	if autoBombFrame then
+		hudVisibilityConnection = autoBombFrame:GetAttributeChangedSignal("HUDModeVisible"):Connect(refreshHudAutoBomb)
+	end
+end
+
 local function resolveHudAutoBomb()
-	autoBombFrame = findAutoBombFrame()
+	bindHudVisibility(findAutoBombFrame())
 	toggleButton = findToggleButton(autoBombFrame)
-	bindBackButton(findBackButton())
+	bindToggleTrack(findToggleTrack(toggleButton))
+	togglePoint = findTogglePoint(toggleTrack)
+
 	bindToggleButton(toggleButton)
 	refreshHudAutoBomb()
 end
 
-hud.ChildAdded:Connect(function(child)
-	if child.Name == "Autobomb" or child.Name == "Back" then
-		task.defer(resolveHudAutoBomb)
-	end
-end)
-
-hud.ChildRemoved:Connect(function(child)
-	if child == autoBombFrame then
-		autoBombFrame = nil
-		toggleButton = nil
-	elseif child == backButton then
-		disconnectBackButtonConnections()
-		backButton = nil
-		task.defer(refreshHudAutoBomb)
-	end
-end)
+local function onAutoBombStateChanged()
+	toggleBusy = false
+	pendingToggleState = nil
+	refreshHudAutoBomb()
+end
 
 hud.DescendantAdded:Connect(function(descendant)
-	if autoBombFrame and descendant:IsDescendantOf(autoBombFrame) and descendant.Name == "Toggle" then
+	local name = descendant.Name
+	if name == "Autobomb" or name == "Toggle" or name == "MainFrame" or name == "Base" or name == "back" or name == "Point" then
 		task.defer(resolveHudAutoBomb)
 	end
 end)
 
-player:GetAttributeChangedSignal("HasAutoBomb"):Connect(refreshHudAutoBomb)
-player:GetAttributeChangedSignal("AutoBombEnabled"):Connect(refreshHudAutoBomb)
+hud.DescendantRemoving:Connect(function(descendant)
+	if descendant == autoBombFrame or descendant == toggleButton or descendant == toggleTrack or descendant == togglePoint then
+		task.defer(resolveHudAutoBomb)
+	end
+end)
+
+player:GetAttributeChangedSignal("HasAutoBomb"):Connect(onAutoBombStateChanged)
+player:GetAttributeChangedSignal("AutoBombEnabled"):Connect(onAutoBombStateChanged)
+FrameManager.Changed:Connect(refreshHudAutoBomb)
 
 resolveHudAutoBomb()

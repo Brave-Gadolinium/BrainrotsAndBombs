@@ -4,6 +4,7 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
+local Workspace = game:GetService("Workspace")
 
 local ProductConfigurations = require(ReplicatedStorage.Modules.ProductConfigurations)
 local AnalyticsFunnelsService = require(ServerScriptService.Modules.AnalyticsFunnelsService)
@@ -226,9 +227,68 @@ local function hasGamePassAttribute(player: Player, attributeName: string): bool
 	return player:GetAttribute(attributeName) == true
 end
 
+local function isInsideZonePart(zonePart: BasePart, position: Vector3): boolean
+	local relativePos = zonePart.CFrame:PointToObjectSpace(position)
+	local size = zonePart.Size
+
+	return math.abs(relativePos.X) <= size.X * 0.5
+		and math.abs(relativePos.Y) <= size.Y * 0.5
+		and math.abs(relativePos.Z) <= size.Z * 0.5
+end
+
+local function isPlayerInMineZone(player: Player): boolean
+	local character = player.Character
+	if not character then
+		return false
+	end
+
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	local root = character:FindFirstChild("HumanoidRootPart")
+	if not humanoid or humanoid.Health <= 0 or not root or not root:IsA("BasePart") then
+		return false
+	end
+
+	local zonesFolder = Workspace:FindFirstChild("Zones")
+	if not zonesFolder then
+		return false
+	end
+
+	for _, zonePart in ipairs(zonesFolder:GetChildren()) do
+		if zonePart:IsA("BasePart") and zonePart.Name == "ZonePart" and isInsideZonePart(zonePart, root.Position) then
+			return true
+		end
+	end
+
+	return false
+end
+
+local function isAutoBombBlockedBySession(): boolean
+	return Workspace:GetAttribute("SessionEnded") == true
+		or Workspace:GetAttribute("TerrainResetInProgress") == true
+end
+
 local function setAutoBombEnabled(player: Player, active: boolean)
-	local nextValue = active and hasGamePassAttribute(player, "HasAutoBomb")
+	local nextValue = active
+		and not isAutoBombBlockedBySession()
+		and hasGamePassAttribute(player, "HasAutoBomb")
+		and isPlayerInMineZone(player)
 	player:SetAttribute("AutoBombEnabled", nextValue)
+end
+
+local function enforceAutoBombZoneState(player: Player): boolean
+	if player:GetAttribute("AutoBombEnabled") ~= true then
+		return false
+	end
+
+	if isAutoBombBlockedBySession()
+		or not hasGamePassAttribute(player, "HasAutoBomb")
+		or not isPlayerInMineZone(player)
+	then
+		player:SetAttribute("AutoBombEnabled", false)
+		return false
+	end
+
+	return true
 end
 
 function BoosterService:GetTimedBoosterEndsAt(player: Player, boosterName: string): number
@@ -263,7 +323,10 @@ function BoosterService:HasAutoBomb(player: Player): boolean
 end
 
 function BoosterService:IsAutoBombEnabled(player: Player): boolean
-	return player:GetAttribute("AutoBombEnabled") == true and self:HasAutoBomb(player)
+	return player:GetAttribute("AutoBombEnabled") == true
+		and not isAutoBombBlockedBySession()
+		and self:HasAutoBomb(player)
+		and isPlayerInMineZone(player)
 end
 
 function BoosterService:SetAutoBombEnabled(player: Player, active: boolean)
@@ -275,6 +338,7 @@ function BoosterService:SyncPlayer(player: Player)
 	syncBoosterAttribute(player, "Shield")
 	player:SetAttribute("HasAutoBomb", player:GetAttribute("HasAutoBomb") == true)
 	player:SetAttribute("AutoBombEnabled", player:GetAttribute("AutoBombEnabled") == true and player:GetAttribute("HasAutoBomb") == true)
+	enforceAutoBombZoneState(player)
 end
 
 function BoosterService:PromptShieldOffer(player: Player)
@@ -344,8 +408,13 @@ local function startAutoBombHeartbeat()
 	autoBombHeartbeatStarted = true
 	task.spawn(function()
 		while true do
+			local sessionBlocked = isAutoBombBlockedBySession()
 			for _, player in ipairs(Players:GetPlayers()) do
-				if BoosterService:IsAutoBombEnabled(player) then
+				if sessionBlocked and player:GetAttribute("AutoBombEnabled") == true then
+					player:SetAttribute("AutoBombEnabled", false)
+				end
+
+				if enforceAutoBombZoneState(player) and BoosterService:IsAutoBombEnabled(player) then
 					local bombManager = getBombManager()
 					if bombManager and bombManager.TryThrowBomb then
 						bombManager.TryThrowBomb(player, nil, {
