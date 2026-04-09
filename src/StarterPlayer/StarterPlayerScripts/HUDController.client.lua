@@ -4,6 +4,7 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
 local MarketplaceService = game:GetService("MarketplaceService")
 local SocialService = game:GetService("SocialService") 
 local Workspace = game:GetService("Workspace")
@@ -30,6 +31,12 @@ local MUTATION_MULTIPLIERS = Constants.MUTATION_MULTIPLIERS
 
 print("[HUDController] Loaded (Only Money in Leaderstats, Active Offline Income Calc)")
 
+local function isTouchOnlyControls(): boolean
+	return UserInputService.TouchEnabled
+		and not UserInputService.KeyboardEnabled
+		and not UserInputService.MouseEnabled
+end
+
 local function setupButtonAnimation(button: GuiButton)
 	local uiScale = button:FindFirstChildOfClass("UIScale")
 	if not uiScale then
@@ -51,18 +58,53 @@ local function setupHUD()
 	local gui = playerGui:WaitForChild("GUI")
 	local hud = gui:WaitForChild("HUD")
 	local timeLabel = hud:FindFirstChild("SessionTimer") :: TextLabel
+
+	local function updateSessionTimerLayout()
+		local viewportSize = gui.AbsoluteSize
+		local touchOnly = isTouchOnlyControls()
+		local width = if touchOnly
+			then math.clamp(math.floor(viewportSize.X * 0.30 + 0.5), 104, 148)
+			else math.clamp(math.floor(viewportSize.X * 0.20 + 0.5), 180, 320)
+		local height = if touchOnly
+			then math.clamp(math.floor(viewportSize.Y * 0.04 + 0.5), 24, 34)
+			else math.clamp(math.floor(viewportSize.Y * 0.055 + 0.5), 40, 58)
+		local topOffset = if touchOnly
+			then math.clamp(math.floor(viewportSize.Y * 0.012 + 0.5), 4, 10)
+			else math.clamp(math.floor(viewportSize.Y * 0.02 + 0.5), 8, 18)
+		local textSize = if touchOnly
+			then math.clamp(math.floor(height * 0.52 + 0.5), 14, 18)
+			else math.clamp(math.floor(height * 0.48 + 0.5), 18, 28)
+		local cornerRadius = if touchOnly
+			then math.clamp(math.floor(height * 0.25 + 0.5), 6, 10)
+			else math.clamp(math.floor(height * 0.22 + 0.5), 8, 14)
+		local strokeThickness = if touchOnly then 1 else 2
+
+		timeLabel.Position = UDim2.new(0.5, 0, 0, topOffset)
+		timeLabel.Size = UDim2.fromOffset(width, height)
+		timeLabel.TextScaled = false
+		timeLabel.TextSize = textSize
+
+		local corner = timeLabel:FindFirstChildOfClass("UICorner")
+		if corner then
+			corner.CornerRadius = UDim.new(0, cornerRadius)
+		end
+
+		local stroke = timeLabel:FindFirstChildOfClass("UIStroke")
+		if stroke then
+			stroke.Thickness = strokeThickness
+		end
+	end
+
 	if not timeLabel then
 		timeLabel = Instance.new("TextLabel")
 		timeLabel.Name = "SessionTimer"
 		timeLabel.AnchorPoint = Vector2.new(0.5, 0)
-		timeLabel.Position = UDim2.fromScale(0.5, 0.02)
-		timeLabel.Size = UDim2.fromOffset(260, 54)
 		timeLabel.BackgroundTransparency = 0.25
 		timeLabel.BackgroundColor3 = Color3.fromRGB(18, 18, 18)
 		timeLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
 		timeLabel.BorderSizePixel = 0
 		timeLabel.Font = Enum.Font.GothamBold
-		timeLabel.TextScaled = true
+		timeLabel.TextScaled = false
 		timeLabel.Text = "05:00"
 		timeLabel.Parent = hud
 
@@ -76,6 +118,9 @@ local function setupHUD()
 		stroke.Transparency = 0.65
 		stroke.Parent = timeLabel
 	end
+
+	updateSessionTimerLayout()
+	gui:GetPropertyChangedSignal("AbsoluteSize"):Connect(updateSessionTimerLayout)
 
 	-- 1. TRACK MONEY AND OFFLINE INCOME
 	local labels = hud:WaitForChild("Labels")

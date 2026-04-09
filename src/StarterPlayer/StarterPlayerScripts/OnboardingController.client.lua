@@ -405,16 +405,38 @@ local function setHudBackButtonHidden(backButton: GuiButton, hidden: boolean)
 	end
 end
 
+local function getTutorialProxyOffset(step: number): Vector2
+	if step == 4 then
+		local viewportSize = mainGui.AbsoluteSize
+		local yOffset = math.clamp(math.floor(viewportSize.Y * 0.065 + 0.5), 28, 54)
+		return Vector2.new(0, yOffset)
+	end
+
+	return Vector2.zero
+end
+
 local function syncTutorialGuiLayout(targetButton: GuiButton)
+	local proxyOffset = getTutorialProxyOffset(currentStep)
+
 	if tutorialGuiProxyButton then
 		tutorialGuiProxyButton.AnchorPoint = Vector2.zero
-		tutorialGuiProxyButton.Position = UDim2.fromOffset(targetButton.AbsolutePosition.X, targetButton.AbsolutePosition.Y)
+		tutorialGuiProxyButton.Position = UDim2.fromOffset(
+			targetButton.AbsolutePosition.X + proxyOffset.X,
+			targetButton.AbsolutePosition.Y + proxyOffset.Y
+		)
 		tutorialGuiProxyButton.Size = UDim2.fromOffset(targetButton.AbsoluteSize.X, targetButton.AbsoluteSize.Y)
 		tutorialGuiProxyButton.Rotation = targetButton.Rotation
 	end
 
-	local centerX = targetButton.AbsolutePosition.X + (targetButton.AbsoluteSize.X * 0.5)
-	local topY = targetButton.AbsolutePosition.Y
+	local referencePosition = targetButton.AbsolutePosition
+	local referenceSize = targetButton.AbsoluteSize
+	if tutorialGuiProxyButton then
+		referencePosition = tutorialGuiProxyButton.AbsolutePosition
+		referenceSize = tutorialGuiProxyButton.AbsoluteSize
+	end
+
+	local centerX = referencePosition.X + (referenceSize.X * 0.5)
+	local topY = referencePosition.Y
 
 	if tutorialGuiCursor then
 		local cursorParent: Instance = targetButton

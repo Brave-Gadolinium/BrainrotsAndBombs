@@ -6,11 +6,37 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local MarketplaceService = game:GetService("MarketplaceService")
 
 local ProductConfigurations = require(ReplicatedStorage.Modules.ProductConfigurations)
+local FrameManager = require(ReplicatedStorage.Modules.FrameManager)
+local ClientZoneService = require(ReplicatedStorage.Modules.ClientZoneService)
 
 local player = Players.LocalPlayer
 local events = ReplicatedStorage:WaitForChild("Events")
 local requestAutoBombState = events:WaitForChild("RequestAutoBombState") :: RemoteEvent
 local reportAnalyticsIntent = events:WaitForChild("ReportAnalyticsIntent") :: RemoteEvent
+
+type HudBoosterDefinition = {
+	ProductName: string,
+	CandidateNames: {string},
+}
+
+local HUD_BOOSTER_DEFINITIONS: {HudBoosterDefinition} = {
+	{ProductName = "MegaExplosion", CandidateNames = {"MegaExplosion", "Mega Explosion"}},
+	{ProductName = "Shield", CandidateNames = {"Shield"}},
+	{ProductName = "NukeBooster", CandidateNames = {"Nuke", "NukeBooster", "Nuke Booster"}},
+}
+
+local WATCHED_HUD_DESCENDANTS = {
+	GUI = true,
+	HUD = true,
+	Left = true,
+	Buttons1 = true,
+	MegaExplosion = true,
+	["Mega Explosion"] = true,
+	Shield = true,
+	Nuke = true,
+	NukeBooster = true,
+	["Nuke Booster"] = true,
+}
 
 local function formatRemainingTime(endsAt: number): string
 	local remaining = math.max(0, math.floor(endsAt - os.time()))
@@ -24,6 +50,7 @@ local function safeFindCard(frame: Instance, cardName: string): Frame?
 	if card and card:IsA("Frame") then
 		return card
 	end
+
 	return nil
 end
 
@@ -31,14 +58,102 @@ local function setButtonText(button: GuiButton?, text: string)
 	if not button then
 		return
 	end
+
 	if button:IsA("TextButton") then
 		button.Text = text
-	else
-		local label = button:FindFirstChildWhichIsA("TextLabel", true)
-		if label then
-			label.Text = text
+		return
+	end
+
+	local label = button:FindFirstChildWhichIsA("TextLabel", true)
+	if label then
+		label.Text = text
+	end
+end
+
+local function bindButtonOnce(button: GuiButton?, attributeName: string, callback: () -> ())
+	if not button or button:GetAttribute(attributeName) == true then
+		return
+	end
+
+	button:SetAttribute(attributeName, true)
+	button.Activated:Connect(callback)
+end
+
+local function findNamedInstance(parent: Instance, candidateNames: {string}): Instance?
+	for _, candidateName in ipairs(candidateNames) do
+		local directChild = parent:FindFirstChild(candidateName)
+		if directChild then
+			return directChild
 		end
 	end
+
+	for _, candidateName in ipairs(candidateNames) do
+		local descendant = parent:FindFirstChild(candidateName, true)
+		if descendant then
+			return descendant
+		end
+	end
+
+	return nil
+end
+
+local function findHudButtonsContainer(): GuiObject?
+	local playerGui = player:FindFirstChild("PlayerGui")
+	if not playerGui then
+		return nil
+	end
+
+	local gui = playerGui:FindFirstChild("GUI")
+	if not gui then
+		return nil
+	end
+
+	local hud = gui:FindFirstChild("HUD")
+	if not hud then
+		return nil
+	end
+
+	local leftPanel = hud:FindFirstChild("Left")
+	if not leftPanel then
+		return nil
+	end
+
+	local buttons1 = leftPanel:FindFirstChild("Buttons1")
+	if buttons1 and buttons1:IsA("GuiObject") then
+		return buttons1
+	end
+
+	return nil
+end
+
+local function resolveHudBooster(definition: HudBoosterDefinition): (GuiObject?, GuiButton?)
+	local buttons1 = findHudButtonsContainer()
+	if not buttons1 then
+		return nil, nil
+	end
+
+	local target = findNamedInstance(buttons1, definition.CandidateNames)
+	if not target then
+		return nil, nil
+	end
+
+	local visibilityTarget = if target:IsA("GuiObject") then target else nil
+	local actionButton: GuiButton? = nil
+
+	if target:IsA("GuiButton") then
+		actionButton = target
+	else
+		local nestedButton = target:FindFirstChildWhichIsA("GuiButton", true)
+		if nestedButton then
+			actionButton = nestedButton
+		end
+	end
+
+	if not visibilityTarget and actionButton then
+		visibilityTarget = actionButton
+	end
+
+	return visibilityTarget, actionButton
 end
 
 local function reportStoreOpened(surface: string)
@@ -49,11 +164,19 @@ local function reportStoreOpened(surface: string)
 	})
 end
 
-local function reportStorePromptFailed(productName: string, purchaseKind: string, purchaseId: number?, reason: string)
+local function reportStorePromptFailed(
+	surface: string,
+	section: string,
+	entrypoint: string,
+	productName: string,
+	purchaseKind: string,
+	purchaseId: number?,
+	reason: string
+)
 	local payload = {
-		surface = "boosters",
-		section = "boosters",
-		entrypoint = "button",
+		surface = surface,
+		section = section,
+		entrypoint = entrypoint,
 		productName = productName,
 		purchaseKind = purchaseKind,
 		paymentType = "robux",
@@ -69,77 +192,110 @@ local function reportStorePromptFailed(productName: string, purchaseKind: string
 	reportAnalyticsIntent:FireServer("StorePromptFailed", payload)
 end
 
+local function promptBoosterProduct(surface: string, section: string, entrypoint: string, productName: string)
+	local productId = ProductConfigurations.Products[productName]
+	if type(productId) ~= "number" or productId <= 0 then
+		reportStorePromptFailed(surface, section, entrypoint, productName, "product", productId, "missing_product_id")
+		return
+	end
+
+	reportAnalyticsIntent:FireServer("StoreOfferPrompted", {
+		surface = surface,
+		section = section,
+		entrypoint = entrypoint,
+		productName = productName,
+		productId = productId,
+		purchaseKind = "product",
+		paymentType = "robux",
+	})
+
+	local success, err = pcall(function()
+		MarketplaceService:PromptProductPurchase(player, productId)
+	end)
+	if not success then
+		warn("[BoostersController] Failed to prompt product:", productName, err)
+		reportStorePromptFailed(surface, section, entrypoint, productName, "product", productId, "prompt_failed")
+	end
+end
+
+local function promptBoosterGamePass(surface: string, section: string, entrypoint: string, productName: string)
+	local passId = ProductConfigurations.GamePasses[productName]
+	if type(passId) ~= "number" or passId <= 0 then
+		reportStorePromptFailed(surface, section, entrypoint, productName, "gamepass", passId, "missing_pass_id")
+		return
+	end
+
+	reportAnalyticsIntent:FireServer("StoreOfferPrompted", {
+		surface = surface,
+		section = section,
+		entrypoint = entrypoint,
+		productName = productName,
+		passId = passId,
+		purchaseKind = "gamepass",
+		paymentType = "robux",
+	})
+
+	local success, err = pcall(function()
+		MarketplaceService:PromptGamePassPurchase(player, passId)
+	end)
+	if not success then
+		warn("[BoostersController] Failed to prompt gamepass:", productName, err)
+		reportStorePromptFailed(surface, section, entrypoint, productName, "gamepass", passId, "prompt_failed")
+	end
+end
+
+local function shouldShowHudBoosterButtons(): boolean
+	return ClientZoneService.IsInMineZone() and not FrameManager.isAnyFrameOpen()
+end
+
+local function syncHudBoosterButtons()
+	local shouldShow = shouldShowHudBoosterButtons()
+
+	for _, definition in ipairs(HUD_BOOSTER_DEFINITIONS) do
+		local visibilityTarget, actionButton = resolveHudBooster(definition)
+		if actionButton then
+			bindButtonOnce(actionButton, "BoostersHudBound", function()
+				promptBoosterProduct("boosters_hud", "boosters_hud", "button", definition.ProductName)
+			end)
+			actionButton.Active = shouldShow
+			actionButton.AutoButtonColor = shouldShow
+		end
+
+		if visibilityTarget then
+			visibilityTarget.Visible = shouldShow
+		end
+	end
+end
+
 local function setupCardActions(boostersFrame: Frame)
 	local megaCard = safeFindCard(boostersFrame, "MegaExplosion")
 	local shieldCard = safeFindCard(boostersFrame, "Shield")
 	local nukeCard = safeFindCard(boostersFrame, "NukeBooster")
 	local autoCard = safeFindCard(boostersFrame, "AutoBomb")
 
-	local function bindPrompt(card: Frame?, productName: string, infoType: Enum.InfoType)
+	local function bindProductCard(card: Frame?, productName: string)
 		if not card then
 			return
 		end
+
 		local buyButton = card:FindFirstChild("Buy")
 		if not buyButton or not buyButton:IsA("GuiButton") then
 			return
 		end
 
-		buyButton.MouseButton1Click:Connect(function()
-			if infoType == Enum.InfoType.Product then
-				local productId = ProductConfigurations.Products[productName]
-				if type(productId) == "number" and productId > 0 then
-					reportAnalyticsIntent:FireServer("StoreOfferPrompted", {
-						surface = "boosters",
-						section = "boosters",
-						entrypoint = "button",
-						productName = productName,
-						productId = productId,
-						purchaseKind = "product",
-						paymentType = "robux",
-					})
-					local success, err = pcall(function()
-						MarketplaceService:PromptProductPurchase(player, productId)
-					end)
-					if not success then
-						warn("[BoostersController] Failed to prompt product:", productName, err)
-						reportStorePromptFailed(productName, "product", productId, "prompt_failed")
-					end
-				else
-					reportStorePromptFailed(productName, "product", productId, "missing_product_id")
-				end
-			else
-				local passId = ProductConfigurations.GamePasses[productName]
-				if type(passId) == "number" and passId > 0 then
-					reportAnalyticsIntent:FireServer("StoreOfferPrompted", {
-						surface = "boosters",
-						section = "boosters",
-						entrypoint = "button",
-						productName = productName,
-						passId = passId,
-						purchaseKind = "gamepass",
-						paymentType = "robux",
-					})
-					local success, err = pcall(function()
-						MarketplaceService:PromptGamePassPurchase(player, passId)
-					end)
-					if not success then
-						warn("[BoostersController] Failed to prompt gamepass:", productName, err)
-						reportStorePromptFailed(productName, "gamepass", passId, "prompt_failed")
-					end
-				else
-					reportStorePromptFailed(productName, "gamepass", passId, "missing_pass_id")
-				end
-			end
+		bindButtonOnce(buyButton, "BoostersCardBound", function()
+			promptBoosterProduct("boosters", "boosters", "button", productName)
 		end)
 	end
 
-	bindPrompt(megaCard, "MegaExplosion", Enum.InfoType.Product)
-	bindPrompt(shieldCard, "Shield", Enum.InfoType.Product)
-	bindPrompt(nukeCard, "NukeBooster", Enum.InfoType.Product)
+	bindProductCard(megaCard, "MegaExplosion")
+	bindProductCard(shieldCard, "Shield")
+	bindProductCard(nukeCard, "NukeBooster")
+
 	if autoCard then
 		local autoButton = autoCard:FindFirstChild("Buy")
 		if autoButton and autoButton:IsA("GuiButton") then
-			autoButton.MouseButton1Click:Connect(function()
+			bindButtonOnce(autoButton, "BoostersCardBound", function()
 				if player:GetAttribute("HasAutoBomb") == true then
 					local nextState = not (player:GetAttribute("AutoBombEnabled") == true)
 					reportAnalyticsIntent:FireServer("AutoBombToggleRequested", {
@@ -150,27 +306,7 @@ local function setupCardActions(boostersFrame: Frame)
 					return
 				end
 
-				local passId = ProductConfigurations.GamePasses.AutoBomb
-				if type(passId) == "number" and passId > 0 then
-					reportAnalyticsIntent:FireServer("StoreOfferPrompted", {
-						surface = "boosters",
-						section = "boosters",
-						entrypoint = "button",
-						productName = "AutoBomb",
-						passId = passId,
-						purchaseKind = "gamepass",
-						paymentType = "robux",
-					})
-					local success, err = pcall(function()
-						MarketplaceService:PromptGamePassPurchase(player, passId)
-					end)
-					if not success then
-						warn("[BoostersController] Failed to prompt AutoBomb pass:", err)
-						reportStorePromptFailed("AutoBomb", "gamepass", passId, "prompt_failed")
-					end
-				else
-					reportStorePromptFailed("AutoBomb", "gamepass", passId, "missing_pass_id")
-				end
+				promptBoosterGamePass("boosters", "boosters", "button", "AutoBomb")
 			end)
 		end
 	end
@@ -220,6 +356,18 @@ local function updateBoostersUI(boostersFrame: Frame)
 	end
 end
 
+local function shouldRefreshForHudDescendant(descendant: Instance): boolean
+	if WATCHED_HUD_DESCENDANTS[descendant.Name] then
+		return true
+	end
+
+	if descendant:IsA("GuiButton") and descendant:FindFirstAncestor("Buttons1") ~= nil then
+		return true
+	end
+
+	return false
+end
+
 local function init()
 	local playerGui = player:WaitForChild("PlayerGui")
 	local gui = playerGui:WaitForChild("GUI")
@@ -238,6 +386,7 @@ local function init()
 
 	local function refresh()
 		updateBoostersUI(boostersFrame)
+		syncHudBoosterButtons()
 	end
 
 	player:GetAttributeChangedSignal("MegaExplosionEndsAt"):Connect(refresh)
@@ -245,9 +394,37 @@ local function init()
 	player:GetAttributeChangedSignal("HasAutoBomb"):Connect(refresh)
 	player:GetAttributeChangedSignal("AutoBombEnabled"):Connect(refresh)
 
+	FrameManager.Changed:Connect(function()
+		syncHudBoosterButtons()
+	end)
+
+	ClientZoneService.Changed:Connect(function()
+		syncHudBoosterButtons()
+	end)
+
+	player.CharacterAdded:Connect(function()
+		task.defer(syncHudBoosterButtons)
+	end)
+
+	player.CharacterRemoving:Connect(function()
+		task.defer(syncHudBoosterButtons)
+	end)
+
+	playerGui.DescendantAdded:Connect(function(descendant)
+		if shouldRefreshForHudDescendant(descendant) then
+			task.defer(syncHudBoosterButtons)
+		end
+	end)
+
+	playerGui.DescendantRemoving:Connect(function(descendant)
+		if WATCHED_HUD_DESCENDANTS[descendant.Name] then
+			task.defer(syncHudBoosterButtons)
+		end
+	end)
+
 	task.spawn(function()
 		while true do
-			refresh()
+			updateBoostersUI(boostersFrame)
 			task.wait(1)
 		end
 	end)
