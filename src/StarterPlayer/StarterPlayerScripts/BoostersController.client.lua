@@ -328,7 +328,7 @@ local function updateBoostersUI(boostersFrame: Frame)
 		if megaEndsAt > os.time() then
 			setButtonText(button, "Active " .. formatRemainingTime(megaEndsAt))
 		else
-			setButtonText(button, "Buy R$39")
+			setButtonText(button, "Buy  39")
 		end
 	end
 
@@ -337,13 +337,13 @@ local function updateBoostersUI(boostersFrame: Frame)
 		if shieldEndsAt > os.time() then
 			setButtonText(button, "Active " .. formatRemainingTime(shieldEndsAt))
 		else
-			setButtonText(button, "Buy R$39")
+			setButtonText(button, "Buy  39")
 		end
 	end
 
 	if nukeCard then
 		local button = nukeCard:FindFirstChild("Buy") :: GuiButton?
-		setButtonText(button, "Buy R$79")
+		setButtonText(button, "Buy  79")
 	end
 
 	if autoCard then
@@ -351,7 +351,7 @@ local function updateBoostersUI(boostersFrame: Frame)
 		if hasAutoBomb then
 			setButtonText(button, if autoBombEnabled then "Owned - On" else "Owned - Off")
 		else
-			setButtonText(button, "Buy R$299")
+			setButtonText(button, "Buy  299")
 		end
 	end
 end

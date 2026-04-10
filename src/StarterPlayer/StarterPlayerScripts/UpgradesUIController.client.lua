@@ -111,7 +111,7 @@ local function trySetRobuxPrice(label: TextLabel?, productId: number?)
 			return MarketplaceService:GetProductInfo(productId, Enum.InfoType.Product)
 		end)
 		if success and info and label.Parent then
-			local priceText = "R$" .. tostring(info.PriceInRobux)
+			local priceText = " " .. tostring(info.PriceInRobux)
 			robuxPriceCache[productId] = priceText
 			label.Text = priceText
 		end

@@ -72,6 +72,10 @@ local function shouldRagdollMotor(motor: Motor6D): boolean
 		return false
 	end
 
+	if motor.Name == "Neck" then
+		return false
+	end
+
 	return true
 end
 

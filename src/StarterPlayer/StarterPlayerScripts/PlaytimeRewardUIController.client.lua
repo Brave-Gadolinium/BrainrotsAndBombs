@@ -118,7 +118,7 @@ local function getRewardAmountText(reward): string
 	end
 
 	if reward.Type == "LuckyBlock" then
-		return reward.DisplayName or "Lucky Block"
+		return ""
 	end
 
 	return reward.DisplayName or reward.Type or "Reward"

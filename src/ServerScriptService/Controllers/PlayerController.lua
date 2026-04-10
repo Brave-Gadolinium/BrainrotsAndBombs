@@ -13,6 +13,7 @@ local Debris = game:GetService("Debris")
 local ProfileStoreModule = require(ServerScriptService.Modules.ProfileStore)
 local ItemConfigurations = require(ReplicatedStorage.Modules.ItemConfigurations)
 local ProductConfigurations = require(ReplicatedStorage.Modules.ProductConfigurations)
+local LimitedTimeOfferConfiguration = require(ReplicatedStorage.Modules.LimitedTimeOfferConfiguration)
 local NumberFormatter = require(ReplicatedStorage.Modules.NumberFormatter)
 local UpgradesConfiguration = require(ReplicatedStorage.Modules.UpgradesConfigurations)
 local SlotUnlockConfigurations = require(ReplicatedStorage.Modules.SlotUnlockConfigurations)
@@ -34,6 +35,7 @@ local MAX_OFFLINE_TIME = 8 * 60 * 60
 local INCOME_SCALING = Constants.INCOME_SCALING
 local VIP_TAG = "V.I.P"
 local COLLECT_ALL_GAMEPASS = ProductConfigurations.GamePasses.CollectAll or 1783037385
+local LIMITED_TIME_COLLECT_ALL_DURATION = math.max(0, math.floor(tonumber(LimitedTimeOfferConfiguration.OfferDurationSeconds) or 0))
 
 local GROUP_ID = 0 
 
@@ -73,6 +75,7 @@ type PlayerData = {
 	DiscoveredItems: {[string]: boolean},
 	ClaimedPacks: {[string]: boolean},
 	RedeemedCodes: {[string]: boolean},
+	LimitedTimeOffers: {[string]: any},
 	Boosters: {
 		MegaExplosionEndsAt: number,
 		ShieldEndsAt: number,
@@ -106,6 +109,9 @@ local Template: PlayerData = {
 	DiscoveredItems = {},
 	ClaimedPacks = {},
 	RedeemedCodes = {},
+	LimitedTimeOffers = {
+		CollectAllStartTime = 0,
+	},
 	Boosters = {
 		MegaExplosionEndsAt = 0,
 		ShieldEndsAt = 0,
@@ -164,6 +170,38 @@ local function ensureUpgradeDefaults(data)
 			data[statId] = normalizeUpgradeValue(config, data[statId])
 		end
 	end
+end
+
+local function ensureLimitedTimeOfferDefaults(data)
+	if type(data) ~= "table" then
+		return
+	end
+
+	if type(data.LimitedTimeOffers) ~= "table" then
+		data.LimitedTimeOffers = {}
+	end
+
+	local offers = data.LimitedTimeOffers
+	local collectAllStartTime = math.max(0, math.floor(tonumber(offers.CollectAllStartTime) or 0))
+	if collectAllStartTime <= 0 then
+		collectAllStartTime = os.time()
+		offers.CollectAllStartTime = collectAllStartTime
+	end
+end
+
+local function syncLimitedTimeOfferAttributes(player: Player, data)
+	if type(data) ~= "table" then
+		return
+	end
+
+	ensureLimitedTimeOfferDefaults(data)
+
+	local offers = data.LimitedTimeOffers
+	local collectAllStartTime = math.max(0, math.floor(tonumber(offers.CollectAllStartTime) or 0))
+	local collectAllEndTime = collectAllStartTime + LIMITED_TIME_COLLECT_ALL_DURATION
+
+	player:SetAttribute(LimitedTimeOfferConfiguration.StartAttribute, collectAllStartTime)
+	player:SetAttribute(LimitedTimeOfferConfiguration.EndAttribute, collectAllEndTime)
 end
 
 local function playPurchaseEffects(player: Player)
@@ -732,6 +770,7 @@ local function createLeaderstats(player: Player, data: PlayerData)
 	player:SetAttribute("HasAutoBomb", player:GetAttribute("HasAutoBomb") == true)
 	player:SetAttribute("HasCollectAll", player:GetAttribute("HasCollectAll") == true)
 	player:SetAttribute("AutoBombEnabled", false)
+	syncLimitedTimeOfferAttributes(player, data)
 
 	ensureUpgradeDefaults(data)
 	for _, config in ipairs(UpgradesConfiguration.Upgrades) do
@@ -766,6 +805,7 @@ local function onPlayerAdded(player: Player)
 	profile:AddUserId(player.UserId)
 	profile:Reconcile() 
 	ensureUpgradeDefaults(profile.Data)
+	ensureLimitedTimeOfferDefaults(profile.Data)
 
 	-- Wipe legacy data
 	if profile.Data.Speed then profile.Data.Speed = nil end
@@ -786,6 +826,7 @@ local function onPlayerAdded(player: Player)
 	player:SetAttribute("SpinNumber", profile.Data.SpinNumber or 0)
 	player:SetAttribute("LastDailySpin", profile.Data.LastDailySpin or 0)
 	player:SetAttribute("UnlockedSlots", SlotUnlockConfigurations.ClampSlots(profile.Data.unlocked_slots))
+	player:SetAttribute(LimitedTimeOfferConfiguration.ReadyAttribute, false)
 
 	if type(profile.Data.AnalyticsFunnels) ~= "table" then
 		profile.Data.AnalyticsFunnels = {
@@ -860,6 +901,7 @@ local function onPlayerAdded(player: Player)
 		setupBackpackTracking(bp)
 		syncEntitlementAttribute(player, "HasCollectAll", ProductConfigurations.GamePasses.CollectAll)
 		syncEntitlementAttribute(player, "HasAutoBomb", ProductConfigurations.GamePasses.AutoBomb)
+		player:SetAttribute(LimitedTimeOfferConfiguration.ReadyAttribute, true)
 
 		player.CharacterAdded:Connect(function(char)
 			deadPlayers[player] = false

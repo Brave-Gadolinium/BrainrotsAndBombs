@@ -122,7 +122,7 @@ local function setText(target, text)
 end
 
 local function formatRobux(price)
-	return "R$" .. tostring(price)
+	return " " .. tostring(price)
 end
 
 local function formatCash(amount)
@@ -198,7 +198,7 @@ local function applyResolvedRobuxPrice(label, productId, infoType, onResolved)
 	task.spawn(function()
 		local info = getCachedProductInfo(productId, infoType)
 		local price = info and info.PriceInRobux
-		local text = if type(price) == "number" then formatRobux(price) else "R$?"
+		local text = if type(price) == "number" then formatRobux(price) else " ?"
 		applyBasePriceText(label, text)
 
 		if onResolved then

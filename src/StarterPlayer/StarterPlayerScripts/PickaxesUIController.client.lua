@@ -29,7 +29,10 @@ local CLICK_SCALE = 0.95
 local TWEEN_INFO = TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 local DISABLED_BUTTON_BACKGROUND_TRANSPARENCY_OFFSET = 0.14
 local DISABLED_BUTTON_TEXT_TRANSPARENCY_OFFSET = 0.18
-local ACTION_BUTTON_GREEN = Color3.fromRGB(66, 191, 110)
+local ACTION_BUTTON_BUY = Color3.fromRGB(34, 255, 0)
+local ACTION_BUTTON_EQUIP = Color3.fromRGB(255, 214, 64)
+local ACTION_BUTTON_LOCKED = Color3.fromRGB(120, 120, 120)
+local ACTION_BUTTON_TEXT = Color3.fromRGB(255, 255, 255)
 
 type TextVisualSnapshot = {
 	TextColor3: Color3,
@@ -139,15 +142,23 @@ local function restoreButtonVisuals(button: GuiButton)
 	end
 end
 
-local function applyActionButtonStyle(button: GuiButton?)
+local function applyButtonTheme(button: GuiButton?, backgroundColor: Color3, textColor: Color3?)
 	if not button then
 		return
 	end
 
-	button.BackgroundColor3 = ACTION_BUTTON_GREEN
+	local resolvedTextColor = textColor or ACTION_BUTTON_TEXT
+	button.BackgroundColor3 = backgroundColor
 
 	if button:IsA("ImageButton") then
-		button.ImageColor3 = ACTION_BUTTON_GREEN
+		button.ImageColor3 = backgroundColor
+	end
+
+	local snapshot = getButtonVisualSnapshot(button)
+	for textElement in pairs(snapshot.TextElements) do
+		if textElement.Parent and (textElement:IsA("TextLabel") or textElement:IsA("TextButton")) then
+			textElement.TextColor3 = resolvedTextColor
+		end
 	end
 end
 
@@ -240,7 +251,7 @@ local function getRobuxPriceText(productId: number?): string?
 	end)
 
 	if success and info and info.PriceInRobux then
-		local priceText = "R$" .. tostring(info.PriceInRobux)
+		local priceText = " " .. tostring(info.PriceInRobux)
 		robuxPriceCache[productId] = priceText
 		return priceText
 	end
@@ -451,36 +462,31 @@ local function updateShowcase(pickaxesFrame: Frame, pickaxeId: string, shouldRep
 	end
 
 	if leftPrimary then
-		leftPrimary.Text = "Explosion Radius: " .. formatStatValue(config.ExplosionRadius)
+		leftPrimary.Text = "Radius: " .. formatStatValue(config.ExplosionRadius)
 	end
 	if leftSecondary then
-		leftSecondary.Text = "Knockback: " .. formatStatValue(config.KnockbackForce)
+		leftSecondary.Text = "KB: " .. formatStatValue(config.KnockbackForce)
 	end
 	if rightPrimary then
-		rightPrimary.Text = "Max Depth: " .. formatStatValue(config.MaxDepthLevel)
+		rightPrimary.Text = "Depth: " .. formatStatValue(config.MaxDepthLevel)
 	end
 	if rightSecondary then
-		rightSecondary.Text = "Cooldown: " .. formatStatValue(config.Cooldown) .. "s"
+		rightSecondary.Text = "CD: " .. formatStatValue(config.Cooldown) .. "s"
 	end
 
 	if softBuyButton then
 		if isOwned then
-			setButtonText(softBuyButton, if isEquipped then "EQUIPPED" else "OWNED")
-			setButtonEnabled(softBuyButton, false)
-			if isEquipped then
-				applyActionButtonStyle(softBuyButton)
-			end
+			setButtonText(softBuyButton, if isEquipped then "Equipped" else "Equip")
+			setButtonEnabled(softBuyButton, not isEquipped)
+			applyButtonTheme(softBuyButton, ACTION_BUTTON_EQUIP)
 		elseif isLockedForSoftPurchase then
-			setButtonText(softBuyButton, "LOCKED")
+			setButtonText(softBuyButton, "Locked")
 			setButtonEnabled(softBuyButton, false)
+			applyButtonTheme(softBuyButton, ACTION_BUTTON_LOCKED)
 		else
-			if (config.Price or 0) > 0 then
-				setButtonText(softBuyButton, "BUY $" .. NumberFormatter.Format(config.Price))
-			else
-				setButtonText(softBuyButton, "FREE")
-			end
+			setButtonText(softBuyButton, "Buy")
 			setButtonEnabled(softBuyButton, true)
-			applyActionButtonStyle(softBuyButton)
+			applyButtonTheme(softBuyButton, ACTION_BUTTON_BUY)
 		end
 	end
 
@@ -533,8 +539,9 @@ local function bindShowcaseButtons(pickaxesFrame: Frame)
 			end
 
 			local isOwned = currentOwnedPickaxes[selectedPickaxeId] == true
+			local isEquipped = currentEquippedPickaxe == selectedPickaxeId
 			local isLockedForSoftPurchase = not isOwned and currentNextAvailableId ~= nil and selectedPickaxeId ~= currentNextAvailableId
-			if isOwned or isLockedForSoftPurchase then
+			if isLockedForSoftPurchase or isEquipped then
 				return
 			end
 
@@ -628,11 +635,12 @@ local function initializeUI(preferHighestOwned: boolean?)
 
 		local isOwned = currentOwnedPickaxes[pickaxe.Id] == true
 		local isEquipped = currentEquippedPickaxe == pickaxe.Id
+		local isLockedForSoftPurchase = not isOwned and currentNextAvailableId ~= nil and pickaxe.Id ~= currentNextAvailableId
 
 		local imageLabel = newTemplate:FindFirstChild("Image") :: ImageLabel?
-		local lockedIcon = newTemplate:FindFirstChild("Locked") :: GuiObject?
-		local checkmarkIcon = newTemplate:FindFirstChild("Checkmark") :: GuiObject?
-		local levelLabel = newTemplate:FindFirstChild("Level") :: TextLabel?
+		local lockedIcon = imageLabel:FindFirstChild("Locked") :: GuiObject?
+		local checkmarkIcon = imageLabel:FindFirstChild("Checkmark") :: GuiObject?
+		local levelLabel = imageLabel:FindFirstChild("Level")
 		local nameCostFrame = newTemplate:FindFirstChild("NameCost")
 		local nameLabel = nameCostFrame and nameCostFrame:FindFirstChild("Name") :: TextLabel?
 		local costLabel = nameCostFrame and nameCostFrame:FindFirstChild("Cost") :: TextLabel?
@@ -640,19 +648,19 @@ local function initializeUI(preferHighestOwned: boolean?)
 
 		if imageLabel then
 			imageLabel.Image = pickaxe.Data.ImageId
-			imageLabel.ImageColor3 = if isOwned then Color3.new(1, 1, 1) else Color3.new(0.2, 0.2, 0.2)
+			imageLabel.ImageColor3 = if isOwned or not isLockedForSoftPurchase then Color3.new(1, 1, 1) else Color3.new(0.2, 0.2, 0.2)
 		end
 
-		if lockedIcon then
-			lockedIcon.Visible = not isOwned
-		end
+		-- if lockedIcon then
+		-- 	lockedIcon.Visible = not isOwned
+		-- end
 
-		if checkmarkIcon then
-			checkmarkIcon.Visible = isOwned
-		end
+		-- if checkmarkIcon then
+		-- 	checkmarkIcon.Visible = isOwned
+		-- end
 
 		if levelLabel then
-			levelLabel.Text = "Lvl " .. tostring(getBombTier(pickaxe.Id))
+			levelLabel.Text = tostring(getBombTier(pickaxe.Id))
 		end
 
 		if nameLabel then
@@ -666,16 +674,27 @@ local function initializeUI(preferHighestOwned: boolean?)
 		if equipButton then
 			setupButtonAnimation(equipButton)
 			if isOwned then
-				setButtonText(equipButton, if isEquipped then "EQUIPPED" else "EQUIP")
+				setButtonText(equipButton, if isEquipped then "Equipped" else "Equip")
 				setButtonEnabled(equipButton, not isEquipped)
-				applyActionButtonStyle(equipButton)
-			else
-				setButtonText(equipButton, "LOCKED")
+				applyButtonTheme(equipButton, ACTION_BUTTON_EQUIP)
+			elseif isLockedForSoftPurchase then
+				setButtonText(equipButton, "Locked")
 				setButtonEnabled(equipButton, false)
+				applyButtonTheme(equipButton, ACTION_BUTTON_LOCKED)
+			else
+				setButtonText(equipButton, "Buy")
+				setButtonEnabled(equipButton, true)
+				applyButtonTheme(equipButton, ACTION_BUTTON_BUY)
 			end
 
 			equipButton.MouseButton1Click:Connect(function()
-				if currentOwnedPickaxes[pickaxe.Id] ~= true or currentEquippedPickaxe == pickaxe.Id then
+				local currentlyOwned = currentOwnedPickaxes[pickaxe.Id] == true
+				local currentlyEquipped = currentEquippedPickaxe == pickaxe.Id
+				local currentlyLockedForSoftPurchase = not currentlyOwned
+					and currentNextAvailableId ~= nil
+					and pickaxe.Id ~= currentNextAvailableId
+
+				if currentlyEquipped or currentlyLockedForSoftPurchase then
 					return
 				end
 

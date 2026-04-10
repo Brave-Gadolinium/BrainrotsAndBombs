@@ -240,7 +240,9 @@ function MonetizationController.ProcessReceipt(receiptInfo)
 			AnalyticsFunnelsService:HandleStatUpgradePurchased(player, targetUpgradeConfig.Id, "robux", "upgrades")
 			logStorePurchaseSuccess(player, "product", productId, targetUpgradeConfig.Id, "robux", "upgrades")
 
-			if notif then notif:FireClient(player, "+" .. upgradeAmount .. " " .. targetUpgradeConfig.DisplayName .. " Purchased!", "Success") end
+			if notif then
+				notif:FireClient(player, targetUpgradeConfig.DisplayName .. " Purchased!", "Success")
+			end
 			playPurchaseEffects(player)
 			return Enum.ProductPurchaseDecision.PurchaseGranted
 		end

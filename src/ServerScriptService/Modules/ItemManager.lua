@@ -111,6 +111,8 @@ local fallbackItemTemplates: {[string]: Model} = {}
 local VISUAL_ITEM_VERTICAL_OFFSET = -0.75
 local FALLBACK_ITEM_SIZE = Vector3.new(2.4, 2.4, 2.4)
 local WORLD_ITEM_PICKUP_DISTANCE = 16
+local ZONE1_SPAWN_Y_OFFSET = 2
+local LUCKY_BLOCK_TOOL_FORWARD_OFFSET = 2.25
 local EVENT_WORLD_ITEM_TAG = "EventBrainrotWorldItem"
 local queuedMineZones: {[BasePart]: boolean} = {}
 local mineSpawnQueue: {BasePart} = {}
@@ -639,7 +641,7 @@ function ItemManager.GiveLuckyBlockToPlayer(player: Player, blockId: string)
 		end
 	end
 
-	model:PivotTo(handle.CFrame)
+	model:PivotTo(handle.CFrame * CFrame.new(0, 0, -LUCKY_BLOCK_TOOL_FORWARD_OFFSET))
 	newTool.Parent = player:WaitForChild("Backpack")
 	return newTool
 end
@@ -755,12 +757,13 @@ function ItemManager.SpawnInMine(mineZonePart: BasePart)
 		local randomRot = CFrame.Angles(0, math.rad(math.random(0, 360)), 0)
 
 		for attempt = 1, maxAttempts do
-			--local randomX = (math.random() - 0.5) * (mineZonePart.Size.X * 0.9)
-			--local randomZ = (math.random() - 0.5) * (mineZonePart.Size.Z * 0.9)
-
 			local randomX = (math.random() - 0.5) * (mineZonePart.Size.X * 0.9)
-			local randomY = (math.random() - 0.5) * mineZonePart.Size.Y
 			local randomZ = (math.random() - 0.5) * (mineZonePart.Size.Z * 0.9)
+			local randomY = (math.random() - 0.5) * mineZonePart.Size.Y
+
+			if mineZonePart.Name == "Zone1" then
+				randomY += ZONE1_SPAWN_Y_OFFSET
+			end
 
 
 			spawnCFrame = CFrame.new((mineZonePart.CFrame * CFrame.new(randomX, randomY, randomZ)).Position)
