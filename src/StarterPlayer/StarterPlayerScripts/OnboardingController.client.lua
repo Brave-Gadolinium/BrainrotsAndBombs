@@ -892,6 +892,53 @@ local function findBaseUpgradeGuiButton(): GuiButton?
 	return nil
 end
 
+local function shouldRetryTutorialMask(presentation): boolean
+	if presentation.ShowMoney then
+		local moneyLabel = findMoneyLabel()
+		if not moneyLabel or not moneyLabel.Visible then
+			return true
+		end
+	end
+
+	if presentation.ShowMobileBombButton then
+		local mobileBombButton = findMobileBombButton()
+		if not mobileBombButton or not mobileBombButton.Visible then
+			return true
+		end
+	end
+
+	if presentation.ShowJumpButton then
+		local jumpButton = findMobileJumpButton()
+		if not jumpButton or not jumpButton.Visible then
+			return true
+		end
+	end
+
+	if presentation.ShowPickaxesFrame and currentStep == 8 then
+		local buyButton = findBombBuyButton()
+		if not buyButton or not buyButton.Visible then
+			return true
+		end
+	end
+
+	if presentation.ShowUpgradesFrame and currentStep == 10 then
+		local characterUpgradeButton = findCharacterUpgradeButton()
+		if not characterUpgradeButton or not characterUpgradeButton.Visible then
+			return true
+		end
+	end
+
+	if presentation.ShowBaseUpgradeSurfaceButton then
+		local baseSurfaceGui = findBaseUpgradeSurfaceGui()
+		local baseButton = findBaseUpgradeGuiButton()
+		if not baseSurfaceGui or not baseSurfaceGui.Enabled or not baseButton or not baseButton.Visible then
+			return true
+		end
+	end
+
+	return false
+end
+
 local function getPlayerPlotSurfaceGuis(): {SurfaceGui}
 	local plot = Workspace:FindFirstChild("Plot_" .. player.Name)
 	if not plot then
@@ -1112,6 +1159,10 @@ local function applyTutorialUiMask(presentation)
 	if tutorialGuiBlackout then
 		tutorialGuiBlackout.Visible = presentation.UseBlackout
 		tutorialGuiBlackout.Active = presentation.UseBlackout
+	end
+
+	if shouldRetryTutorialMask(presentation) then
+		maskDirty = true
 	end
 end
 

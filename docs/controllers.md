@@ -50,6 +50,7 @@ Features:
 - Points players to world targets with beams/highlights and opens guided upgrade flows
 - Resets tutorial completion state by closing all non-notification frames and forcing the camera back to the default FOV on the final tutorial step
 - Invalidates cached masking only when top-level HUD/frame children change during tutorial so dynamic UI still restores correctly without mask spam inside animated frames
+- Re-applies FTUE masking when guided targets arrive late so money HUD, purchase buttons, and the base-upgrade surface button do not remain hidden after step transitions
 
 Controller: QuestChainUIController
 

@@ -21,3 +21,4 @@
 - Re-masked tutorial step 5 after leaving the mine so the client hides all UI except the tutorial text and world guidance until the brainrot is placed on the base
 - Added a menu-safe FOV reset so pressing `ESC` cancels active UI/bomb camera FOV effects and restores the camera to the default value instead of leaving the player zoomed
 - Re-synced zone-driven HUD controllers on tutorial completion so step 13 now shows the correct mine/base button set immediately based on the player's current zone
+- Deferred the Drop HUD resync after tutorial completion, kept money visible for masked steps after the first placed brainrot, and retried FTUE masking until late-arriving guided buttons become visible
