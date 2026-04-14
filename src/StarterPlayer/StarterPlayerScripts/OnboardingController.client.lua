@@ -76,6 +76,9 @@ local isRefreshingStep = false
 local DEBUG_TUTORIAL = true
 local lastMaskKey: string? = nil
 local maskActive = false
+local maskDirty = false
+local hasAppliedTutorialCompletionCleanup = false
+local DEFAULT_CAMERA_FOV = 70
 
 local function debugTutorialLog(message: string)
 	if DEBUG_TUTORIAL then
@@ -463,11 +466,12 @@ local function isMaskableEnabledInstance(instance: Instance): boolean
 end
 
 local function setMaskedGuiVisible(guiObject: GuiObject, visible: boolean)
-	if maskedGuiVisibility[guiObject] == nil then
-		maskedGuiVisibility[guiObject] = guiObject.Visible
+	local currentVisible = guiObject.Visible
+	if maskedGuiVisibility[guiObject] == nil or currentVisible ~= visible then
+		maskedGuiVisibility[guiObject] = currentVisible
 	end
 
-	if guiObject.Visible ~= visible then
+	if currentVisible ~= visible then
 		guiObject.Visible = visible
 	end
 end
@@ -491,13 +495,23 @@ local function setMaskedGuiEnabled(instance: Instance, enabled: boolean)
 		return
 	end
 
-	if maskedGuiEnabled[instance] == nil then
-		maskedGuiEnabled[instance] = (instance :: any).Enabled
+	local currentEnabled = (instance :: any).Enabled
+	if maskedGuiEnabled[instance] == nil or currentEnabled ~= enabled then
+		maskedGuiEnabled[instance] = currentEnabled
 	end
 
-	if (instance :: any).Enabled ~= enabled then
+	if currentEnabled ~= enabled then
 		(instance :: any).Enabled = enabled
 	end
+end
+
+local function invalidateTutorialMask()
+	if not maskActive then
+		return
+	end
+
+	maskDirty = true
+	lastMaskKey = nil
 end
 
 local function restoreMaskedGuiEnabled(instance: Instance)
@@ -573,6 +587,52 @@ local function restoreTutorialUiMask()
 	lastTutorialInventoryVisible = nil
 	lastMaskKey = nil
 	maskActive = false
+	maskDirty = false
+end
+
+local function forceDefaultCameraFov()
+	local camera = Workspace.CurrentCamera
+	if camera then
+		camera.FieldOfView = DEFAULT_CAMERA_FOV
+	end
+end
+
+local function closeAllTutorialFrames()
+	if FrameManager.closeAll then
+		FrameManager.closeAll(true)
+		return
+	end
+
+	for _, child in ipairs(frames:GetChildren()) do
+		if child:IsA("GuiObject") and child.Name ~= "Notifications" then
+			child.Visible = false
+		end
+	end
+end
+
+local function applyTutorialCompletionCleanup()
+	if hasAppliedTutorialCompletionCleanup then
+		return
+	end
+
+	hasAppliedTutorialCompletionCleanup = true
+	debugTutorialLog("ApplyFinalCleanup")
+
+	closeAllTutorialFrames()
+	forceDefaultCameraFov()
+
+	task.defer(function()
+		if currentStep >= TutorialConfiguration.FinalStep then
+			closeAllTutorialFrames()
+			forceDefaultCameraFov()
+		end
+	end)
+
+	task.delay(0.15, function()
+		if currentStep >= TutorialConfiguration.FinalStep then
+			forceDefaultCameraFov()
+		end
+	end)
 end
 
 local function getTutorialProxyOffset(step: number): Vector2
@@ -940,12 +1000,13 @@ local function applyTutorialUiMask(presentation)
 		tostring(presentation.UseBlackout),
 	}, "|")
 
-	if maskActive and lastMaskKey == maskKey then
+	if maskActive and lastMaskKey == maskKey and not maskDirty then
 		return
 	end
 
 	maskActive = true
 	lastMaskKey = maskKey
+	maskDirty = false
 
 	debugTutorialLog(("ApplyMask step=%d text=%s money=%s inv=%s pickaxes=%s upgrades=%s base=%s mobileBomb=%s jump=%s"):format(
 		currentStep,
@@ -1053,6 +1114,11 @@ local function applyTutorialUiMask(presentation)
 		tutorialGuiBlackout.Active = presentation.UseBlackout
 	end
 end
+
+hud.ChildAdded:Connect(invalidateTutorialMask)
+hud.ChildRemoved:Connect(invalidateTutorialMask)
+frames.ChildAdded:Connect(invalidateTutorialMask)
+frames.ChildRemoved:Connect(invalidateTutorialMask)
 
 shouldUseTutorialGuiProxy = function(step: number): boolean
 	local presentation = TutorialConfiguration.GetStepPresentation(step)
@@ -1209,6 +1275,37 @@ local function getPlayerPlot(): Model?
 	return nil
 end
 
+local function getNumericAttribute(instance: Instance?, attributeName: string): number?
+	if not instance then
+		return nil
+	end
+
+	local numericValue = tonumber(instance:GetAttribute(attributeName))
+	if numericValue == nil then
+		return nil
+	end
+
+	return numericValue
+end
+
+local function getPlayerBaseNumber(): number?
+	return getNumericAttribute(getPlayerPlot(), "BaseNumber")
+end
+
+local function getInstanceBaseNumber(instance: Instance?): number?
+	local current = instance
+	while current and current ~= Workspace do
+		local baseNumber = getNumericAttribute(current, "BaseNumber")
+		if baseNumber ~= nil then
+			return baseNumber
+		end
+
+		current = current.Parent
+	end
+
+	return nil
+end
+
 local function iteratePlotSlots(callback: (Model, BasePart, BasePart?) -> boolean?)
 	local plot = getPlayerPlot()
 	if not plot then
@@ -1290,6 +1387,10 @@ local function findClosestTaggedPart(tagName: string): BasePart?
 	end
 
 	local PLOT_OWNERSHIP_FALLBACK_DISTANCE = 90
+	local MAX_TAG_DISTANCE_BY_NAME = {
+		UpgradePart = 65,
+	}
+	local playerBaseNumber = if tagName == "UpgradePart" then getPlayerBaseNumber() else nil
 
 	local function getOwningPlot(instance: Instance?): Model?
 		local current = instance
@@ -1377,10 +1478,29 @@ local function findClosestTaggedPart(tagName: string): BasePart?
 	local closestPart: BasePart? = nil
 	local closestDistance = math.huge
 
+	if playerBaseNumber ~= nil then
+		for _, instance in ipairs(CollectionService:GetTagged(tagName)) do
+			if instance:IsA("BasePart") and getInstanceBaseNumber(instance) == playerBaseNumber then
+				local distance = (instance.Position - rootPart.Position).Magnitude
+				if distance < closestDistance then
+					closestDistance = distance
+					closestPart = instance
+				end
+			end
+		end
+
+		if closestPart then
+			return closestPart
+		end
+	end
+
+	closestDistance = math.huge
+
 	for _, instance in ipairs(CollectionService:GetTagged(tagName)) do
 		if instance:IsA("BasePart") and isOwnPlotPart(instance) then
 			local distance = (instance.Position - rootPart.Position).Magnitude
-			if distance < closestDistance then
+			local maxDistance = MAX_TAG_DISTANCE_BY_NAME[tagName]
+			if (type(maxDistance) ~= "number" or distance <= maxDistance) and distance < closestDistance then
 				closestDistance = distance
 				closestPart = instance
 			end
@@ -1516,6 +1636,7 @@ local function applyStepPresentation()
 	hideTutorialGuiOverlay()
 
 	if currentStep < TutorialConfiguration.FinalStep then
+		hasAppliedTutorialCompletionCleanup = false
 		instructionsLabel.Text = stepDefinition.Text
 		instructionsLabel.Visible = presentation.ShowText
 
@@ -1545,6 +1666,8 @@ local function applyStepPresentation()
 
 		return
 	end
+
+	applyTutorialCompletionCleanup()
 
 	clearExpiredPostTutorialCompletion()
 
@@ -1674,6 +1797,7 @@ end)
 
 player.CharacterAdded:Connect(function()
 	task.wait(0.5)
+	hasAppliedTutorialCompletionCleanup = false
 	restoreTutorialUiMask()
 	hideTutorialGuiOverlay()
 	clearAllTargets(true)

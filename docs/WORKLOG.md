@@ -36,3 +36,6 @@
 - Added verbose tutorial debug logs across client tutorial flow, server tutorial service, and slot interactions to trace the freeze.
 - Cached tutorial mask application so heavy UI visibility changes only run when the step/presentation actually changes.
 - After placing a brainrot, step 6 now guides the player to the bomb shop with a masked UI and world arrow (cash step still required before moving to step 7).
+
+## 2026-04-14
+- Restored tutorial step 4 `Go to the surface` to the original direct HUD back button by removing the enlarged proxy hitbox.

@@ -151,6 +151,39 @@ function FrameManager.closeCurrent()
 	end
 end
 
+function FrameManager.closeAll(immediate: boolean?)
+	local visibleFrames = {}
+
+	for _, child in ipairs(framesContainer:GetChildren()) do
+		if child:IsA("GuiObject") and child.Name ~= "Notifications" and child.Visible then
+			initializeFrame(child)
+			table.insert(visibleFrames, child)
+		end
+	end
+
+	if #visibleFrames == 0 then
+		currentlyOpenFrame = nil
+		syncFrameState()
+		return
+	end
+
+	if immediate then
+		for _, frame in ipairs(visibleFrames) do
+			local hiddenPosition: UDim2 = UDim2.new(framePositions[frame].X.Scale, framePositions[frame].X.Offset, 1.5, 0)
+			frame.Position = hiddenPosition
+			frame.Visible = false
+		end
+
+		currentlyOpenFrame = nil
+		syncFrameState()
+		return
+	end
+
+	for _, frame in ipairs(visibleFrames) do
+		FrameManager.close(frame.Name)
+	end
+end
+
 function FrameManager.close(frameName: string)
 	syncFrameState()
 	local targetFrame = framesContainer:FindFirstChild(frameName)

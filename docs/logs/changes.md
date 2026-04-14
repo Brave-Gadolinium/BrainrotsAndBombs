@@ -12,3 +12,12 @@
 - Stopped tutorial step 6 from auto-skipping to 7 before the player reaches the bomb shop
 - Reworked tutorial steps 3-8 to require actual pickup, explicit back-button return, cash collection, and shop opening via `ShopPart`
 - Restored step 6 completion on reaching `CashGoal` and made the money HUD visible during that step
+- Restored step 4 completion on mine-zone exit and switched `UpgradePart` targeting/opening to `BaseNumber` matching with plot-attribute fallback
+- Restored tutorial step 4 `Go to the surface` to use the original HUD back button instead of the enlarged proxy overlay
+- Fixed tutorial UI mask restoration so HUD/frame descendants created or updated during FTUE restore their current `Visible`/`Enabled` state after the tutorial ends
+- Fixed `ChainQuests` runtime naming and forced quest rows to re-render after tutorial completion so `QuestText` and claim UI do not stay hidden
+- Added a final tutorial client cleanup that closes every non-notification frame and forces the camera `FieldOfView` back to the default value on step 13
+- Narrowed tutorial mask invalidation from all descendants to top-level HUD/frame children so opening the bomb shop no longer re-applies the same step 8 mask repeatedly
+- Re-masked tutorial step 5 after leaving the mine so the client hides all UI except the tutorial text and world guidance until the brainrot is placed on the base
+- Added a menu-safe FOV reset so pressing `ESC` cancels active UI/bomb camera FOV effects and restores the camera to the default value instead of leaving the player zoomed
+- Re-synced zone-driven HUD controllers on tutorial completion so step 13 now shows the correct mine/base button set immediately based on the player's current zone

@@ -146,6 +146,10 @@ ClientZoneService.Changed:Connect(function()
 	syncHudMode()
 end)
 
+player:GetAttributeChangedSignal("OnboardingStep"):Connect(function()
+	task.defer(syncHudMode)
+end)
+
 player.CharacterAdded:Connect(function()
 	task.defer(syncHudMode)
 end)

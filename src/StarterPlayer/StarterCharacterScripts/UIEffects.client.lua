@@ -2,6 +2,7 @@
 -- LOCATION: StarterPlayerScripts/UIEffects
 
 local CollectionService = game:GetService("CollectionService")
+local GuiService = game:GetService("GuiService")
 local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -265,13 +266,24 @@ end
 --================------------------------------------------------
 local isFovPopping = false
 local bombHitFovToken = 0
+local fovPopToken = 0
 local bombHitBaselineFov: number? = nil
 local activeBombHitTweens: {Tween} = {}
+local activeFovPopTweens: {Tween} = {}
+local DEFAULT_CAMERA_FOV = 70
 
 local BOMB_HIT_FOV_BOOST = 16
 local BOMB_HIT_FOV_HOLD_TIME = 0.14
 local BOMB_HIT_FOV_IN_INFO = TweenInfo.new(0.08, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
 local BOMB_HIT_FOV_OUT_INFO = TweenInfo.new(0.42, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+
+local function clearFovPopTweens()
+	for _, tween in ipairs(activeFovPopTweens) do
+		tween:Cancel()
+	end
+
+	table.clear(activeFovPopTweens)
+end
 
 local function clearBombHitTweens()
 	for _, tween in ipairs(activeBombHitTweens) do
@@ -281,38 +293,76 @@ local function clearBombHitTweens()
 	table.clear(activeBombHitTweens)
 end
 
+local function resetMenuFovEffects()
+	fovPopToken += 1
+	bombHitFovToken += 1
+	isFovPopping = false
+	bombHitBaselineFov = nil
+	clearFovPopTweens()
+	clearBombHitTweens()
+
+	local currentCam = Workspace.CurrentCamera
+	if currentCam then
+		currentCam.FieldOfView = DEFAULT_CAMERA_FOV
+	end
+end
+
 local function FOVPop()
 	local currentCam = Workspace.CurrentCamera
 	if not currentCam then return end
+	if GuiService.MenuIsOpen then return end
 
 	-- Prevent spam-glitching the FOV if they exit the zone repeatedly
 	if isFovPopping then return end
 	isFovPopping = true
+	fovPopToken += 1
+	local token = fovPopToken
 
 	print("[UIEffects] FOV Pop Triggered!")
 
-	local originalFOV = 70 -- Base Roblox FOV
+	local originalFOV = DEFAULT_CAMERA_FOV
 	local targetFOV = originalFOV * 1.25 -- Exactly a 25% increase (87.5)
+	clearFovPopTweens()
 
 	-- Pop open instantly
-	TweenService:Create(currentCam, TweenInfo.new(0.15, Enum.EasingStyle.Sine, Enum.EasingDirection.Out), {FieldOfView = targetFOV}):Play()
+	local popTween = TweenService:Create(
+		currentCam,
+		TweenInfo.new(0.15, Enum.EasingStyle.Sine, Enum.EasingDirection.Out),
+		{FieldOfView = targetFOV}
+	)
+	table.insert(activeFovPopTweens, popTween)
+	popTween:Play()
 
 	-- Hold it for a short duration to make the transition clear within 1 second
 	task.wait(0.6) 
+	if fovPopToken ~= token or GuiService.MenuIsOpen then
+		if fovPopToken == token then
+			resetMenuFovEffects()
+		end
+		return
+	end
 
 	-- Ease it back smoothly
 	if currentCam then
 		local returnTween = TweenService:Create(currentCam, TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {FieldOfView = originalFOV})
+		table.insert(activeFovPopTweens, returnTween)
 		returnTween:Play()
 		returnTween.Completed:Wait() -- Wait for it to finish before allowing another pop
 	end
 
-	isFovPopping = false
+	if fovPopToken == token then
+		isFovPopping = false
+		clearFovPopTweens()
+	end
 end
 
 local function BombHitFOV()
 	local currentCam = Workspace.CurrentCamera
 	if not currentCam then
+		return
+	end
+	if GuiService.MenuIsOpen then
+		resetMenuFovEffects()
 		return
 	end
 
@@ -338,6 +388,10 @@ local function BombHitFOV()
 		if bombHitFovToken ~= token then
 			return
 		end
+		if GuiService.MenuIsOpen then
+			resetMenuFovEffects()
+			return
+		end
 
 		local cameraForReturn = Workspace.CurrentCamera
 		if not cameraForReturn then
@@ -359,6 +413,10 @@ local function BombHitFOV()
 		if bombHitFovToken ~= token then
 			return
 		end
+		if GuiService.MenuIsOpen then
+			resetMenuFovEffects()
+			return
+		end
 
 		local cameraToRestore = Workspace.CurrentCamera
 		if cameraToRestore then
@@ -369,6 +427,8 @@ local function BombHitFOV()
 		bombHitBaselineFov = nil
 	end)
 end
+
+GuiService.MenuOpened:Connect(resetMenuFovEffects)
 
 --================------------------------------------------------
 -- ## EFFECTS LOOP ##

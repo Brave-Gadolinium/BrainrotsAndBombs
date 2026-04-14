@@ -491,6 +491,7 @@ local function spawnPlot(player: Player)
 	newPlot:SetAttribute("OwnerUserId", player.UserId)
 	newPlot:SetAttribute("OwnerName", player.Name)
 	newPlot:SetAttribute("OwnerDisplayName", player.DisplayName)
+	newPlot:SetAttribute("BaseNumber", index)
 	newPlot.Parent = Workspace
 	newPlot:SetPrimaryPartCFrame(locator.CFrame)
 

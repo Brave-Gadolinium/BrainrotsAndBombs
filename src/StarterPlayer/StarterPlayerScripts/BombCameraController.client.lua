@@ -1,6 +1,7 @@
 --!strict
 
 local Players = game:GetService("Players")
+local GuiService = game:GetService("GuiService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
@@ -26,6 +27,7 @@ local OCCLUSION_LIFT_STEP = 4
 local OCCLUSION_ATTEMPTS = 3
 local BLAST_GRACE_TIME = 0.75
 local EARLY_BLAST_REPLICATION_GRACE = 0.2
+local DEFAULT_CAMERA_FOV = 70
 
 type CameraBaseline = {
 	CameraType: Enum.CameraType,
@@ -218,6 +220,10 @@ end
 
 local function forceRestoreImmediate()
 	if not state.IsActive then
+		local camera = getCurrentCamera()
+		if camera then
+			camera.FieldOfView = DEFAULT_CAMERA_FOV
+		end
 		return
 	end
 
@@ -227,6 +233,11 @@ local function forceRestoreImmediate()
 	disconnectMonitors()
 	restoreBaselineImmediate()
 	clearState()
+
+	local camera = getCurrentCamera()
+	if camera then
+		camera.FieldOfView = DEFAULT_CAMERA_FOV
+	end
 end
 
 local function resolveShotPosition(focus: Vector3, desiredPosition: Vector3, bombContainer: Instance?, zonePart: BasePart?): Vector3
@@ -596,5 +607,9 @@ triggerUIEffect.OnClientEvent:Connect(function(effectName: string, ...)
 end)
 
 player.CharacterRemoving:Connect(function()
+	forceRestoreImmediate()
+end)
+
+GuiService.MenuOpened:Connect(function()
 	forceRestoreImmediate()
 end)

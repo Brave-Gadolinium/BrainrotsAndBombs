@@ -216,6 +216,37 @@ local function getPlayerPlot(): Model?
 	return nil
 end
 
+local function getNumericAttribute(instance: Instance?, attributeName: string): number?
+	if not instance then
+		return nil
+	end
+
+	local numericValue = tonumber(instance:GetAttribute(attributeName))
+	if numericValue == nil then
+		return nil
+	end
+
+	return numericValue
+end
+
+local function getPlayerBaseNumber(): number?
+	return getNumericAttribute(getPlayerPlot(), "BaseNumber")
+end
+
+local function getInstanceBaseNumber(instance: Instance?): number?
+	local current = instance
+	while current and current ~= Workspace do
+		local baseNumber = getNumericAttribute(current, "BaseNumber")
+		if baseNumber ~= nil then
+			return baseNumber
+		end
+
+		current = current.Parent
+	end
+
+	return nil
+end
+
 local function getPlotCenter(plot: Model): Vector3?
 	if plot.Parent then
 		return plot:GetPivot().Position
@@ -246,6 +277,18 @@ local function isWithinOwnBaseInteractionRange(position: Vector3): boolean
 	end
 
 	return (position - plotCenter).Magnitude <= OWN_BASE_INTERACTION_RADIUS
+end
+
+local function isTouchPartOwnedByPlayerBase(touchPart: BasePart, rootPosition: Vector3, tagName: string): boolean
+	if tagName == "UpgradePart" then
+		local playerBaseNumber = getPlayerBaseNumber()
+		local partBaseNumber = getInstanceBaseNumber(touchPart)
+		if playerBaseNumber ~= nil and partBaseNumber ~= nil then
+			return playerBaseNumber == partBaseNumber
+		end
+	end
+
+	return isWithinOwnBaseInteractionRange(rootPosition)
 end
 
 -- [ HELPER: BUTTON ANIMATIONS ]
@@ -321,7 +364,7 @@ local function setupTaggedTouchTrigger(tagName: string, frameName: string)
 					and hum.Health > 0
 					and root
 					and root:IsA("BasePart")
-					and isWithinOwnBaseInteractionRange(root.Position)
+					and isTouchPartOwnedByPlayerBase(touchPart, root.Position, tagName)
 					and isTouchFrameAllowedByTutorial(frameName)
 				then
 					lastInteraction = now

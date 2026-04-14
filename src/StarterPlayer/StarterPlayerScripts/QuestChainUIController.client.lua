@@ -6,6 +6,7 @@ local TweenService = game:GetService("TweenService")
 
 local NotificationManager = require(ReplicatedStorage.Modules.NotificationManager)
 local NumberFormatter = require(ReplicatedStorage.Modules.NumberFormatter)
+local TutorialConfiguration = require(ReplicatedStorage.Modules.TutorialConfiguration)
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -29,12 +30,16 @@ end
 
 local function ensureQuestFrame(): Frame
 	local existing = hud:FindFirstChild("ChainQuests")
+	if not existing then
+		existing = hud:FindFirstChild("Quests")
+	end
 	if existing and existing:IsA("Frame") then
+		existing.Name = "ChainQuests"
 		return existing
 	end
 
 	local frame = Instance.new("Frame")
-	frame.Name = "Quests"
+	frame.Name = "ChainQuests"
 	frame.AnchorPoint = Vector2.new(0, 0)
 	frame.Position = UDim2.fromScale(0.02, 0.34)
 	frame.Size = UDim2.fromScale(0.2, 0.3)
@@ -164,6 +169,7 @@ local template = questList:WaitForChild("Template") :: Frame
 local HOVER_SCALE = 1.03
 local CLICK_SCALE = 0.97
 local TWEEN_INFO = TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+local latestState = nil
 
 local function setupButtonAnimation(button: GuiButton)
 	local uiScale = button:FindFirstChildOfClass("UIScale")
@@ -217,20 +223,37 @@ local function renderQuest(questState)
 
 	local questText = questItem:FindFirstChild("QuestText") :: TextLabel?
 	if questText then
+		questText.Visible = true
 		questText.Text = formatQuestText(questState)
 	end
 
 	local claimFrame = questItem:FindFirstChild("ClaimFrame") :: Frame?
 	local collectButton = claimFrame and claimFrame:FindFirstChild("Collect") :: TextButton?
+	local claimText: TextLabel? = nil
+	local coin: Frame? = nil
 	local rewardAmount: TextLabel? = nil
 	if collectButton then
-		local coin = collectButton:FindFirstChild("Coin")
-		if coin then
-			local rewardAmountLabel = coin:FindFirstChild("RewardAmount")
-			if rewardAmountLabel and rewardAmountLabel:IsA("TextLabel") then
-				rewardAmount = rewardAmountLabel
-			end
+		local claimTextInstance = collectButton:FindFirstChild("TextClaim")
+		if claimTextInstance and claimTextInstance:IsA("TextLabel") then
+			claimText = claimTextInstance
 		end
+
+		local coinFrame = collectButton:FindFirstChild("Coin")
+		if coinFrame and coinFrame:IsA("Frame") then
+			coin = coinFrame
+		end
+	end
+
+	if coin then
+		coin.Visible = true
+		local rewardAmountLabel = coin:FindFirstChild("RewardAmount")
+		if rewardAmountLabel and rewardAmountLabel:IsA("TextLabel") then
+			rewardAmount = rewardAmountLabel
+			rewardAmount.Visible = true
+		end
+	end
+	if claimText then
+		claimText.Visible = true
 	end
 
 	local canClaim = questState.isCompleted == true and questState.isClaimed ~= true
@@ -285,6 +308,7 @@ local function renderQuest(questState)
 end
 
 renderState = function(state)
+	latestState = state
 	clearQuestItems()
 
 	if not state or state.enabled == false or not state.active or #state.active == 0 then
@@ -314,3 +338,20 @@ if ok then
 else
 	warn("[QuestChainUIController] Failed to fetch initial quest state")
 end
+
+local lastOnboardingStep = tonumber(player:GetAttribute("OnboardingStep")) or 0
+player:GetAttributeChangedSignal("OnboardingStep"):Connect(function()
+	local nextOnboardingStep = tonumber(player:GetAttribute("OnboardingStep")) or 0
+	if nextOnboardingStep >= TutorialConfiguration.FinalStep
+		and lastOnboardingStep < TutorialConfiguration.FinalStep
+		and latestState
+	then
+		task.defer(function()
+			if latestState then
+				renderState(latestState)
+			end
+		end)
+	end
+
+	lastOnboardingStep = nextOnboardingStep
+end)

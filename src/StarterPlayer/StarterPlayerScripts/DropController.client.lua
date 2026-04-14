@@ -72,6 +72,11 @@ ClientZoneService.Changed:Connect(function(nextZone)
 	updateDropButton()
 end)
 
+player:GetAttributeChangedSignal("OnboardingStep"):Connect(function()
+	isInMineZone = ClientZoneService.IsInMineZone()
+	updateDropButton()
+end)
+
 player.CharacterAdded:Connect(function(character)
 	bindCharacter(character)
 end)

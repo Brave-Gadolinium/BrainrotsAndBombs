@@ -605,7 +605,9 @@ function TutorialService:HandleBrainrotPickedUp(player: Player)
 end
 
 function TutorialService:HandleMineZoneExited(player: Player)
-	return
+	if getCurrentStep(player) == 4 then
+		self:AdvanceToStep(player, 5)
+	end
 end
 
 function TutorialService:HandleBrainrotPlaced(player: Player)

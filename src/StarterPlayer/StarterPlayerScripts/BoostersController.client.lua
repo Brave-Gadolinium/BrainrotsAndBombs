@@ -402,6 +402,10 @@ local function init()
 		syncHudBoosterButtons()
 	end)
 
+	player:GetAttributeChangedSignal("OnboardingStep"):Connect(function()
+		task.defer(syncHudBoosterButtons)
+	end)
+
 	player.CharacterAdded:Connect(function()
 		task.defer(syncHudBoosterButtons)
 	end)
