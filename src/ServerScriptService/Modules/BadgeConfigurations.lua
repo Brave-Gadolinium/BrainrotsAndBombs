@@ -32,7 +32,7 @@ BadgeConfigurations.Badges = {
 	},
 	BrainrotEmpire = {
 		Id = 1017978213685005,
-		Name = "Brainrot Empire",
+		Name = "Brainrot Collector 5",
 	},
 	Millionaire = {
 		Id = 954581339851427,

@@ -24,6 +24,7 @@ local PlayerController
 local BoosterService
 local PlaytimeRewardController
 local DailyRewardController
+local OfflineIncomeController
 local TutorialService
 local PickaxeController
 local TRANSACTION_TYPES = AnalyticsEconomyService:GetTransactionTypes()
@@ -392,6 +393,32 @@ function MonetizationController.ProcessReceipt(receiptInfo)
 		return Enum.ProductPurchaseDecision.NotProcessedYet
 	end
 
+	if productName == "OfflineIncomeX5" then
+		if not OfflineIncomeController then
+			OfflineIncomeController = require(ServerScriptService.Controllers.OfflineIncomeController)
+		end
+
+		local success = false
+		local rewardGranted = false
+		if OfflineIncomeController and OfflineIncomeController.HandleRobuxClaim then
+			success, rewardGranted = OfflineIncomeController:HandleRobuxClaim(player)
+		end
+
+		if success then
+			if rewardGranted then
+				AnalyticsEconomyService:LogEntitlementGranted(player, "OfflineIncomeX5", productName, nil, {
+					feature = "offline_income",
+					content_id = productName,
+					context = "shop",
+				})
+				logStorePurchaseSuccess(player, "product", productId, productName, "robux", "offline_income")
+				playPurchaseEffects(player)
+			end
+			return Enum.ProductPurchaseDecision.PurchaseGranted
+		end
+		return Enum.ProductPurchaseDecision.NotProcessedYet
+	end
+
 	if productName == "DailyRewardsSkipAll" or productName == "DailyRewardsSkip1" then
 		if not DailyRewardController then
 			DailyRewardController = require(ServerScriptService.Controllers.DailyRewardController)
@@ -553,6 +580,7 @@ end
 function MonetizationController:Init(controllers)
 	PlaytimeRewardController = controllers.PlaytimeRewardController
 	DailyRewardController = controllers.DailyRewardController
+	OfflineIncomeController = controllers.OfflineIncomeController
 	print("[MonetizationController] Initialized")
 end
 

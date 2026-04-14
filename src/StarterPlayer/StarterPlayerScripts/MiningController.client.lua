@@ -13,6 +13,7 @@ local BombToolClient = require(Modules:WaitForChild("BombToolClient"))
 local FrameManager = require(Modules:WaitForChild("FrameManager"))
 local ClientZoneService = require(Modules:WaitForChild("ClientZoneService"))
 local PickaxesConfigurations = require(Modules:WaitForChild("PickaxesConfigurations"))
+local TutorialConfiguration = require(Modules:WaitForChild("TutorialConfiguration"))
 
 -- References for Animation, Sounds & UI
 local Templates = ReplicatedStorage:WaitForChild("Templates")
@@ -154,10 +155,25 @@ local function isAnyBlockingFrameVisible(): boolean
 	return false
 end
 
+local function isTutorialMobileBombAllowed(): boolean
+	local onboardingStep = tonumber(player:GetAttribute("OnboardingStep")) or 0
+	if onboardingStep <= 0 then
+		return true
+	end
+
+	local presentation = TutorialConfiguration.GetStepPresentation(onboardingStep)
+	if presentation.MaskUi then
+		return presentation.ShowMobileBombButton
+	end
+
+	return true
+end
+
 local function shouldShowMobileBombButton(): boolean
 	return UserInputService.TouchEnabled
 		and not UserInputService.KeyboardEnabled
 		and not UserInputService.MouseEnabled
+		and isTutorialMobileBombAllowed()
 		and ClientZoneService.IsInMineZone()
 		and not isAnyBlockingFrameVisible()
 end
@@ -931,6 +947,10 @@ end)
 
 player.CharacterRemoving:Connect(function()
 	bindTrackedBombTool(nil)
+	updateMobileBombButtonState()
+end)
+
+player:GetAttributeChangedSignal("OnboardingStep"):Connect(function()
 	updateMobileBombButtonState()
 end)
 

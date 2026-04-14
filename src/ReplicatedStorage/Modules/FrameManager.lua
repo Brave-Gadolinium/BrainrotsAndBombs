@@ -17,10 +17,11 @@ local TWEEN_INFO: TweenInfo = TweenInfo.new(0.4, Enum.EasingStyle.Quint, Enum.Ea
 local BLUR_TWEEN_INFO: TweenInfo = TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 local BLUR_EFFECT_NAME = "FrameManagerBlur"
 local BLUR_VISIBLE_SIZE = 18
+local NON_BLOCKING_ATTRIBUTE = "IgnoreFrameManagerBlocking"
 
 local currentlyOpenFrame: GuiObject? = nil
 local framePositions: {[GuiObject]: UDim2} = {}
-local trackedFrames: {[GuiObject]: RBXScriptConnection} = {}
+local trackedFrames: {[GuiObject]: {RBXScriptConnection}} = {}
 local stateChangedEvent = Instance.new("BindableEvent")
 local lastAnyFrameOpen = false
 local lastFrameName: string? = nil
@@ -28,7 +29,9 @@ local lastFrameName: string? = nil
 FrameManager.Changed = stateChangedEvent.Event
 
 local function isBlockingFrame(frame: Instance): boolean
-	return frame:IsA("GuiObject") and frame.Name ~= "Notifications"
+	return frame:IsA("GuiObject")
+		and frame.Name ~= "Notifications"
+		and frame:GetAttribute(NON_BLOCKING_ATTRIBUTE) ~= true
 end
 
 local function ensureBlurEffect(): BlurEffect
@@ -56,7 +59,11 @@ local function updateBlur(anyFrameOpen: boolean)
 end
 
 local function getVisibleBlockingFrame(): GuiObject?
-	if currentlyOpenFrame and currentlyOpenFrame.Parent and currentlyOpenFrame.Visible then
+	if currentlyOpenFrame
+		and currentlyOpenFrame.Parent
+		and currentlyOpenFrame.Visible
+		and isBlockingFrame(currentlyOpenFrame)
+	then
 		return currentlyOpenFrame
 	end
 
@@ -94,7 +101,10 @@ local function trackFrame(frame: Instance)
 		return
 	end
 
-	trackedFrames[guiObject] = guiObject:GetPropertyChangedSignal("Visible"):Connect(syncFrameState)
+	trackedFrames[guiObject] = {
+		guiObject:GetPropertyChangedSignal("Visible"):Connect(syncFrameState),
+		guiObject:GetAttributeChangedSignal(NON_BLOCKING_ATTRIBUTE):Connect(syncFrameState),
+	}
 end
 
 local function untrackFrame(frame: Instance)
@@ -102,9 +112,11 @@ local function untrackFrame(frame: Instance)
 		return
 	end
 
-	local connection = trackedFrames[frame]
-	if connection then
-		connection:Disconnect()
+	local connections = trackedFrames[frame]
+	if connections then
+		for _, connection in ipairs(connections) do
+			connection:Disconnect()
+		end
 		trackedFrames[frame] = nil
 	end
 end

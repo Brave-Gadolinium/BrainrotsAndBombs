@@ -23,8 +23,17 @@ local reportActionEvent: RemoteEvent? = nil
 local postTutorialCompletionEvent: RemoteEvent? = nil
 local CURRENT_TUTORIAL_VERSION = 2
 local STEP_ONE_MIN_DISPLAY_TIME = 1.5
+local STEP_TWELVE_AUTO_ADVANCE_DELAY = 0
 local stepActivatedAt: {[Player]: number} = {}
 local stepOneEvaluationTokens: {[Player]: number} = {}
+local stepTwelveAutoAdvanceTokens: {[Player]: number} = {}
+local DEBUG_TUTORIAL = true
+
+local function debugTutorialLog(player: Player, message: string)
+	if DEBUG_TUTORIAL then
+		print(("[Tutorial][Server][%s] %s"):format(player.Name, message))
+	end
+end
 
 local function getUpgradeConfig(upgradeId: string)
 	for _, config in ipairs(UpgradesConfigurations.Upgrades) do
@@ -66,6 +75,7 @@ end
 
 local function syncStepAttribute(player: Player, step: number)
 	player:SetAttribute("OnboardingStep", step)
+	debugTutorialLog(player, ("OnboardingStep=%d"):format(step))
 end
 
 local function markStepActivated(player: Player)
@@ -74,6 +84,31 @@ end
 
 local function invalidateScheduledStepOneEvaluation(player: Player)
 	stepOneEvaluationTokens[player] = (stepOneEvaluationTokens[player] or 0) + 1
+end
+
+local function invalidateScheduledStepTwelveAutoAdvance(player: Player)
+	stepTwelveAutoAdvanceTokens[player] = (stepTwelveAutoAdvanceTokens[player] or 0) + 1
+end
+
+local function scheduleStepTwelveAutoAdvance(player: Player)
+	local token = (stepTwelveAutoAdvanceTokens[player] or 0) + 1
+	stepTwelveAutoAdvanceTokens[player] = token
+
+	task.delay(STEP_TWELVE_AUTO_ADVANCE_DELAY, function()
+		if stepTwelveAutoAdvanceTokens[player] ~= token then
+			return
+		end
+
+		if not player.Parent then
+			return
+		end
+
+		if getCurrentStep(player) ~= 12 then
+			return
+		end
+
+		TutorialService:AdvanceToStep(player, 13)
+	end)
 end
 
 local function getRemainingInitialStepOneDisplayTime(player: Player, step: number): number
@@ -283,10 +318,15 @@ local function setCurrentStep(player: Player, profile: any, step: number)
 	syncStepAttribute(player, clampedStep)
 	markStepActivated(player)
 	invalidateScheduledStepOneEvaluation(player)
+	invalidateScheduledStepTwelveAutoAdvance(player)
 	AnalyticsFunnelsService:SyncTutorial(player, clampedStep)
 
 	if PlayerController and PlayerController.OnTutorialStepChanged then
 		PlayerController:OnTutorialStepChanged(player, clampedStep)
+	end
+
+	if clampedStep == 12 then
+		scheduleStepTwelveAutoAdvance(player)
 	end
 end
 
@@ -401,6 +441,7 @@ function TutorialService:IsTutorialBaseUpgradeFreeAvailable(player: Player): boo
 	ensureTutorialFlags(profile)
 
 	return profile.Data.TutorialFreeBaseUpgradeConsumed ~= true
+		and getCurrentStep(player) == 11
 		and not hasBaseSlotUpgrade(profile)
 end
 
@@ -411,6 +452,7 @@ function TutorialService:SyncPlayer(player: Player)
 		syncStepAttribute(player, step)
 		markStepActivated(player)
 		invalidateScheduledStepOneEvaluation(player)
+		invalidateScheduledStepTwelveAutoAdvance(player)
 		syncPostTutorialStageAttribute(player, PostTutorialConfiguration.Stages.Completed)
 		AnalyticsFunnelsService:SyncTutorial(player, step)
 		return step
@@ -422,8 +464,13 @@ function TutorialService:SyncPlayer(player: Player)
 	syncStepAttribute(player, step)
 	markStepActivated(player)
 	invalidateScheduledStepOneEvaluation(player)
+	invalidateScheduledStepTwelveAutoAdvance(player)
 	syncPostTutorialStageAttribute(player, PostTutorialConfiguration.Stages.Completed)
 	AnalyticsFunnelsService:SyncTutorial(player, step)
+
+	if step == 12 then
+		scheduleStepTwelveAutoAdvance(player)
+	end
 
 	return step
 end
@@ -440,6 +487,7 @@ function TutorialService:AdvanceToStep(player: Player, step: number): boolean
 		return false
 	end
 
+	debugTutorialLog(player, ("AdvanceToStep %d -> %d"):format(currentStep, targetStep))
 	setCurrentStep(player, profile, targetStep)
 	self:EvaluateCurrentStep(player)
 	return true
@@ -468,6 +516,7 @@ function TutorialService:EvaluateCurrentStep(player: Player)
 		advanced = false
 
 		local currentStep = getCurrentStep(player)
+		debugTutorialLog(player, ("EvaluateStep %d"):format(currentStep))
 		if currentStep >= TutorialConfiguration.FinalStep then
 			self:EvaluatePostTutorial(player)
 			return
@@ -482,10 +531,6 @@ function TutorialService:EvaluateCurrentStep(player: Player)
 				and getRemainingInitialStepOneDisplayTime(player, currentStep) <= 0
 			then
 				nextStep = 2
-			end
-		elseif currentStep == 3 then
-			if hasBrainrotInHandOrInventory(player) then
-				nextStep = 4
 			end
 		elseif currentStep == 5 then
 			if hasPlacedBrainrot(player) then
@@ -505,17 +550,9 @@ function TutorialService:EvaluateCurrentStep(player: Player)
 				nextStep = 11
 			end
 		elseif currentStep == 11 then
-			if isNearBaseUpgradeButton(player) then
-				if hasBaseSlotUpgrade(profile) then
-					consumeTutorialBaseUpgrade(profile)
-					nextStep = 13
-				else
-					nextStep = 12
-				end
-			end
-		elseif currentStep == 12 then
 			if hasBaseSlotUpgrade(profile) then
 				consumeTutorialBaseUpgrade(profile)
+				firePostTutorialCompletion(player, PostTutorialConfiguration.CompletionTexts.BaseUpgrade)
 				nextStep = 13
 			end
 		end
@@ -559,6 +596,7 @@ function TutorialService:HandleBombThrown(player: Player)
 end
 
 function TutorialService:HandleBrainrotPickedUp(player: Player)
+	debugTutorialLog(player, "HandleBrainrotPickedUp")
 	if getCurrentStep(player) == 3 then
 		self:AdvanceToStep(player, 4)
 	else
@@ -567,12 +605,11 @@ function TutorialService:HandleBrainrotPickedUp(player: Player)
 end
 
 function TutorialService:HandleMineZoneExited(player: Player)
-	if getCurrentStep(player) == 4 then
-		self:AdvanceToStep(player, 5)
-	end
+	return
 end
 
 function TutorialService:HandleBrainrotPlaced(player: Player)
+	debugTutorialLog(player, "HandleBrainrotPlaced")
 	if getCurrentStep(player) == 5 then
 		self:AdvanceToStep(player, 6)
 	else
@@ -581,10 +618,12 @@ function TutorialService:HandleBrainrotPlaced(player: Player)
 end
 
 function TutorialService:HandleMoneyChanged(player: Player)
+	debugTutorialLog(player, "HandleMoneyChanged")
 	self:EvaluateCurrentStep(player)
 end
 
 function TutorialService:HandleBombPurchased(player: Player)
+	debugTutorialLog(player, "HandleBombPurchased")
 	if getCurrentStep(player) == 8 then
 		self:AdvanceToStep(player, 9)
 	else
@@ -622,7 +661,8 @@ function TutorialService:HandlePostTutorialBaseUpgradePurchased(player: Player)
 	ensureTutorialFlags(profile)
 	consumeTutorialBaseUpgrade(profile)
 
-	if getCurrentStep(player) == 12 then
+	if getCurrentStep(player) == 11 then
+		firePostTutorialCompletion(player, PostTutorialConfiguration.CompletionTexts.BaseUpgrade)
 		self:AdvanceToStep(player, 13)
 		return
 	end
@@ -633,13 +673,16 @@ end
 
 function TutorialService:ReportAction(player: Player, actionId: string)
 	local currentStep = getCurrentStep(player)
+	debugTutorialLog(player, ("ReportAction %s (step=%d)"):format(actionId, currentStep))
 
 	if actionId == "BackPressed" then
 		if currentStep == 4 then
 			self:AdvanceToStep(player, 5)
 		end
 	elseif actionId == "ShopOpened" then
-		if currentStep == 7 then
+		if currentStep == 6 then
+			self:AdvanceToStep(player, 7)
+		elseif currentStep == 7 then
 			self:AdvanceToStep(player, 8)
 		end
 	elseif actionId == "UpgradesOpened" then
@@ -676,6 +719,7 @@ function TutorialService:Init(controllers)
 	Players.PlayerRemoving:Connect(function(player)
 		stepActivatedAt[player] = nil
 		stepOneEvaluationTokens[player] = nil
+		stepTwelveAutoAdvanceTokens[player] = nil
 	end)
 end
 

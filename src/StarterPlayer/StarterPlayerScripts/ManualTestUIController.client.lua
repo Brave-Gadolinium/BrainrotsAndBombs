@@ -53,6 +53,8 @@ local SNAPSHOT_FIELDS = {
 	{ key = "Spins", label = "Spins" },
 	{ key = "FreeSpinRemaining", label = "Free Spin In" },
 	{ key = "Rebirths", label = "Rebirths" },
+	{ key = "FriendBoostCount", label = "Friend Boost Count" },
+	{ key = "FriendBoostMultiplier", label = "Friend Boost Mult" },
 	{ key = "UnlockedSlots", label = "Unlocked Slots" },
 	{ key = "EquippedPickaxe", label = "Equipped Pickaxe" },
 	{ key = "OwnedPickaxesCount", label = "Owned Pickaxes" },
@@ -71,6 +73,8 @@ local SNAPSHOT_FIELDS = {
 	{ key = "PlaytimeClaimableCount", label = "Playtime Claimable" },
 	{ key = "PlaytimeNextRewardId", label = "Playtime Next Reward" },
 	{ key = "PlaytimeSpeedMultiplier", label = "Playtime Speed" },
+	{ key = "OfflineIncomePendingAmount", label = "Offline Pending" },
+	{ key = "OfflineIncomePlay15Active", label = "Offline Play15" },
 }
 
 local bootstrapData = nil

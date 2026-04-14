@@ -12,6 +12,8 @@ local Workspace = game:GetService("Workspace")
 -- [ MODULES ]
 local NumberFormatter = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("NumberFormatter"))
 local ItemConfigurations = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("ItemConfigurations"))
+local IncomeCalculationUtils = require(ReplicatedStorage.Modules.IncomeCalculationUtils)
+local MultiplierUtils = require(ReplicatedStorage.Modules.MultiplierUtils)
 local ProductConfigurations = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("ProductConfigurations"))
 local NotificationManager = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("NotificationManager")) 
 local Constants = require(ReplicatedStorage.Modules.Constants)
@@ -24,10 +26,6 @@ local hudInitialized = false
 local HOVER_SCALE = 1.05
 local CLICK_SCALE = 0.95
 local TWEEN_INFO = TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-
--- Income Calculation Constants
-local INCOME_SCALING = Constants.INCOME_SCALING
-local MUTATION_MULTIPLIERS = Constants.MUTATION_MULTIPLIERS
 
 print("[HUDController] Loaded (Only Money in Leaderstats, Active Offline Income Calc)")
 
@@ -48,6 +46,19 @@ local function setupButtonAnimation(button: GuiButton)
 	button.MouseButton1Up:Connect(function() TweenService:Create(uiScale, TWEEN_INFO, {Scale = HOVER_SCALE}):Play() end)
 end
 
+local function waitForPath(root: Instance, path: {string}, timeoutPerStep: number?): Instance?
+	local current: Instance? = root
+	for _, name in ipairs(path) do
+		if not current then
+			return nil
+		end
+
+		current = current:WaitForChild(name, timeoutPerStep or 5)
+	end
+
+	return current
+end
+
 local function setupHUD()
 	if hudInitialized then
 		return
@@ -58,6 +69,9 @@ local function setupHUD()
 	local gui = playerGui:WaitForChild("GUI")
 	local hud = gui:WaitForChild("HUD")
 	local timeLabel = hud:FindFirstChild("SessionTimer") :: TextLabel
+	local boosts = hud:FindFirstChild("Boosts")
+	local friendBoostLabel = boosts and waitForPath(boosts, {"Friends", "Value"}, 2)
+	local rebirthBoostLabel = boosts and waitForPath(boosts, {"Rebirth", "Value"}, 2)
 
 	local function updateSessionTimerLayout()
 		local viewportSize = gui.AbsoluteSize
@@ -195,17 +209,28 @@ local function setupHUD()
 			return 0
 		end
 
-		local base = itemData.Income or 0
-		local mutMult = MUTATION_MULTIPLIERS[mut] or 1
-		local lvlMult = INCOME_SCALING ^ (lvl - 1)
-		return base * mutMult * lvlMult
+		return IncomeCalculationUtils.ComputeBaseIncomePerSecond(itemData.Income or 0, mut, lvl)
+	end
+
+	local function updateBoostLabels()
+		if friendBoostLabel and friendBoostLabel:IsA("TextLabel") then
+			local friendBoostMultiplier = tonumber(player:GetAttribute("FriendBoostMultiplier")) or 1
+			friendBoostLabel.Text = MultiplierUtils.FormatMultiplier(friendBoostMultiplier)
+		end
+
+		if rebirthBoostLabel and rebirthBoostLabel:IsA("TextLabel") then
+			local rebirths = tonumber(player:GetAttribute("Rebirths")) or 0
+			rebirthBoostLabel.Text = MultiplierUtils.FormatMultiplier(
+				MultiplierUtils.GetRebirthMultiplier(rebirths)
+			)
+		end
 	end
 
 	local function updateOfflineIncomeLabel()
-		local reb = player:GetAttribute("Rebirths") or 0
-		local rebMult = 1 + (reb * 0.5)
+		local reb = tonumber(player:GetAttribute("Rebirths")) or 0
+		local rebMult = MultiplierUtils.GetRebirthMultiplier(reb)
 		local isVip = player:GetAttribute("IsVIP") == true
-		local vipMult = isVip and 1.5 or 1
+		local vipMult = IncomeCalculationUtils.GetVipMultiplier(isVip)
 		local offlinePerHour = baseIncomePerSec * rebMult * vipMult * 3600
 
 		if offlineLabel then
@@ -290,7 +315,10 @@ local function setupHUD()
 	end)
 
 	player:GetAttributeChangedSignal("Rebirths"):Connect(updateOfflineIncomeLabel)
+	player:GetAttributeChangedSignal("Rebirths"):Connect(updateBoostLabels)
 	player:GetAttributeChangedSignal("IsVIP"):Connect(updateOfflineIncomeLabel)
+	player:GetAttributeChangedSignal("FriendBoostMultiplier"):Connect(updateBoostLabels)
+	updateBoostLabels()
 	refreshPlotBinding()
 
 	-- 2. SETUP RANDOM ITEM BUTTON (GACHA)

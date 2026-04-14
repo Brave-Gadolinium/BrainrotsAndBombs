@@ -9,6 +9,7 @@ local Workspace = game:GetService("Workspace")
 local FrameManager = require(ReplicatedStorage.Modules.FrameManager)
 local LimitedTimeOfferConfiguration = require(ReplicatedStorage.Modules.LimitedTimeOfferConfiguration)
 local ProductConfigurations = require(ReplicatedStorage.Modules.ProductConfigurations)
+local TutorialConfiguration = require(ReplicatedStorage.Modules.TutorialConfiguration)
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -24,7 +25,6 @@ if not frame or not frame:IsA("GuiObject") then
 end
 
 local title = frame:WaitForChild("Title", 5)
-local timerLabel = title and title:WaitForChild("timer", 5)
 local main = frame:WaitForChild("Main", 5)
 local right = main and main:WaitForChild("Right", 5)
 local buyRobux = right and right:WaitForChild("BuyRobux", 5)
@@ -39,8 +39,12 @@ local startAttribute = LimitedTimeOfferConfiguration.StartAttribute
 local endAttribute = LimitedTimeOfferConfiguration.EndAttribute
 local readyAttribute = LimitedTimeOfferConfiguration.ReadyAttribute
 
+local AUTO_OPEN_CONFIRMATION_DELAY = 0.75
 local autoOpenConsumed = false
+local autoOpenAttemptToken = 0
+local autoOpenConfirmationScheduled = false
 local priceResolved = false
+local timerDisplay: GuiObject? = nil
 
 local function getServerTimestamp(): number
 	return Workspace:GetServerTimeNow()
@@ -67,8 +71,17 @@ local function isOfferExpired(): boolean
 	return endTime <= 0 or getServerTimestamp() >= endTime
 end
 
+local function isTutorialBlockingOffer(): boolean
+	local onboardingStep = tonumber(player:GetAttribute("OnboardingStep")) or 0
+	return onboardingStep > 0 and onboardingStep < TutorialConfiguration.FinalStep
+end
+
 local function isOfferAvailable(): boolean
 	if LimitedTimeOfferConfiguration.Enabled ~= true then
+		return false
+	end
+
+	if isTutorialBlockingOffer() then
 		return false
 	end
 
@@ -91,12 +104,54 @@ local function formatRemainingTime(remainingSeconds: number): string
 	local totalHours = math.floor(remainingSeconds / 3600)
 	local minutes = math.floor((remainingSeconds % 3600) / 60)
 	local seconds = remainingSeconds % 60
-	return string.format("%s %02d:%02d:%02d", LimitedTimeOfferConfiguration.TimerPrefix, totalHours, minutes, seconds)
+	return string.format("%02d:%02d:%02d", totalHours, minutes, seconds)
+end
+
+local function resolveTimerDisplay(): GuiObject?
+	if timerDisplay and timerDisplay.Parent and timerDisplay:IsA("GuiObject") then
+		return timerDisplay
+	end
+
+	local function tryCandidate(candidate: Instance?): GuiObject?
+		if candidate and (candidate:IsA("TextLabel") or candidate:IsA("TextButton") or candidate:IsA("TextBox")) then
+			timerDisplay = candidate
+			return timerDisplay
+		end
+
+		return nil
+	end
+
+	local directCandidate = tryCandidate(title and title:FindFirstChild("timer"))
+		or tryCandidate(title and title:FindFirstChild("Timer"))
+		or tryCandidate(frame:FindFirstChild("timer", true))
+		or tryCandidate(frame:FindFirstChild("Timer", true))
+
+	if directCandidate then
+		return directCandidate
+	end
+
+	for _, descendant in ipairs(frame:GetDescendants()) do
+		if descendant:IsA("TextLabel") or descendant:IsA("TextButton") or descendant:IsA("TextBox") then
+			local loweredName = string.lower(descendant.Name)
+			local loweredText = string.lower(descendant.Text)
+			if loweredName == "timer"
+				or string.find(loweredName, "timer", 1, true)
+				or loweredText == "00:00:00"
+			then
+				timerDisplay = descendant
+				return timerDisplay
+			end
+		end
+	end
+
+	return nil
 end
 
 local function refreshTimer()
-	if timerLabel and timerLabel:IsA("TextLabel") then
-		timerLabel.Text = formatRemainingTime(getRemainingSeconds())
+	local timerGuiObject = resolveTimerDisplay()
+	if timerGuiObject and (timerGuiObject:IsA("TextLabel") or timerGuiObject:IsA("TextButton") or timerGuiObject:IsA("TextBox")) then
+		timerGuiObject.Visible = true
+		timerGuiObject.Text = formatRemainingTime(getRemainingSeconds())
 	end
 end
 
@@ -106,6 +161,42 @@ local function hideOffer()
 	else
 		frame.Visible = false
 	end
+end
+
+local function cancelAutoOpenAttempt()
+	autoOpenAttemptToken += 1
+	autoOpenConfirmationScheduled = false
+end
+
+local function scheduleAutoOpenConfirmation()
+	if autoOpenConsumed or autoOpenConfirmationScheduled then
+		return
+	end
+
+	autoOpenAttemptToken += 1
+	autoOpenConfirmationScheduled = true
+	local attemptToken = autoOpenAttemptToken
+
+	task.delay(AUTO_OPEN_CONFIRMATION_DELAY, function()
+		if autoOpenAttemptToken ~= attemptToken then
+			return
+		end
+
+		autoOpenConfirmationScheduled = false
+		if autoOpenConsumed then
+			return
+		end
+
+		if FrameManager.getCurrentFrameName() ~= LimitedTimeOfferConfiguration.FrameName then
+			return
+		end
+
+		if not isOfferAvailable() then
+			return
+		end
+
+		autoOpenConsumed = true
+	end)
 end
 
 local function refreshPriceLabel()
@@ -142,17 +233,24 @@ end
 
 local function tryAutoOpen()
 	if autoOpenConsumed or not isOfferAvailable() then
+		cancelAutoOpenAttempt()
 		return
 	end
 
-	if FrameManager.isAnyFrameOpen() then
+	local currentFrameName = FrameManager.getCurrentFrameName()
+	if currentFrameName == LimitedTimeOfferConfiguration.FrameName then
+		scheduleAutoOpenConfirmation()
 		return
 	end
 
-	autoOpenConsumed = true
+	if currentFrameName ~= nil then
+		return
+	end
+
 	refreshTimer()
 	refreshPriceLabel()
 	FrameManager.open(LimitedTimeOfferConfiguration.FrameName)
+	scheduleAutoOpenConfirmation()
 end
 
 local function refreshOfferState()
@@ -160,6 +258,7 @@ local function refreshOfferState()
 	refreshPriceLabel()
 
 	if not isOfferAvailable() then
+		cancelAutoOpenAttempt()
 		hideOffer()
 	end
 end
@@ -216,7 +315,19 @@ player:GetAttributeChangedSignal(endAttribute):Connect(function()
 	tryAutoOpen()
 end)
 
+player:GetAttributeChangedSignal("OnboardingStep"):Connect(function()
+	refreshOfferState()
+	tryAutoOpen()
+end)
+
 FrameManager.Changed:Connect(function(anyFrameOpen)
+	if anyFrameOpen then
+		if FrameManager.getCurrentFrameName() ~= LimitedTimeOfferConfiguration.FrameName and not autoOpenConsumed then
+			cancelAutoOpenAttempt()
+		end
+		return
+	end
+
 	if not anyFrameOpen then
 		tryAutoOpen()
 	end
@@ -226,6 +337,16 @@ task.spawn(function()
 	while frame.Parent do
 		refreshOfferState()
 		task.wait(1)
+	end
+end)
+
+frame.DescendantAdded:Connect(function(descendant)
+	if descendant:IsA("TextLabel") or descendant:IsA("TextButton") or descendant:IsA("TextBox") then
+		local loweredName = string.lower(descendant.Name)
+		if loweredName == "timer" or string.find(loweredName, "timer", 1, true) then
+			timerDisplay = descendant
+			task.defer(refreshTimer)
+		end
 	end
 end)
 

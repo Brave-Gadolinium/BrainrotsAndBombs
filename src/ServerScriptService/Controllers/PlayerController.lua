@@ -14,10 +14,8 @@ local ProfileStoreModule = require(ServerScriptService.Modules.ProfileStore)
 local ItemConfigurations = require(ReplicatedStorage.Modules.ItemConfigurations)
 local ProductConfigurations = require(ReplicatedStorage.Modules.ProductConfigurations)
 local LimitedTimeOfferConfiguration = require(ReplicatedStorage.Modules.LimitedTimeOfferConfiguration)
-local NumberFormatter = require(ReplicatedStorage.Modules.NumberFormatter)
 local UpgradesConfiguration = require(ReplicatedStorage.Modules.UpgradesConfigurations)
 local SlotUnlockConfigurations = require(ReplicatedStorage.Modules.SlotUnlockConfigurations)
-local Constants = require(ReplicatedStorage.Modules.Constants)
 local BombsConfigurations = require(ReplicatedStorage.Modules.BombsConfigurations)
 local TutorialConfiguration = require(ReplicatedStorage.Modules.TutorialConfiguration)
 local BadgeManager = require(ServerScriptService.Modules.BadgeManager)
@@ -27,25 +25,16 @@ local PickaxeController
 local TutorialService
 local AnalyticsFunnelsService
 local AnalyticsEconomyService
+local OfflineIncomeController
 
 -- [ CONFIGURATION ]
 local DATA_VERSION = "ProjectData_v90" 
 
-local MAX_OFFLINE_TIME = 8 * 60 * 60
-local INCOME_SCALING = Constants.INCOME_SCALING
 local VIP_TAG = "V.I.P"
 local COLLECT_ALL_GAMEPASS = ProductConfigurations.GamePasses.CollectAll or 1783037385
 local LIMITED_TIME_COLLECT_ALL_DURATION = math.max(0, math.floor(tonumber(LimitedTimeOfferConfiguration.OfferDurationSeconds) or 0))
 
 local GROUP_ID = 0 
-
-local MUTATION_MULTIPLIERS = {
-	["Normal"] = 1,
-	["Golden"] = 2,
-	["Diamond"] = 3,
-	["Ruby"] = 4,
-	["Neon"] = 5,
-}
 
 -- Data Types
 type ItemData = { Name: string, Mutation: string, Rarity: string, Level: number }
@@ -79,6 +68,11 @@ type PlayerData = {
 	Boosters: {
 		MegaExplosionEndsAt: number,
 		ShieldEndsAt: number,
+	},
+	OfflineIncome: {
+		PendingBaseAmount: number,
+		PendingSeconds: number,
+		PendingGeneratedAt: number,
 	},
 	[string]: any 
 }
@@ -115,6 +109,11 @@ local Template: PlayerData = {
 	Boosters = {
 		MegaExplosionEndsAt = 0,
 		ShieldEndsAt = 0,
+	},
+	OfflineIncome = {
+		PendingBaseAmount = 0,
+		PendingSeconds = 0,
+		PendingGeneratedAt = 0,
 	},
 	OwnedPickaxes = { ["Bomb 1"] = true },
 	EquippedPickaxe = "Bomb 1",
@@ -451,47 +450,9 @@ local function setupVIPTouch(part: BasePart)
 end
 
 local function calculateOfflineEarnings(player: Player, profile: any)
-	local lastTime = profile.Data.LastSaveTime
-	if not lastTime or lastTime == 0 then return end
-
-	local now = os.time()
-	local diff = now - lastTime
-	if diff < 60 then return end 
-
-	local timeToCalc = math.min(diff, MAX_OFFLINE_TIME)
-	local totalEarned = 0
-
-	for floorName, floorData in pairs(profile.Data.Plots) do
-		for slotName, slotData in pairs(floorData) do
-			if slotData.Item then
-				local itemConf = ItemConfigurations.GetItemData(slotData.Item.Name)
-				if itemConf then
-					local base = itemConf.Income
-					local mutMult = MUTATION_MULTIPLIERS[slotData.Item.Mutation] or 1
-					local level = slotData.Level or 1
-					local levelMult = INCOME_SCALING ^ (level - 1)
-					local reb = profile.Data.Rebirths or 0
-					local rebMult = 1 + (reb * 0.5)
-
-					local rate = base * mutMult * levelMult * rebMult
-					local earnings = rate * timeToCalc
-
-					if type(slotData.Stored) ~= "number" then slotData.Stored = 0 end
-					slotData.Stored += earnings
-					totalEarned += earnings
-				end
-			end
-		end
-	end
-
-	if totalEarned > 0 then
-		task.delay(4, function() 
-			if player and player.Parent then
-				--local events = ReplicatedStorage:FindFirstChild("Events")
-				--local notif = events and events:FindFirstChild("ShowNotification")
-				--if notif then notif:FireClient(player, "Collect your offline earnings!", "Success") end
-			end
-		end)
+	if OfflineIncomeController and OfflineIncomeController.QueueOfflineIncomeForJoin then
+		OfflineIncomeController:QueueOfflineIncomeForJoin(player, profile)
+		OfflineIncomeController:PushStatus(player)
 	end
 end
 
@@ -770,6 +731,12 @@ local function createLeaderstats(player: Player, data: PlayerData)
 	player:SetAttribute("HasAutoBomb", player:GetAttribute("HasAutoBomb") == true)
 	player:SetAttribute("HasCollectAll", player:GetAttribute("HasCollectAll") == true)
 	player:SetAttribute("AutoBombEnabled", false)
+	player:SetAttribute("FriendBoostCount", tonumber(player:GetAttribute("FriendBoostCount")) or 0)
+	player:SetAttribute("FriendBoostMultiplier", tonumber(player:GetAttribute("FriendBoostMultiplier")) or 1)
+	local offlineIncome = if type(data.OfflineIncome) == "table" then data.OfflineIncome else {}
+	player:SetAttribute("OfflineIncomePendingAmount", math.max(0, tonumber(offlineIncome.PendingBaseAmount) or 0))
+	player:SetAttribute("OfflineIncomePlay15Active", false)
+	player:SetAttribute("OfflineIncomePlay15EndsAt", 0)
 	syncLimitedTimeOfferAttributes(player, data)
 
 	ensureUpgradeDefaults(data)
@@ -881,6 +848,7 @@ local function onPlayerAdded(player: Player)
 	if player.Parent == Players then
 		profiles[player] = profile
 		createLeaderstats(player, profile.Data)
+		calculateOfflineEarnings(player, profile)
 		evaluateExistingBadgeProgress(player, profile)
 		local tutorialService = getTutorialService()
 		if tutorialService then
@@ -941,7 +909,6 @@ local function onPlayerAdded(player: Player)
 		end)
 
 		checkAndGrantGroupReward(player, profile)
-		calculateOfflineEarnings(player, profile)
 	else
 		profile:EndSession()
 	end
@@ -955,6 +922,9 @@ local function onPlayerRemoving(player: Player)
 	local profile = profiles[player]
 	if profile then 
 		profile.Data.LastSaveTime = os.time()
+		if OfflineIncomeController and OfflineIncomeController.CancelPlay15 then
+			OfflineIncomeController:CancelPlay15(player)
+		end
 		profile:EndSession()
 		profiles[player] = nil 
 	end
@@ -1175,6 +1145,7 @@ function PlayerController:Init(controllers)
 	local Modules = ServerScriptService:WaitForChild("Modules")
 	ItemManager = require(Modules:WaitForChild("ItemManager"))
 	SlotManager = require(Modules:WaitForChild("SlotManager"))
+	OfflineIncomeController = controllers.OfflineIncomeController
 	if SlotManager.Init then SlotManager:Init(controllers) end
 
 	local Events = ReplicatedStorage:WaitForChild("Events")

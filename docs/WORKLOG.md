@@ -14,4 +14,25 @@
 - Added a shared round-based `Xray` world bonus that can spawn near miners, grants local through-ground brainrot highlights in a configurable radius, and points to the nearest brainrot with the tutorial beam until the round ends.
 - Added an auto-opening `LimitedTimeOffer` flow for `Collect All`: the server now stores the player-specific 3-day offer start/end window from the first tracked join, and the existing frame shows a live countdown plus Robux purchase prompt until the gamepass is bought or the timer expires.
 - Changed HUD contextual offer rotation so exactly one offer button stays visible at all times, swapping to the next one every 30 seconds without the old appearance sound or hide gap.
+- Fixed HUD contextual offer rotation so refreshes no longer hide every button between ticks; only one offer button remains visible at a time and it now rotates every 15 seconds.
+- Fixed `LimitedTimeOffer` session auto-open so startup frame races no longer consume the join popup before the player actually sees it; the offer now retries during the same join until it is really shown once.
 - Updated bomb shop buttons so available-but-unowned bombs now show a toxic bright `Buy`, sequence-locked bombs show gray `Locked`, and owned bombs use yellow `Equip` / `Equipped`; shortened bomb stat labels to `Radius`, `KB`, `Depth`, and `CD`.
+- Reworked tutorial steps 1-12 to use a declarative UI mask allowlist, hiding distracting HUD/frames/notifications while keeping only the required step-specific UI visible.
+- Removed tutorial blackout dimming, doubled the tutorial cursor width, and scaled the step 4 `Back to base` proxy button to 3x.
+- Changed the tutorial cash goal from `$50` to `$5` and changed the global `Venom Bomb` price from `$50` to `$5`.
+- Moved the free base upgrade purchase to tutorial step 11, made step 12 text-only with timed auto-advance, and restored the normal UI on step 13.
+- Bound tutorial mobile controls to the step presentation rules so the bomb button is only available on steps 2-3 and the mobile jump button is hidden outside those steps.
+- Made the `LimitedTimeOffer` timer resolve its countdown label more robustly and render the live remaining time as plain `HH:MM:SS`.
+- Hid the satchel inventory whenever any blocking frame is open, while still restoring the normal backpack visibility rules after frames close.
+- Forced the direct `Part` objects inside player slot models like `Slot1`/`Slot2`/`Slot3` to stay `CanCollide = false`.
+- Fixed `Bomb Owner` so it only awards for owned bombs above the default `Bomb 1`, and repurposed badge `1017978213685005` into `Brainrot Collector 5` awarded at 5 collected brainrots.
+- Suppressed the limited-time offer during the main tutorial, stopped the tutorial mask from forcing the mobile bomb button visible on desktop, and prevented the tutorial/shop touch-open loop that could freeze the game near the bomb shop.
+- Changed tutorial step 8 so the bomb purchase frame is no longer auto-opened and instead opens from touching the bomb shop in the world.
+- Switched tutorial step 7 to ignore the missing HUD shop button, letting the `Pickaxes` frame open only by touching the `ShopPart` in-world.
+- Allowed the bomb shop frame to remain visible on tutorial step 7 so the touch-open flow no longer immediately hides the UI.
+- Ensured the satchel inventory can be forced on during tutorial steps that require it, even if the mine zone flag is still active, and re-evaluated backpack visibility on `OnboardingStep` changes.
+- Reduced tutorial UI churn by avoiding redundant GUI visibility/enable assignments and guarding against re-entrant step refreshes.
+- Disabled UI masking on tutorial step 5 (place brainrot on a slot) so the slot interaction uses the full normal UI.
+- Added verbose tutorial debug logs across client tutorial flow, server tutorial service, and slot interactions to trace the freeze.
+- Cached tutorial mask application so heavy UI visibility changes only run when the step/presentation actually changes.
+- After placing a brainrot, step 6 now guides the player to the bomb shop with a masked UI and world arrow (cash step still required before moving to step 7).

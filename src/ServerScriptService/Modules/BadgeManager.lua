@@ -139,10 +139,13 @@ function BadgeManager:EvaluateMoneyMilestones(player: Player, totalMoney: number
 end
 
 function BadgeManager:EvaluatePickaxeMilestones(player: Player, pickaxeName: string)
-	self:AwardBadge(player, "BombOwner")
 	local pickaxeLevel = tonumber(string.match(pickaxeName, "%d+"))
 	if not pickaxeLevel then
 		return
+	end
+
+	if pickaxeLevel >= 2 then
+		self:AwardBadge(player, "BombOwner")
 	end
 
 	if pickaxeLevel >= 5 then
@@ -169,12 +172,12 @@ function BadgeManager:EvaluateBrainrotMilestones(player: Player, rarity: string?
 	self:AwardBadge(player, "FirstBrainrot")
 
 	if type(totalCollected) == "number" then
-		if totalCollected >= 10 then
-			self:AwardBadge(player, "BrainrotCollector")
+		if totalCollected >= 5 then
+			self:AwardBadge(player, "BrainrotEmpire")
 		end
 
-		if totalCollected >= 100 then
-			self:AwardBadge(player, "BrainrotEmpire")
+		if totalCollected >= 10 then
+			self:AwardBadge(player, "BrainrotCollector")
 		end
 	end
 

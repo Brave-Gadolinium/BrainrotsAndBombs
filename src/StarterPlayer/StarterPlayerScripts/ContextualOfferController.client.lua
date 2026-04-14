@@ -18,7 +18,7 @@ local events = ReplicatedStorage:WaitForChild("Events")
 local showContextualOfferEvent = events:WaitForChild("ShowContextualOffer") :: RemoteEvent
 local reportAnalyticsIntent = events:WaitForChild("ReportAnalyticsIntent") :: RemoteEvent
 
-local ROTATION_INTERVAL = 30
+local ROTATION_INTERVAL = 15
 local SHOW_TWEEN_INFO = TweenInfo.new(0.28, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
 local INITIAL_SCALE = 0.82
 local OFFER_SURFACE = "contextual_offer"
@@ -396,6 +396,20 @@ local function setTransparencyAlpha(state: OfferButtonState, alpha: number)
 	end
 end
 
+local function setOfferButtonHidden(state: OfferButtonState)
+	setTransparencyAlpha(state, 1)
+	state.Scale.Scale = 1
+	state.Button.Visible = false
+end
+
+local function hideNonActiveButtons(activeState: OfferButtonState?)
+	for _, state in pairs(offerButtonsByInstance) do
+		if state ~= activeState then
+			setOfferButtonHidden(state)
+		end
+	end
+end
+
 local function cancelActiveTweens()
 	for _, tween in ipairs(activeTweens) do
 		tween:Cancel()
@@ -507,9 +521,7 @@ local function buildOfferButtonState(button: ImageButton, offerKey: string, defi
 		Bound = false,
 	}
 
-	setTransparencyAlpha(state, 1)
-	state.Scale.Scale = 1
-	state.Button.Visible = false
+	setOfferButtonHidden(state)
 	bindOfferButton(state)
 
 	return state
@@ -518,6 +530,8 @@ end
 local function refreshOfferButtons()
 	offerContainer = findOfferContainer()
 	if not offerContainer then
+		hideNonActiveButtons(nil)
+		activeButtonState = nil
 		orderedOfferButtons = {}
 		if not warnedMissingContainer then
 			warn("[ContextualOfferController] Offer container in HUD was not found.")
@@ -529,6 +543,8 @@ local function refreshOfferButtons()
 	warnedMissingContainer = false
 
 	local refreshedButtons = {}
+	local seenButtons: {[ImageButton]: boolean} = {}
+	local activeStateStillPresent = false
 	for _, descendant in ipairs(offerContainer:GetDescendants()) do
 		if descendant:IsA("ImageButton") then
 			local offerKey, definition = resolveOfferForButton(descendant)
@@ -544,10 +560,14 @@ local function refreshOfferButtons()
 				end
 
 				bindOfferButton(state)
-				setTransparencyAlpha(state, 1)
-				state.Scale.Scale = 1
-				state.Button.Visible = false
+				if activeButtonState == state then
+					activeStateStillPresent = true
+				end
+				if activeButtonState ~= state then
+					setOfferButtonHidden(state)
+				end
 				updateButtonCost(state.Button, definition)
+				seenButtons[descendant] = true
 				table.insert(refreshedButtons, state)
 			end
 		end
@@ -560,13 +580,25 @@ local function refreshOfferButtons()
 		return a.LayoutOrder < b.LayoutOrder
 	end)
 
-	for instance in pairs(offerButtonsByInstance) do
+	for instance, state in pairs(offerButtonsByInstance) do
 		if instance.Parent == nil then
+			if activeButtonState == state then
+				activeButtonState = nil
+			end
 			offerButtonsByInstance[instance] = nil
+		elseif not seenButtons[instance] then
+			if activeButtonState == state then
+				activeButtonState = nil
+			end
+			setOfferButtonHidden(state)
 		end
 	end
 
 	orderedOfferButtons = refreshedButtons
+	if activeButtonState and not activeStateStillPresent then
+		activeButtonState = nil
+	end
+	hideNonActiveButtons(activeButtonState)
 	if currentIndex > #orderedOfferButtons then
 		currentIndex = 0
 	end
@@ -577,18 +609,14 @@ local function hideOfferButton(state: OfferButtonState, immediate: boolean?)
 	activeDisplayToken += 1
 
 	if immediate then
-		setTransparencyAlpha(state, 1)
-		state.Scale.Scale = 1
-		state.Button.Visible = false
+		setOfferButtonHidden(state)
 		if activeButtonState == state then
 			activeButtonState = nil
 		end
 		return
 	end
 
-	setTransparencyAlpha(state, 1)
-	state.Scale.Scale = 1
-	state.Button.Visible = false
+	setOfferButtonHidden(state)
 	if activeButtonState == state then
 		activeButtonState = nil
 	end
@@ -610,6 +638,7 @@ local function showOfferButton(state: OfferButtonState)
 	activeButtonState = state
 	nextRotationAt = os.clock() + ROTATION_INTERVAL
 
+	hideNonActiveButtons(state)
 	state.Button.Visible = true
 	state.Scale.Scale = INITIAL_SCALE
 	setTransparencyAlpha(state, 1)
@@ -681,6 +710,7 @@ end)
 
 FrameManager.Changed:Connect(function(anyFrameOpen)
 	if anyFrameOpen then
+		hideNonActiveButtons(nil)
 		hideActiveOffer(true)
 		return
 	end
@@ -717,6 +747,7 @@ task.spawn(function()
 		else
 			refreshOfferButtons()
 			if #orderedOfferButtons == 0 then
+				hideNonActiveButtons(nil)
 				hideActiveOffer(true)
 				task.wait(1)
 			else

@@ -32,6 +32,7 @@ ProductConfigurations.Products = {
 
 	["SpinsX3"] = 3567801026,
 	["SpinsX9"] = 3567801177,
+	["OfflineIncomeX5"] = 0,
 
 	["BrainrotGodBallerinoLololo"] = 3569171946,
 	["BrainrotGodLuckyBlock"] = 3569174619,

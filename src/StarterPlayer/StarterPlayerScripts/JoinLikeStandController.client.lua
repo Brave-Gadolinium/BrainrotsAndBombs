@@ -30,6 +30,7 @@ type PlotRecord = {
 	Plot: Model,
 	Stand: Instance?,
 	Prompt: ProximityPrompt?,
+	PromptConnection: RBXScriptConnection?,
 	Connections: {RBXScriptConnection},
 	OriginalProperties: {[Instance]: {[string]: any}},
 	IdleTrack: AnimationTrack?,
@@ -108,6 +109,7 @@ local function getRecord(plot: Model): PlotRecord
 		Plot = plot,
 		Stand = nil,
 		Prompt = nil,
+		PromptConnection = nil,
 		Connections = {},
 		OriginalProperties = {},
 		IdleTrack = nil,
@@ -121,6 +123,11 @@ local function getRecord(plot: Model): PlotRecord
 end
 
 local function disconnectRecord(record: PlotRecord)
+	if record.PromptConnection then
+		record.PromptConnection:Disconnect()
+		record.PromptConnection = nil
+	end
+
 	for _, connection in ipairs(record.Connections) do
 		connection:Disconnect()
 	end
@@ -524,7 +531,6 @@ local function getManagedPrompt(record: PlotRecord): ProximityPrompt?
 
 	local anchorPart = resolveAnchorPart(stand)
 	if not anchorPart then
-		warn("[JoinLikeStandController] No BasePart found for", stand:GetFullName())
 		return nil
 	end
 
@@ -655,9 +661,18 @@ local function connectPrompt(record: PlotRecord)
 		return
 	end
 
-	table.insert(record.Connections, prompt.Triggered:Connect(function(triggeringPlayer)
+	if record.PromptConnection and record.Prompt == prompt then
+		return
+	end
+
+	if record.PromptConnection then
+		record.PromptConnection:Disconnect()
+	end
+
+	record.Prompt = prompt
+	record.PromptConnection = prompt.Triggered:Connect(function(triggeringPlayer)
 		handlePromptTriggered(record, triggeringPlayer)
-	end))
+	end)
 end
 
 local function bindPlot(plot: Model)
@@ -695,6 +710,13 @@ local function bindPlot(plot: Model)
 		else
 			applyVisibilityToInstance(record, descendant, true)
 			disableForeignPrompts(record)
+		end
+
+		if descendant:IsA("BasePart") or descendant:IsA("ProximityPrompt") then
+			task.defer(function()
+				connectPrompt(record)
+				refreshStandState(record)
+			end)
 		end
 
 		if descendant:IsA("Animation") or descendant:IsA("Humanoid") or descendant:IsA("AnimationController") or descendant:IsA("Animator") then

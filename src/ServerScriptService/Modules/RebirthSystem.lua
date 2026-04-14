@@ -8,6 +8,7 @@ local RebirthSystem = {}
 
 local PlayerController
 local NumberFormatter = require(ReplicatedStorage.Modules.NumberFormatter)
+local MultiplierUtils = require(ReplicatedStorage.Modules.MultiplierUtils)
 local ItemConfigurations = require(ReplicatedStorage.Modules.ItemConfigurations)
 local RebirthRequirements = require(ReplicatedStorage.Modules.RebirthRequirements)
 local AnalyticsFunnelsService = require(ServerScriptService.Modules.AnalyticsFunnelsService)
@@ -221,8 +222,8 @@ function RebirthSystem.GetInfo(player: Player)
 	end
 
 	local rebirths = tonumber(profile.Data.Rebirths) or 0
-	local currentMult = 1 + (rebirths * 0.5)
-	local nextMult = 1 + ((rebirths + 1) * 0.5)
+	local currentMult = MultiplierUtils.GetRebirthMultiplier(rebirths)
+	local nextMult = MultiplierUtils.GetRebirthMultiplier(rebirths + 1)
 	local requirement = RebirthRequirements.Get(rebirths + 1)
 	local cost = requirement and (tonumber(requirement.soft_required) or 0) or 0
 

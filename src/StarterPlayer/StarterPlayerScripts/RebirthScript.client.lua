@@ -8,6 +8,7 @@ local Workspace = game:GetService("Workspace")
 
 local NumberFormatter = require(ReplicatedStorage.Modules.NumberFormatter)
 local ItemConfigurations = require(ReplicatedStorage.Modules.ItemConfigurations)
+local MultiplierUtils = require(ReplicatedStorage.Modules.MultiplierUtils)
 local RebirthRequirements = require(ReplicatedStorage.Modules.RebirthRequirements)
 local ProductConfigurations = require(ReplicatedStorage.Modules.ProductConfigurations)
 local RarityConfigurations = require(ReplicatedStorage.Modules.RarityConfigurations)
@@ -242,8 +243,8 @@ local function getClientState(): ClientState
 	local targetLevel = rebirths + 1
 	local requirement = RebirthRequirements.Get(targetLevel)
 	local currentMoney = getMoneyValue()
-	local currentMult = 1 + (rebirths * 0.5)
-	local nextMult = requirement and (1 + (targetLevel * 0.5)) or currentMult
+	local currentMult = MultiplierUtils.GetRebirthMultiplier(rebirths)
+	local nextMult = requirement and MultiplierUtils.GetRebirthMultiplier(targetLevel) or currentMult
 
 	if not requirement then
 		return {
@@ -372,10 +373,10 @@ end
 local function renderRewards(state: ClientState)
 	clearRewards()
 
-	cloneRewardTemplate(templateFloor, "Current", "x" .. string.format("%.1f", state.currentMult), CASH_ICON)
+	cloneRewardTemplate(templateFloor, "Current", MultiplierUtils.FormatMultiplier(state.currentMult), CASH_ICON)
 
 	if state.requirement then
-		cloneRewardTemplate(templateMoney, "After Rebirth", "x" .. string.format("%.1f", state.nextMult), CASH_ICON)
+		cloneRewardTemplate(templateMoney, "After Rebirth", MultiplierUtils.FormatMultiplier(state.nextMult), CASH_ICON)
 		cloneRewardTemplate(templateSlots, "Target Level", tostring(state.targetLevel), CASH_ICON)
 	else
 		cloneRewardTemplate(templateMoney, "After Rebirth", "MAX", CASH_ICON)

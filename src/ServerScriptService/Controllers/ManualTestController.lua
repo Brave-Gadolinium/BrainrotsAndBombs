@@ -42,6 +42,7 @@ local PlayerController
 local PickaxeController
 local DailyRewardController
 local PlaytimeRewardController
+local OfflineIncomeController
 
 local eventsFolder: Folder? = nil
 local remotesFolder: Folder? = nil
@@ -709,6 +710,8 @@ local function buildTargetSnapshot(player: Player, executor: Player, accessLevel
 		FreeSpinReady = freeSpinRemaining <= 0,
 		FreeSpinRemaining = freeSpinRemaining,
 		Rebirths = tonumber(profile.Data.Rebirths) or 0,
+		FriendBoostCount = tonumber(player:GetAttribute("FriendBoostCount")) or 0,
+		FriendBoostMultiplier = tonumber(player:GetAttribute("FriendBoostMultiplier")) or 1,
 		UnlockedSlots = PlayerController and PlayerController.GetUnlockedSlots and PlayerController:GetUnlockedSlots(player) or (tonumber(profile.Data.unlocked_slots) or SlotUnlockConfigurations.StartSlots),
 		EquippedPickaxe = tostring(profile.Data.EquippedPickaxe or "Bomb 1"),
 		OwnedPickaxesCount = ownedPickaxesCount,
@@ -727,6 +730,8 @@ local function buildTargetSnapshot(player: Player, executor: Player, accessLevel
 		PlaytimeClaimableCount = #playtimeStatus.ClaimableRewardIds,
 		PlaytimeNextRewardId = playtimeStatus.NextRewardId,
 		PlaytimeSpeedMultiplier = playtimeStatus.SpeedMultiplier,
+		OfflineIncomePendingAmount = tonumber(player:GetAttribute("OfflineIncomePendingAmount")) or 0,
+		OfflineIncomePlay15Active = player:GetAttribute("OfflineIncomePlay15Active") == true,
 		AuditLog = getVisibleAuditEntries(executor, accessLevel),
 	}
 end
@@ -807,6 +812,10 @@ local function refreshTargetState(target: Player, options)
 
 	if PlaytimeRewardController and PlaytimeRewardController.PushStatusForTesting then
 		PlaytimeRewardController:PushStatusForTesting(target)
+	end
+
+	if OfflineIncomeController and OfflineIncomeController.PushStatusForTesting then
+		OfflineIncomeController:PushStatusForTesting(target)
 	end
 
 	if QuestChainService and QuestChainService.RefreshPlayer then
@@ -2826,6 +2835,7 @@ function ManualTestController:Init(controllers)
 	PickaxeController = controllers.PickaxeController
 	DailyRewardController = controllers.DailyRewardController
 	PlaytimeRewardController = controllers.PlaytimeRewardController
+	OfflineIncomeController = controllers.OfflineIncomeController
 
 	ensureRemotes()
 

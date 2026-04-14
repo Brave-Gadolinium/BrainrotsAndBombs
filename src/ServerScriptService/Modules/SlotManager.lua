@@ -21,6 +21,13 @@ local PlayerController -- Lazy load
 local ItemManager -- Lazy load
 local LuckyBlockManager -- Lazy load
 local TRANSACTION_TYPES = AnalyticsEconomyService:GetTransactionTypes()
+local DEBUG_TUTORIAL = true
+
+local function debugTutorialLog(player: Player, message: string)
+	if DEBUG_TUTORIAL then
+		print(("[Tutorial][Server][%s] %s"):format(player.Name, message))
+	end
+end
 
 -- [ ASSETS ]
 local Templates = ReplicatedStorage:WaitForChild("Templates")
@@ -352,6 +359,15 @@ function SlotManager.HandleInteraction(player: Player, floorName: string, slotNa
 	local heldTool = character and character:FindFirstChildWhichIsA("Tool")
 	local heldItemName = heldTool and heldTool:GetAttribute("OriginalName")
 	local heldLuckyBlockId = heldTool and heldTool:GetAttribute("LuckyBlockId")
+
+	debugTutorialLog(player, ("SlotInteract %s/%s occupied=%s heldItem=%s heldLB=%s step=%s"):format(
+		floorName,
+		slotName,
+		tostring(isOccupied),
+		tostring(heldItemName),
+		tostring(heldLuckyBlockId),
+		tostring(player:GetAttribute("OnboardingStep"))
+	))
 
 	if isOccupied then
 		if currentContentType == "Item" then

@@ -63,6 +63,30 @@ local function getFreePlotIndex(): number?
 	return nil
 end
 
+local function normalizeSlotPartCollision(plotModel: Model)
+	for _, child in ipairs(plotModel:GetChildren()) do
+		local floorNumber = tonumber(child.Name:match("^Floor(%d+)$"))
+		if floorNumber then
+			local slotsFolder = child:FindFirstChild("Slots")
+			if slotsFolder then
+				for _, slotModel in ipairs(slotsFolder:GetChildren()) do
+					if slotModel:IsA("Model") then
+						for _, slotChild in ipairs(slotModel:GetChildren()) do
+							if slotChild:IsA("BasePart") and slotChild.Name == "Part" then
+								if slotChild:GetAttribute("OriginalTransparency") == nil then
+									slotChild:SetAttribute("OriginalTransparency", slotChild.Transparency)
+								end
+								slotChild:SetAttribute("OriginalCanCollide", false)
+								slotChild.CanCollide = false
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+end
+
 local function storeOriginalProperties(model: Instance)
 	for _, child in ipairs(model:GetDescendants()) do
 		if child:IsA("BasePart") then
@@ -340,6 +364,7 @@ local function updatePlotVisuals(player: Player)
 		return
 	end
 
+	normalizeSlotPartCollision(plotModel)
 	storeOriginalProperties(plotModel)
 
 	local unlockedSlots = PlayerController:GetUnlockedSlots(player)

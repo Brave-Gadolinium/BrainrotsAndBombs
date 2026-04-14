@@ -11,6 +11,12 @@ local Workspace = game:GetService("Workspace")
 local PostTutorialConfiguration = require(ReplicatedStorage.Modules.PostTutorialConfiguration)
 local TutorialConfiguration = require(ReplicatedStorage.Modules.TutorialConfiguration)
 local FrameManager = require(ReplicatedStorage.Modules.FrameManager)
+local ClientZoneService = require(ReplicatedStorage.Modules.ClientZoneService)
+
+local SatchelFolder = ReplicatedStorage:WaitForChild("Satchel")
+local SatchelLoader = SatchelFolder:WaitForChild("SatchelLoader")
+local SatchelModule = SatchelLoader:WaitForChild("Satchel")
+local Satchel = require(SatchelModule)
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -49,7 +55,6 @@ local activeHighlight: Highlight? = nil
 local worldTarget: BasePart? = nil
 local refreshAccumulator = 0
 local reportDebounce: {[string]: number} = {}
-local finalMessageHideAt = 0
 local tutorialGuiOverlay: ScreenGui? = nil
 local tutorialGuiBlackout: Frame? = nil
 local tutorialGuiProxyButton: GuiButton? = nil
@@ -64,6 +69,19 @@ local postTutorialCompletionQueue: {QueuedPostTutorialCompletion} = {}
 local activePostTutorialCompletion: ActivePostTutorialCompletion? = nil
 local shouldUseTutorialGuiProxy: ((number) -> boolean)? = nil
 local getTutorialGuiTarget: ((number) -> GuiButton?)? = nil
+local maskedGuiVisibility: {[GuiObject]: boolean} = {}
+local maskedGuiEnabled: {[Instance]: boolean} = {}
+local lastTutorialInventoryVisible: boolean? = nil
+local isRefreshingStep = false
+local DEBUG_TUTORIAL = true
+local lastMaskKey: string? = nil
+local maskActive = false
+
+local function debugTutorialLog(message: string)
+	if DEBUG_TUTORIAL then
+		print(("[Tutorial][Client] %s"):format(message))
+	end
+end
 
 local function getCharacter()
 	return player.Character or player.CharacterAdded:Wait()
@@ -210,6 +228,7 @@ local function reportAction(actionId: string)
 	end
 
 	reportDebounce[actionId] = now
+	debugTutorialLog(("ReportAction %s (step=%d)"):format(actionId, currentStep))
 	ReportTutorialAction:FireServer(actionId)
 end
 
@@ -302,32 +321,6 @@ local function hideTutorialGuiOverlay()
 	if tutorialGuiOverlay then
 		tutorialGuiOverlay.Enabled = false
 	end
-
-	local backButton = hud:FindFirstChild("Back")
-	if backButton and backButton:IsA("GuiButton") then
-		for instance, originalState in pairs(hiddenHudBackState) do
-			if instance.Parent then
-				if instance:IsA("GuiObject") and originalState.BackgroundTransparency ~= nil then
-					instance.BackgroundTransparency = originalState.BackgroundTransparency
-				end
-				if (instance:IsA("TextLabel") or instance:IsA("TextButton") or instance:IsA("TextBox")) and originalState.TextTransparency ~= nil then
-					instance.TextTransparency = originalState.TextTransparency
-					instance.TextStrokeTransparency = originalState.TextStrokeTransparency
-				end
-				if (instance:IsA("ImageLabel") or instance:IsA("ImageButton")) and originalState.ImageTransparency ~= nil then
-					instance.ImageTransparency = originalState.ImageTransparency
-				end
-				if instance:IsA("UIStroke") and originalState.Transparency ~= nil then
-					instance.Transparency = originalState.Transparency
-				end
-				if instance:IsA("GuiButton") and originalState.Active ~= nil then
-					instance.Active = originalState.Active
-					instance.AutoButtonColor = originalState.AutoButtonColor
-				end
-			end
-		end
-		table.clear(hiddenHudBackState)
-	end
 end
 
 local function setHudBackButtonHidden(backButton: GuiButton, hidden: boolean)
@@ -405,57 +398,225 @@ local function setHudBackButtonHidden(backButton: GuiButton, hidden: boolean)
 	end
 end
 
-local function getTutorialProxyOffset(step: number): Vector2
-	if step == 4 then
-		local viewportSize = mainGui.AbsoluteSize
-		local yOffset = math.clamp(math.floor(viewportSize.Y * 0.065 + 0.5), 28, 54)
-		return Vector2.new(0, yOffset)
+local function getCurrentStepPresentation()
+	return TutorialConfiguration.GetStepPresentation(currentStep)
+end
+
+local function getBackButton(): GuiButton?
+	local backButton = hud:FindFirstChild("Back")
+	if backButton and backButton:IsA("GuiButton") then
+		return backButton
 	end
 
+	return nil
+end
+
+local function findMoneyLabel(): GuiObject?
+	local moneyLabel = hud:FindFirstChild("Money", true)
+	if moneyLabel and moneyLabel:IsA("GuiObject") then
+		return moneyLabel
+	end
+
+	return nil
+end
+
+local function findMobileBombButton(): GuiObject?
+	local mobileBombButton = mainGui:FindFirstChild("MobileBombButton")
+	if mobileBombButton and mobileBombButton:IsA("GuiObject") then
+		return mobileBombButton
+	end
+
+	return nil
+end
+
+local function findMobileJumpButton(): GuiButton?
+	local touchGui = playerGui:FindFirstChild("TouchGui")
+	if not touchGui then
+		return nil
+	end
+
+	local directButton = touchGui:FindFirstChild("JumpButton", true)
+	if directButton and directButton:IsA("GuiButton") then
+		return directButton
+	end
+
+	for _, descendant in ipairs(touchGui:GetDescendants()) do
+		if descendant:IsA("GuiButton") and string.find(string.lower(descendant.Name), "jump", 1, true) then
+			return descendant
+		end
+	end
+
+	return nil
+end
+
+local function findBackpackGui(): ScreenGui?
+	local backpackGui = playerGui:FindFirstChild("BackpackGui")
+	if backpackGui and backpackGui:IsA("ScreenGui") then
+		return backpackGui
+	end
+
+	return nil
+end
+
+local function isMaskableEnabledInstance(instance: Instance): boolean
+	return instance:IsA("ScreenGui") or instance:IsA("SurfaceGui") or instance:IsA("BillboardGui")
+end
+
+local function setMaskedGuiVisible(guiObject: GuiObject, visible: boolean)
+	if maskedGuiVisibility[guiObject] == nil then
+		maskedGuiVisibility[guiObject] = guiObject.Visible
+	end
+
+	if guiObject.Visible ~= visible then
+		guiObject.Visible = visible
+	end
+end
+
+local function restoreMaskedGuiVisible(guiObject: GuiObject)
+	local originalVisible = maskedGuiVisibility[guiObject]
+	if originalVisible == nil then
+		return
+	end
+
+	maskedGuiVisibility[guiObject] = nil
+	if guiObject.Parent then
+		if guiObject.Visible ~= originalVisible then
+			guiObject.Visible = originalVisible
+		end
+	end
+end
+
+local function setMaskedGuiEnabled(instance: Instance, enabled: boolean)
+	if not isMaskableEnabledInstance(instance) then
+		return
+	end
+
+	if maskedGuiEnabled[instance] == nil then
+		maskedGuiEnabled[instance] = (instance :: any).Enabled
+	end
+
+	if (instance :: any).Enabled ~= enabled then
+		(instance :: any).Enabled = enabled
+	end
+end
+
+local function restoreMaskedGuiEnabled(instance: Instance)
+	local originalEnabled = maskedGuiEnabled[instance]
+	if originalEnabled == nil then
+		return
+	end
+
+	maskedGuiEnabled[instance] = nil
+	if instance.Parent and isMaskableEnabledInstance(instance) then
+		if (instance :: any).Enabled ~= originalEnabled then
+			(instance :: any).Enabled = originalEnabled
+		end
+	end
+end
+
+local function syncTutorialInventoryState(shouldShowInventory: boolean)
+	local backpackGui = findBackpackGui()
+	if backpackGui then
+		backpackGui.Enabled = true
+	end
+
+	if Satchel.SetBackpackEnabled then
+		if lastTutorialInventoryVisible ~= shouldShowInventory then
+			lastTutorialInventoryVisible = shouldShowInventory
+			if shouldShowInventory then
+				Satchel:SetBackpackEnabled(true)
+			else
+				Satchel:SetBackpackEnabled(false)
+			end
+		end
+	end
+end
+
+local function shouldBackpackBeVisibleOutsideTutorial(): boolean
+	return not ClientZoneService.IsInMineZone() and not FrameManager.isAnyFrameOpen()
+end
+
+local function restoreTutorialUiMask()
+	pickaxesFrame:SetAttribute("IgnoreFrameManagerBlocking", false)
+	upgradesFrame:SetAttribute("IgnoreFrameManagerBlocking", false)
+
+	local maskedGuiObjects = {}
+	for guiObject in pairs(maskedGuiVisibility) do
+		table.insert(maskedGuiObjects, guiObject)
+	end
+	for _, guiObject in ipairs(maskedGuiObjects) do
+		restoreMaskedGuiVisible(guiObject)
+	end
+
+	local maskedEnabledInstances = {}
+	for instance in pairs(maskedGuiEnabled) do
+		table.insert(maskedEnabledInstances, instance)
+	end
+	for _, instance in ipairs(maskedEnabledInstances) do
+		restoreMaskedGuiEnabled(instance)
+	end
+
+	local backButton = getBackButton()
+	if backButton then
+		setHudBackButtonHidden(backButton, false)
+	end
+
+	local backpackGui = findBackpackGui()
+	if backpackGui then
+		backpackGui.Enabled = true
+	end
+
+	if Satchel.SetBackpackEnabled then
+		Satchel:SetBackpackEnabled(shouldBackpackBeVisibleOutsideTutorial())
+	end
+
+	lastTutorialInventoryVisible = nil
+	lastMaskKey = nil
+	maskActive = false
+end
+
+local function getTutorialProxyOffset(step: number): Vector2
 	return Vector2.zero
 end
 
 local function syncTutorialGuiLayout(targetButton: GuiButton)
+	local presentation = getCurrentStepPresentation()
 	local proxyOffset = getTutorialProxyOffset(currentStep)
 
 	if tutorialGuiProxyButton then
 		tutorialGuiProxyButton.AnchorPoint = Vector2.zero
+		local proxyScale = math.max(1, tonumber(presentation.BackProxyScale) or 1)
+		local scaledWidth = targetButton.AbsoluteSize.X * proxyScale
+		local scaledHeight = targetButton.AbsoluteSize.Y * proxyScale
+		local scaledPosition = targetButton.AbsolutePosition
+			- Vector2.new((scaledWidth - targetButton.AbsoluteSize.X) * 0.5, (scaledHeight - targetButton.AbsoluteSize.Y) * 0.5)
+
 		tutorialGuiProxyButton.Position = UDim2.fromOffset(
-			targetButton.AbsolutePosition.X + proxyOffset.X,
-			targetButton.AbsolutePosition.Y + proxyOffset.Y
+			scaledPosition.X + proxyOffset.X,
+			scaledPosition.Y + proxyOffset.Y
 		)
-		tutorialGuiProxyButton.Size = UDim2.fromOffset(targetButton.AbsoluteSize.X, targetButton.AbsoluteSize.Y)
+		tutorialGuiProxyButton.Size = UDim2.fromOffset(scaledWidth, scaledHeight)
 		tutorialGuiProxyButton.Rotation = targetButton.Rotation
 	end
 
-	local referencePosition = targetButton.AbsolutePosition
-	local referenceSize = targetButton.AbsoluteSize
-	if tutorialGuiProxyButton then
-		referencePosition = tutorialGuiProxyButton.AbsolutePosition
-		referenceSize = tutorialGuiProxyButton.AbsoluteSize
-	end
-
-	local centerX = referencePosition.X + (referenceSize.X * 0.5)
-	local topY = referencePosition.Y
-
 	if tutorialGuiCursor then
-		local cursorParent: Instance = targetButton
+		local cursorTarget = targetButton
 		if tutorialGuiProxyButton and shouldUseTutorialGuiProxy and shouldUseTutorialGuiProxy(currentStep) then
-			cursorParent = tutorialGuiProxyButton
+			cursorTarget = tutorialGuiProxyButton
 		end
 
-		if tutorialGuiCursor.Parent ~= cursorParent then
-			tutorialGuiCursor.Parent = cursorParent
+		if tutorialGuiOverlay and tutorialGuiCursor.Parent ~= tutorialGuiOverlay then
+			tutorialGuiCursor.Parent = tutorialGuiOverlay
 		end
 
+		local targetPos = cursorTarget.AbsolutePosition
+		local targetSize = cursorTarget.AbsoluteSize
 		tutorialGuiCursor.AnchorPoint = Vector2.zero
-		tutorialGuiCursor.Position = UDim2.new(0.7, 0, 0.3, 0)
+		tutorialGuiCursor.Position = UDim2.fromOffset(
+			targetPos.X + targetSize.X * 0.7,
+			targetPos.Y + targetSize.Y * 0.3
+		)
 		applyOverlayZIndex(tutorialGuiCursor, 16)
-	end
-
-	if tutorialGuiStepLabel then
-		tutorialGuiStepLabel.AnchorPoint = Vector2.new(0.5, 1)
-		tutorialGuiStepLabel.Position = UDim2.fromOffset(centerX, topY - 56)
 	end
 end
 
@@ -476,6 +637,7 @@ local function createTutorialGuiCursor()
 	cursor.Parent = tutorialGuiOverlay
 	cursor.AnchorPoint = Vector2.zero
 	cursor.Position = UDim2.new(0.7, 0, 0.3, 0)
+	cursor.Size = UDim2.new(cursor.Size.X.Scale * 2, cursor.Size.X.Offset * 2, cursor.Size.Y.Scale, cursor.Size.Y.Offset)
 	applyOverlayZIndex(cursor, 16)
 	tutorialGuiCursor = cursor
 end
@@ -512,10 +674,6 @@ local function handleTutorialGuiProxyClick()
 		hideTutorialGuiOverlay()
 		reportAction("BackPressed")
 		TeleportPlayer:FireServer()
-	elseif tutorialGuiTargetStep == 7 then
-		guiOverlaySuppressedUntil = tick() + 0.5
-		reportAction("ShopOpened")
-		FrameManager.open("Pickaxes")
 	end
 end
 
@@ -631,45 +789,289 @@ local function findCharacterUpgradeButton(): GuiButton?
 	return nil
 end
 
-local function findBaseUpgradeGuiButton(): GuiButton?
+local function findBaseUpgradeSurfaceGui(): SurfaceGui?
 	local plot = Workspace:FindFirstChild("Plot_" .. player.Name)
 	if not plot then
 		return nil
 	end
 
 	local upgradeModel = plot:FindFirstChild("UpgradeSlotsButton", true)
-	local mainGui = upgradeModel and upgradeModel:FindFirstChild("MainGUI")
-	local surfaceGui = mainGui and mainGui:FindFirstChild("SurfaceGuiA")
+	if not upgradeModel then
+		return nil
+	end
+
+	local upgradeMainGui = upgradeModel:FindFirstChild("MainGUI")
+	local surfaceGui = upgradeMainGui and upgradeMainGui:FindFirstChild("SurfaceGuiA")
+	if surfaceGui and surfaceGui:IsA("SurfaceGui") then
+		return surfaceGui
+	end
+
+	local fallbackSurfaceGui = upgradeModel:FindFirstChildWhichIsA("SurfaceGui", true)
+	if fallbackSurfaceGui then
+		return fallbackSurfaceGui
+	end
+
+	return nil
+end
+
+local function findBaseUpgradeGuiButton(): GuiButton?
+	local surfaceGui = findBaseUpgradeSurfaceGui()
 	local frame = surfaceGui and surfaceGui:FindFirstChild("FrameB")
 	local button = frame and frame:FindFirstChild("UpgradeButton")
 	if button and button:IsA("GuiButton") then
 		return button
 	end
 
+	if surfaceGui then
+		local fallbackButton = surfaceGui:FindFirstChild("UpgradeButton", true)
+		if fallbackButton and fallbackButton:IsA("GuiButton") then
+			return fallbackButton
+		end
+	end
+
 	return nil
 end
 
+local function getPlayerPlotSurfaceGuis(): {SurfaceGui}
+	local plot = Workspace:FindFirstChild("Plot_" .. player.Name)
+	if not plot then
+		return {}
+	end
+
+	local surfaceGuis = {}
+	for _, descendant in ipairs(plot:GetDescendants()) do
+		if descendant:IsA("SurfaceGui") then
+			table.insert(surfaceGuis, descendant)
+		end
+	end
+
+	return surfaceGuis
+end
+
+local function isDescendantOfAny(instance: Instance, roots: {Instance}): boolean
+	for _, root in ipairs(roots) do
+		if instance == root or instance:IsDescendantOf(root) then
+			return true
+		end
+	end
+
+	return false
+end
+
+local function collectGuiLineage(targetSet: {[Instance]: boolean}, instance: Instance?)
+	local current = instance
+	while current and current ~= playerGui do
+		targetSet[current] = true
+		if current == mainGui then
+			break
+		end
+		current = current.Parent
+	end
+end
+
+local function applyMaskToRoot(root: Instance, allowedLineage: {[Instance]: boolean}, fullTreeRoots: {Instance})
+	for _, descendant in ipairs(root:GetDescendants()) do
+		if descendant:IsA("GuiObject") then
+			if allowedLineage[descendant] or isDescendantOfAny(descendant, fullTreeRoots) then
+				restoreMaskedGuiVisible(descendant)
+			else
+				setMaskedGuiVisible(descendant, false)
+			end
+		end
+	end
+end
+
+local function syncTutorialFrames(presentation)
+	pickaxesFrame:SetAttribute("IgnoreFrameManagerBlocking", presentation.ShowPickaxesFrame == true)
+	upgradesFrame:SetAttribute("IgnoreFrameManagerBlocking", presentation.ShowUpgradesFrame == true)
+
+	local allowedFrameName: string? = nil
+	if presentation.ShowPickaxesFrame then
+		allowedFrameName = "Pickaxes"
+	elseif presentation.ShowUpgradesFrame then
+		allowedFrameName = "Upgrades"
+	end
+
+	local currentFrameName = FrameManager.getCurrentFrameName()
+	local transitionalFrameName: string? = nil
+	if currentStep == 7 then
+		transitionalFrameName = "Pickaxes"
+	elseif currentStep == 9 then
+		transitionalFrameName = "Upgrades"
+	end
+
+	if currentFrameName
+		and currentFrameName ~= allowedFrameName
+		and currentFrameName ~= transitionalFrameName then
+		FrameManager.closeCurrent()
+	end
+
+	if presentation.ShowUpgradesFrame and not upgradesFrame.Visible then
+		task.defer(function()
+			local currentPresentation = getCurrentStepPresentation()
+			if currentStep == 10 and currentPresentation.ShowUpgradesFrame and not upgradesFrame.Visible then
+				FrameManager.open("Upgrades")
+			end
+		end)
+	end
+end
+
+local function applyTutorialUiMask(presentation)
+	if not presentation.MaskUi then
+		if maskActive then
+			restoreTutorialUiMask()
+		end
+		return
+	end
+
+	local maskKey = table.concat({
+		tostring(currentStep),
+		tostring(presentation.ShowText),
+		tostring(presentation.ShowMoney),
+		tostring(presentation.ShowInventory),
+		tostring(presentation.ShowBombShopButton),
+		tostring(presentation.ShowPickaxesFrame),
+		tostring(presentation.ShowUpgradesFrame),
+		tostring(presentation.ShowBaseUpgradeSurfaceButton),
+		tostring(presentation.ShowMobileBombButton),
+		tostring(presentation.ShowJumpButton),
+		tostring(presentation.ShowBackButton),
+		tostring(presentation.BackProxyScale),
+		tostring(presentation.UseBlackout),
+	}, "|")
+
+	if maskActive and lastMaskKey == maskKey then
+		return
+	end
+
+	maskActive = true
+	lastMaskKey = maskKey
+
+	debugTutorialLog(("ApplyMask step=%d text=%s money=%s inv=%s pickaxes=%s upgrades=%s base=%s mobileBomb=%s jump=%s"):format(
+		currentStep,
+		tostring(presentation.ShowText),
+		tostring(presentation.ShowMoney),
+		tostring(presentation.ShowInventory),
+		tostring(presentation.ShowPickaxesFrame),
+		tostring(presentation.ShowUpgradesFrame),
+		tostring(presentation.ShowBaseUpgradeSurfaceButton),
+		tostring(presentation.ShowMobileBombButton),
+		tostring(presentation.ShowJumpButton)
+	))
+
+	syncTutorialFrames(presentation)
+
+	local allowedLineage: {[Instance]: boolean} = {}
+	local forceVisibleLineage: {[Instance]: boolean} = {}
+	local fullTreeRoots = {}
+
+	local function allowFullTree(instance: Instance?)
+		if not instance then
+			return
+		end
+
+		table.insert(fullTreeRoots, instance)
+		collectGuiLineage(allowedLineage, instance)
+		collectGuiLineage(forceVisibleLineage, instance)
+	end
+
+	if presentation.ShowText then
+		allowFullTree(instructionsLabel)
+	end
+
+	if presentation.ShowMoney then
+		allowFullTree(findMoneyLabel())
+	end
+
+	if presentation.ShowBombShopButton then
+		allowFullTree(findBombShopButton())
+	end
+
+	if presentation.ShowBackButton then
+		allowFullTree(getBackButton())
+	end
+
+	if presentation.ShowPickaxesFrame then
+		allowFullTree(pickaxesFrame)
+	end
+
+	if presentation.ShowUpgradesFrame then
+		allowFullTree(upgradesFrame)
+	end
+
+	applyMaskToRoot(hud, allowedLineage, fullTreeRoots)
+	applyMaskToRoot(frames, allowedLineage, fullTreeRoots)
+
+	for instance in pairs(forceVisibleLineage) do
+		if instance:IsA("GuiObject") then
+			setMaskedGuiVisible(instance, true)
+		end
+	end
+
+	local mobileBombButton = findMobileBombButton()
+	if mobileBombButton then
+		if presentation.ShowMobileBombButton then
+			restoreMaskedGuiVisible(mobileBombButton)
+		else
+			setMaskedGuiVisible(mobileBombButton, false)
+		end
+	end
+
+	local jumpButton = findMobileJumpButton()
+	if jumpButton then
+		if presentation.ShowJumpButton then
+			restoreMaskedGuiVisible(jumpButton)
+		else
+			setMaskedGuiVisible(jumpButton, false)
+		end
+	end
+
+	syncTutorialInventoryState(presentation.ShowInventory)
+
+	local baseSurfaceGui = findBaseUpgradeSurfaceGui()
+	local baseButton = findBaseUpgradeGuiButton()
+	for _, surfaceGui in ipairs(getPlayerPlotSurfaceGuis()) do
+		local shouldShowSurface = presentation.ShowBaseUpgradeSurfaceButton and surfaceGui == baseSurfaceGui
+		if currentStep == 11 or currentStep == 12 then
+			setMaskedGuiEnabled(surfaceGui, shouldShowSurface)
+		else
+			restoreMaskedGuiEnabled(surfaceGui)
+		end
+	end
+
+	if baseButton then
+		setMaskedGuiVisible(baseButton, presentation.ShowBaseUpgradeSurfaceButton)
+	end
+
+	local backButton = getBackButton()
+	if backButton then
+		setHudBackButtonHidden(backButton, presentation.BackProxyScale > 1)
+	end
+
+	if tutorialGuiBlackout then
+		tutorialGuiBlackout.Visible = presentation.UseBlackout
+		tutorialGuiBlackout.Active = presentation.UseBlackout
+	end
+end
+
 shouldUseTutorialGuiProxy = function(step: number): boolean
-	return step == 4 or step == 7
+	local presentation = TutorialConfiguration.GetStepPresentation(step)
+	return presentation.ShowBackButton and (tonumber(presentation.BackProxyScale) or 1) > 1
 end
 
 local function shouldShowTutorialGuiBlackout(step: number): boolean
-	return step == 4 or step == 7
+	local presentation = TutorialConfiguration.GetStepPresentation(step)
+	return presentation.UseBlackout
 end
 
 getTutorialGuiTarget = function(step: number): GuiButton?
 	if step == 4 then
-		local backButton = hud:FindFirstChild("Back")
-		if backButton and backButton:IsA("GuiButton") then
-			return backButton
-		end
-	elseif step == 7 then
-		return findBombShopButton()
+		return getBackButton()
 	elseif step == 8 then
 		return findBombBuyButton()
 	elseif step == 10 then
 		return findCharacterUpgradeButton()
-	elseif step == 12 then
+	elseif step == 11 then
 		return findBaseUpgradeGuiButton()
 	end
 
@@ -677,9 +1079,10 @@ getTutorialGuiTarget = function(step: number): GuiButton?
 end
 
 local function refreshTutorialGuiOverlay()
-	local backButton = hud:FindFirstChild("Back")
-	if backButton and backButton:IsA("GuiButton") and currentStep ~= 4 then
-		setHudBackButtonHidden(backButton, false)
+	local presentation = getCurrentStepPresentation()
+	if not presentation.MaskUi then
+		hideTutorialGuiOverlay()
+		return
 	end
 
 	local targetButton = getTutorialGuiTarget(currentStep)
@@ -713,16 +1116,7 @@ local function refreshTutorialGuiOverlay()
 		createTutorialGuiCursor()
 	end
 
-	if currentStep == 4 then
-		local stepDefinition = TutorialConfiguration.Steps[currentStep]
-		if not tutorialGuiStepLabel or tutorialGuiStepLabel.Parent ~= tutorialGuiOverlay then
-			createTutorialGuiLabel(stepDefinition and stepDefinition.Text or "")
-		elseif stepDefinition then
-			tutorialGuiStepLabel.Text = stepDefinition.Text
-		end
-	else
-		destroyTutorialGuiLabel()
-	end
+	destroyTutorialGuiLabel()
 
 	if shouldUseTutorialGuiProxy(currentStep) then
 		if not tutorialGuiProxyButton
@@ -732,10 +1126,6 @@ local function refreshTutorialGuiOverlay()
 		end
 	else
 		destroyTutorialGuiProxyButton()
-	end
-
-	if currentStep == 4 and targetButton:IsA("GuiButton") then
-		setHudBackButtonHidden(targetButton, true)
 	end
 
 	syncTutorialGuiLayout(targetButton)
@@ -1028,10 +1418,7 @@ local function resolveWorldTargetForStep(step: number): Instance?
 	elseif step == 3 then
 		return findClosestBrainrot()
 	elseif step == 5 then
-		if hasEquippedBrainrot() then
-			return findClosestFreeSlot()
-		end
-		return nil
+		return findClosestFreeSlot()
 	elseif step == 6 then
 		return findClosestCollectTouch()
 	elseif step == 7 or step == 8 then
@@ -1051,11 +1438,6 @@ local function resolveWorldTargetForStep(step: number): Instance?
 		return nil
 	elseif step == 11 then
 		return findUpgradeSlotsButtonTarget()
-	elseif step == 12 then
-		if not findBaseUpgradeGuiButton() then
-			return findUpgradeSlotsButtonTarget()
-		end
-		return nil
 	end
 
 	return nil
@@ -1090,14 +1472,17 @@ end
 local function applyStepPresentation()
 	local stepDefinition = TutorialConfiguration.Steps[currentStep]
 	if not stepDefinition then
+		restoreTutorialUiMask()
 		hideTutorialGuiOverlay()
 		clearAllTargets()
 		return
 	end
 
-	if currentStep < TutorialConfiguration.FinalStep then
+	local presentation = TutorialConfiguration.GetStepPresentation(currentStep)
+	if presentation.MaskUi then
+		applyTutorialUiMask(presentation)
 		instructionsLabel.Text = stepDefinition.Text
-		instructionsLabel.Visible = true
+		instructionsLabel.Visible = presentation.ShowText
 
 		local newWorldTarget = resolveWorldTargetForStep(currentStep)
 		if newWorldTarget then
@@ -1127,15 +1512,41 @@ local function applyStepPresentation()
 		return
 	end
 
+	restoreTutorialUiMask()
 	hideTutorialGuiOverlay()
-	clearExpiredPostTutorialCompletion()
 
-	if tick() < finalMessageHideAt then
+	if currentStep < TutorialConfiguration.FinalStep then
 		instructionsLabel.Text = stepDefinition.Text
-		instructionsLabel.Visible = true
-		clearAllTargets(true)
+		instructionsLabel.Visible = presentation.ShowText
+
+		local newWorldTarget = resolveWorldTargetForStep(currentStep)
+		if newWorldTarget then
+			if currentStep == 3 then
+				if newWorldTarget:IsA("Model") then
+					local targetPart = newWorldTarget.PrimaryPart or newWorldTarget:FindFirstChildWhichIsA("BasePart")
+					if targetPart then
+						setupBeam(targetPart)
+					else
+						cleanupBeamVisuals()
+					end
+					setupHighlight(newWorldTarget)
+				else
+					cleanupWorldVisuals()
+				end
+			elseif newWorldTarget:IsA("BasePart") then
+				setupBeam(newWorldTarget)
+				cleanupHighlightVisual()
+			else
+				cleanupWorldVisuals()
+			end
+		else
+			clearAllTargets(presentation.ShowText)
+		end
+
 		return
 	end
+
+	clearExpiredPostTutorialCompletion()
 
 	local postTutorialCompletion = getActivePostTutorialCompletion(true)
 	if postTutorialCompletion then
@@ -1165,18 +1576,22 @@ local function applyStepPresentation()
 end
 
 local function refreshCurrentStep()
+	if isRefreshingStep then
+		return
+	end
+	isRefreshingStep = true
+
 	local savedStep = player:GetAttribute("OnboardingStep")
 	if type(savedStep) ~= "number" then
+		isRefreshingStep = false
 		return
 	end
 
 	local clampedStep = math.clamp(savedStep, 1, TutorialConfiguration.FinalStep)
 	if currentStep ~= clampedStep then
 		local previousStep = currentStep
-		if previousStep > 0 and previousStep < TutorialConfiguration.FinalStep and clampedStep >= TutorialConfiguration.FinalStep then
-			finalMessageHideAt = tick() + TutorialConfiguration.CompletionMessageDuration
-		end
 		currentStep = clampedStep
+		debugTutorialLog(("StepChanged %d -> %d"):format(previousStep, currentStep))
 	end
 
 	local savedPostTutorialStage = player:GetAttribute("PostTutorialStage")
@@ -1187,6 +1602,7 @@ local function refreshCurrentStep()
 	end
 
 	applyStepPresentation()
+	isRefreshingStep = false
 end
 
 local function connectUiReporting()
@@ -1205,7 +1621,10 @@ local function connectUiReporting()
 		pickaxesFrame:SetAttribute("TutorialConnected", true)
 		pickaxesFrame:GetPropertyChangedSignal("Visible"):Connect(function()
 			if pickaxesFrame.Visible then
-				reportAction("ShopOpened")
+				debugTutorialLog("PickaxesFrame Visible")
+				if pickaxesFrame:GetAttribute("OpenedByTouchTrigger") == true then
+					reportAction("ShopOpened")
+				end
 				task.defer(refreshCurrentStep)
 			end
 		end)
@@ -1215,6 +1634,7 @@ local function connectUiReporting()
 		upgradesFrame:SetAttribute("TutorialConnected", true)
 		upgradesFrame:GetPropertyChangedSignal("Visible"):Connect(function()
 			if upgradesFrame.Visible then
+				debugTutorialLog("UpgradesFrame Visible")
 				reportAction("UpgradesOpened")
 			end
 			task.defer(refreshCurrentStep)
@@ -1254,6 +1674,7 @@ end)
 
 player.CharacterAdded:Connect(function()
 	task.wait(0.5)
+	restoreTutorialUiMask()
 	hideTutorialGuiOverlay()
 	clearAllTargets(true)
 	guiOverlaySuppressedUntil = 0

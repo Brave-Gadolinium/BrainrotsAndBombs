@@ -10,8 +10,16 @@ local CollectionService = game:GetService("CollectionService")
 
 -- Modules
 local FrameManager = require(ReplicatedStorage.Modules.FrameManager)
+local TutorialConfiguration = require(ReplicatedStorage.Modules.TutorialConfiguration)
 
 local UIInitializer = {}
+local DEBUG_TUTORIAL = true
+
+local function debugTutorialLog(message: string)
+	if DEBUG_TUTORIAL then
+		print(("[Tutorial][Client] %s"):format(message))
+	end
+end
 
 -- [ CONFIGURATION ]
 local DEBOUNCE_TIME = 0.5
@@ -32,6 +40,36 @@ local hudGui = mainGui:WaitForChild("HUD")
 
 local lastInteraction = 0
 local OWN_BASE_INTERACTION_RADIUS = 100
+
+local function isTouchFrameAllowedByTutorial(frameName: string): boolean
+	local onboardingStep = tonumber(player:GetAttribute("OnboardingStep")) or 0
+	if onboardingStep <= 0 then
+		return true
+	end
+
+	local presentation = TutorialConfiguration.GetStepPresentation(onboardingStep)
+	if not presentation.MaskUi then
+		return true
+	end
+
+	if frameName == "Pickaxes" then
+		local allowed = onboardingStep == 7 or onboardingStep == 8
+		if not allowed then
+			debugTutorialLog(("TouchOpenBlocked frame=%s step=%d"):format(frameName, onboardingStep))
+		end
+		return allowed
+	end
+
+	if frameName == "Upgrades" then
+		local allowed = onboardingStep == 9 or onboardingStep == 10
+		if not allowed then
+			debugTutorialLog(("TouchOpenBlocked frame=%s step=%d"):format(frameName, onboardingStep))
+		end
+		return allowed
+	end
+
+	return true
+end
 
 local function ensureGuiCorner(target: Instance, radius: UDim)
 	if target:FindFirstChildOfClass("UICorner") then
@@ -259,6 +297,7 @@ local function setupTaggedTouchTrigger(tagName: string, frameName: string)
 
 	local openedByTouch = false
 	local activeTouchPart: BasePart? = nil
+	targetFrame:SetAttribute("OpenedByTouchTrigger", false)
 
 	local function connectTouchPart(touchPart: Instance)
 		if not touchPart:IsA("BasePart") then
@@ -278,10 +317,17 @@ local function setupTaggedTouchTrigger(tagName: string, frameName: string)
 			if char == player.Character then
 				local hum = char:FindFirstChild("Humanoid")
 				local root = char:FindFirstChild("HumanoidRootPart")
-				if hum and hum.Health > 0 and root and root:IsA("BasePart") and isWithinOwnBaseInteractionRange(root.Position) then
+				if hum
+					and hum.Health > 0
+					and root
+					and root:IsA("BasePart")
+					and isWithinOwnBaseInteractionRange(root.Position)
+					and isTouchFrameAllowedByTutorial(frameName)
+				then
 					lastInteraction = now
 					openedByTouch = true
 					activeTouchPart = touchPart
+					targetFrame:SetAttribute("OpenedByTouchTrigger", true)
 					FrameManager.open(frameName)
 				end
 			end
@@ -293,6 +339,7 @@ local function setupTaggedTouchTrigger(tagName: string, frameName: string)
 		if not targetFrame.Visible then
 			openedByTouch = false
 			activeTouchPart = nil
+			targetFrame:SetAttribute("OpenedByTouchTrigger", false)
 		end
 	end)
 
