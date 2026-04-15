@@ -22,3 +22,4 @@
 - Added a menu-safe FOV reset so pressing `ESC` cancels active UI/bomb camera FOV effects and restores the camera to the default value instead of leaving the player zoomed
 - Re-synced zone-driven HUD controllers on tutorial completion so step 13 now shows the correct mine/base button set immediately based on the player's current zone
 - Deferred the Drop HUD resync after tutorial completion, kept money visible for masked steps after the first placed brainrot, and retried FTUE masking until late-arriving guided buttons become visible
+- Added `TutorialUiConfiguration`, documented the FTUE flow, and preserved the base-upgrade surface button's original visibility so tutorial completion does not hide it

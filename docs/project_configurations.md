@@ -53,3 +53,43 @@ Used by:
 - `OfflineIncomeUIController`
 - `OfflineIncomeController`
 - `MonetizationController`
+
+Config: TutorialConfiguration
+
+Location:
+- `src/ReplicatedStorage/Modules/TutorialConfiguration.lua`
+
+Purpose:
+- Defines FTUE steps, guided targets, and per-step presentation rules such as masking, guided frames, and allowed tutorial buttons.
+
+Parameters:
+- `FinalStep = 13`
+- `CashGoal = 5`
+- `TutorialCharacterUpgradeId = Speed1`
+- `TutorialBaseUpgradeMode = FirstSlotUnlock`
+- `BaseUpgradeApproachDistance = 20`
+
+Used by:
+- `TutorialService`
+- `OnboardingController`
+- `UIInitializer`
+- `QuestChainUIController`
+- `CollectionZoneController`
+- `MiningController`
+
+Config: TutorialUiConfiguration
+
+Location:
+- `src/ReplicatedStorage/Modules/TutorialUiConfiguration.lua`
+
+Purpose:
+- Centralizes FTUE UI exceptions that should not be hardcoded inside `OnboardingController`, including retry targets for delayed tutorial buttons and special visibility restore rules.
+
+Parameters:
+- `PersistentMoneyStartStep = 6`
+- `RetryTargetsByStep` for delayed controls like bomb-buy, character-upgrade, and base-upgrade buttons
+- `PreserveOriginalVisibilityTargets` for controls such as the base-upgrade surface button
+
+Used by:
+- `TutorialConfiguration`
+- `OnboardingController`

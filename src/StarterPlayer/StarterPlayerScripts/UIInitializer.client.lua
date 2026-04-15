@@ -33,7 +33,6 @@ local TWEEN_INFO = TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirecti
 -- [ REFERENCES ]
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
-
 local mainGui = playerGui:WaitForChild("GUI") 
 local framesContainer = mainGui:WaitForChild("Frames")
 local hudGui = mainGui:WaitForChild("HUD") 

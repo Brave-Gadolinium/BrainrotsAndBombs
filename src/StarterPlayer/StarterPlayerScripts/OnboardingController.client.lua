@@ -10,6 +10,7 @@ local Workspace = game:GetService("Workspace")
 
 local PostTutorialConfiguration = require(ReplicatedStorage.Modules.PostTutorialConfiguration)
 local TutorialConfiguration = require(ReplicatedStorage.Modules.TutorialConfiguration)
+local TutorialUiConfiguration = require(ReplicatedStorage.Modules.TutorialUiConfiguration)
 local FrameManager = require(ReplicatedStorage.Modules.FrameManager)
 local ClientZoneService = require(ReplicatedStorage.Modules.ClientZoneService)
 
@@ -476,6 +477,22 @@ local function setMaskedGuiVisible(guiObject: GuiObject, visible: boolean)
 	end
 end
 
+local function setMaskedGuiVisibleForTarget(
+	guiObject: GuiObject,
+	visible: boolean,
+	targetKey: TutorialUiConfiguration.TutorialUiTargetKey
+)
+	local currentVisible = guiObject.Visible
+	local preserveOriginalVisibility = TutorialUiConfiguration.ShouldPreserveOriginalVisibility(targetKey)
+	if maskedGuiVisibility[guiObject] == nil or (not preserveOriginalVisibility and currentVisible ~= visible) then
+		maskedGuiVisibility[guiObject] = currentVisible
+	end
+
+	if currentVisible ~= visible then
+		guiObject.Visible = visible
+	end
+end
+
 local function restoreMaskedGuiVisible(guiObject: GuiObject)
 	local originalVisible = maskedGuiVisibility[guiObject]
 	if originalVisible == nil then
@@ -892,46 +909,44 @@ local function findBaseUpgradeGuiButton(): GuiButton?
 	return nil
 end
 
-local function shouldRetryTutorialMask(presentation): boolean
-	if presentation.ShowMoney then
+local function isTutorialUiTargetReady(targetKey: TutorialUiConfiguration.TutorialUiTargetKey): boolean
+	if targetKey == "Money" then
 		local moneyLabel = findMoneyLabel()
-		if not moneyLabel or not moneyLabel.Visible then
-			return true
-		end
+		return moneyLabel ~= nil and moneyLabel.Visible
 	end
 
-	if presentation.ShowMobileBombButton then
+	if targetKey == "MobileBombButton" then
 		local mobileBombButton = findMobileBombButton()
-		if not mobileBombButton or not mobileBombButton.Visible then
-			return true
-		end
+		return mobileBombButton ~= nil and mobileBombButton.Visible
 	end
 
-	if presentation.ShowJumpButton then
+	if targetKey == "JumpButton" then
 		local jumpButton = findMobileJumpButton()
-		if not jumpButton or not jumpButton.Visible then
-			return true
-		end
+		return jumpButton ~= nil and jumpButton.Visible
 	end
 
-	if presentation.ShowPickaxesFrame and currentStep == 8 then
+	if targetKey == "BombBuyButton" then
 		local buyButton = findBombBuyButton()
-		if not buyButton or not buyButton.Visible then
-			return true
-		end
+		return buyButton ~= nil and buyButton.Visible
 	end
 
-	if presentation.ShowUpgradesFrame and currentStep == 10 then
+	if targetKey == "CharacterUpgradeButton" then
 		local characterUpgradeButton = findCharacterUpgradeButton()
-		if not characterUpgradeButton or not characterUpgradeButton.Visible then
-			return true
-		end
+		return characterUpgradeButton ~= nil and characterUpgradeButton.Visible
 	end
 
-	if presentation.ShowBaseUpgradeSurfaceButton then
+	if targetKey == "BaseUpgradeSurfaceButton" then
 		local baseSurfaceGui = findBaseUpgradeSurfaceGui()
 		local baseButton = findBaseUpgradeGuiButton()
-		if not baseSurfaceGui or not baseSurfaceGui.Enabled or not baseButton or not baseButton.Visible then
+		return baseSurfaceGui ~= nil and baseSurfaceGui.Enabled and baseButton ~= nil and baseButton.Visible
+	end
+
+	return true
+end
+
+local function shouldRetryTutorialMask(): boolean
+	for _, targetKey in ipairs(TutorialUiConfiguration.GetRetryTargets(currentStep)) do
+		if not isTutorialUiTargetReady(targetKey) then
 			return true
 		end
 	end
@@ -1121,7 +1136,7 @@ local function applyTutorialUiMask(presentation)
 		if presentation.ShowMobileBombButton then
 			restoreMaskedGuiVisible(mobileBombButton)
 		else
-			setMaskedGuiVisible(mobileBombButton, false)
+			setMaskedGuiVisibleForTarget(mobileBombButton, false, "MobileBombButton")
 		end
 	end
 
@@ -1130,7 +1145,7 @@ local function applyTutorialUiMask(presentation)
 		if presentation.ShowJumpButton then
 			restoreMaskedGuiVisible(jumpButton)
 		else
-			setMaskedGuiVisible(jumpButton, false)
+			setMaskedGuiVisibleForTarget(jumpButton, false, "JumpButton")
 		end
 	end
 
@@ -1148,7 +1163,7 @@ local function applyTutorialUiMask(presentation)
 	end
 
 	if baseButton then
-		setMaskedGuiVisible(baseButton, presentation.ShowBaseUpgradeSurfaceButton)
+		setMaskedGuiVisibleForTarget(baseButton, presentation.ShowBaseUpgradeSurfaceButton, "BaseUpgradeSurfaceButton")
 	end
 
 	local backButton = getBackButton()
@@ -1161,7 +1176,7 @@ local function applyTutorialUiMask(presentation)
 		tutorialGuiBlackout.Active = presentation.UseBlackout
 	end
 
-	if shouldRetryTutorialMask(presentation) then
+	if shouldRetryTutorialMask() then
 		maskDirty = true
 	end
 end
