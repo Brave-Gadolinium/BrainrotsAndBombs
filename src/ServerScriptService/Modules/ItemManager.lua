@@ -19,7 +19,6 @@ local NumberFormatter = require(ReplicatedStorage.Modules.NumberFormatter)
 local LuckyBlockManager = require(ServerScriptService.Modules.LuckyBlockManager)
 local TutorialService = require(ServerScriptService.Modules.TutorialService)
 local AnalyticsFunnelsService = require(ServerScriptService.Modules.AnalyticsFunnelsService)
-local ConfigItems = require(ReplicatedStorage.Modules.ItemConfigurations)
 local Constants = require(ReplicatedStorage.Modules.Constants)
 local RebirthRequirements = require(ReplicatedStorage.Modules.RebirthRequirements)
 
@@ -461,15 +460,14 @@ local function setupItemGUI(target: Instance, level: number?, rebirths: number?,
 	local lblRarity = labelsFrame:WaitForChild("Rarity") :: TextLabel
 	local lblName = labelsFrame:WaitForChild("Name") :: TextLabel
 	local lblMutation = labelsFrame:WaitForChild("Mutation") :: TextLabel
---~!
-	local itemName = target:GetAttribute("OriginalName") or "Unknown"
-	local rarityName = RarityUtils.Normalize(target:GetAttribute("Rarity")) or "Common"
-	local mutationName = target:GetAttribute("Mutation") or "Normal"
-
-	lblName.Text = ConfigItems.Items[target:GetAttribute("OriginalName") or "Unknown"].DisplayName
-
-
+	local rawItemName = target:GetAttribute("OriginalName")
+	local rawRarity = target:GetAttribute("Rarity")
+	local rawMutation = target:GetAttribute("Mutation")
+	local itemName = if type(rawItemName) == "string" and rawItemName ~= "" then rawItemName else target.Name
+	local rarityName = RarityUtils.Normalize(if type(rawRarity) == "string" then rawRarity else nil) or "Common"
+	local mutationName = if type(rawMutation) == "string" and rawMutation ~= "" then rawMutation else "Normal"
 	local itemData = ItemConfigurations.GetItemData(itemName)
+	lblName.Text = (itemData and itemData.DisplayName) or itemName or target.Name
 	local baseIncome = itemData and itemData.Income or 0
 
 	local reb = rebirths or 0
@@ -481,6 +479,8 @@ local function setupItemGUI(target: Instance, level: number?, rebirths: number?,
 	lblEarnings.Text = "+" .. NumberFormatter.Format(totalIncome) .. "/s"
 
 	local rarityConfig = RarityConfigurations[rarityName]
+	lblRarity.Text = rarityName
+	lblRarity.TextColor3 = Color3.fromRGB(255, 255, 255)
 	if rarityConfig then
 		lblRarity.Text = rarityConfig.DisplayName
 		lblRarity.TextColor3 = rarityConfig.TextColor
@@ -491,6 +491,8 @@ local function setupItemGUI(target: Instance, level: number?, rebirths: number?,
 	end
 
 	local mutationConfig = MutationConfigurations[mutationName]
+	lblMutation.Text = mutationName
+	lblMutation.TextColor3 = Color3.fromRGB(255, 255, 255)
 	if mutationConfig then
 		lblMutation.Text = mutationConfig.DisplayName
 		lblMutation.TextColor3 = mutationConfig.TextColor

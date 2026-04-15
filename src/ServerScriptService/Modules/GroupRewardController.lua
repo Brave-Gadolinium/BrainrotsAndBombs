@@ -15,20 +15,34 @@ local ItemConfigurations = require(ReplicatedStorage.Modules.ItemConfigurations)
 local AnalyticsFunnelsService = require(ServerScriptService.Modules.AnalyticsFunnelsService)
 local AnalyticsEconomyService = require(ServerScriptService.Modules.AnalyticsEconomyService)
 local TRANSACTION_TYPES = AnalyticsEconomyService:GetTransactionTypes()
+local claimRequestsInFlight: {[Player]: boolean} = {}
 
 function GroupRewardController:ProcessRewardRequest(player: Player)
 	AnalyticsFunnelsService:HandleGroupRewardClaimAttempt(player, "group_reward_ui")
+
+	if claimRequestsInFlight[player] then
+		AnalyticsFunnelsService:HandleGroupRewardClaimFailure(player, "group_reward_ui", "RequestInProgress")
+		return {Success = false, Error = "RequestInProgress", Msg = "Reward is already being processed."}
+	end
+
+	claimRequestsInFlight[player] = true
+
+	local function finish(result)
+		claimRequestsInFlight[player] = nil
+		return result
+	end
+
 	local profile = PlayerController:GetProfile(player)
 	if not profile then
 		AnalyticsFunnelsService:HandleGroupRewardClaimFailure(player, "group_reward_ui", "ProfileNotLoaded")
-		return {Success = false, Msg = "Data not loaded yet!"}
+		return finish({Success = false, Error = "ProfileNotLoaded", Msg = "Data not loaded yet!"})
 	end
 
 	-- Check if they already claimed it
 	if profile.Data.ClaimedPacks["GroupItemReward"] then
 		player:SetAttribute("GroupRewardClaimed", true)
 		AnalyticsFunnelsService:HandleGroupRewardClaimFailure(player, "group_reward_ui", "AlreadyClaimed")
-		return {Success = false, Msg = "Already claimed!"}
+		return finish({Success = false, Error = "AlreadyClaimed", Msg = "Already claimed!"})
 	end
 
 	-- Verify Group Membership via Roblox API
@@ -39,15 +53,11 @@ function GroupRewardController:ProcessRewardRequest(player: Player)
 
 	if not success then
 		AnalyticsFunnelsService:HandleGroupRewardClaimFailure(player, "group_reward_ui", "RobloxApiError")
-		return {Success = false, Msg = "Roblox API Error. Try again!"}
+		return finish({Success = false, Error = "RobloxApiError", Msg = "Roblox API Error. Try again!"})
 	end
 
 	if isInGroup then
-		-- 1. Mark as Claimed
-		profile.Data.ClaimedPacks["GroupItemReward"] = true
-		player:SetAttribute("GroupRewardClaimed", true)
-
-		-- 2. Give the Item
+		-- 1. Give the item first, so reward state is not consumed on grant failure.
 		local rewardConfig = ProductConfigurations.Group.Reward
 		local itemData = ItemConfigurations.GetItemData(rewardConfig.Name)
 		local rarity = itemData and itemData.Rarity or "Common"
@@ -59,6 +69,15 @@ function GroupRewardController:ProcessRewardRequest(player: Player)
 			rarity, 
 			rewardConfig.Level or 1
 		)
+		if not tool then
+			AnalyticsFunnelsService:HandleGroupRewardClaimFailure(player, "group_reward_ui", "GrantFailed")
+			return finish({Success = false, Error = "GrantFailed", Msg = "Reward is unavailable right now."})
+		end
+
+		-- 2. Mark as claimed only after the grant succeeds.
+		profile.Data.ClaimedPacks["GroupItemReward"] = true
+		player:SetAttribute("GroupRewardClaimed", true)
+
 		if tool then
 			AnalyticsEconomyService:LogItemValueSourceForItem(
 				player,
@@ -85,11 +104,11 @@ function GroupRewardController:ProcessRewardRequest(player: Player)
 
 		AnalyticsFunnelsService:HandleGroupRewardClaimSuccess(player, "group_reward_ui")
 
-		return {Success = true}
+		return finish({Success = true})
 	else
 		AnalyticsFunnelsService:HandleGroupRewardRejected(player)
 		AnalyticsFunnelsService:HandleGroupRewardClaimFailure(player, "group_reward_ui", "NotInGroup")
-		return {Success = false, Msg = "You must join the group first!"}
+		return finish({Success = false, Error = "NotInGroup", Msg = "You must join the group first!"})
 	end
 end
 
@@ -120,6 +139,10 @@ function GroupRewardController:Start()
 				player:SetAttribute("GroupRewardClaimed", isClaimed)
 			end
 		end)
+	end)
+
+	Players.PlayerRemoving:Connect(function(player)
+		claimRequestsInFlight[player] = nil
 	end)
 end
 

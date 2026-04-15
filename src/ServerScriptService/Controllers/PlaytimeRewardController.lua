@@ -19,6 +19,7 @@ local remotesFolder
 local getStatusRemote
 local claimRewardRemote
 local statusUpdatedRemote
+local claimRequestsInFlight: {[Player]: boolean} = {}
 local TRANSACTION_TYPES = AnalyticsEconomyService:GetTransactionTypes()
 
 local function getProfile(player: Player)
@@ -201,37 +202,72 @@ function PlaytimeRewardController:HandleClaim(player: Player, rewardId: number)
 		}
 	end
 
-	local success, err, status, reward = PlaytimeRewardManager.Claim(profile.Data, rewardId)
+	if claimRequestsInFlight[player] then
+		return {
+			Success = false,
+			Error = "ClaimInProgress",
+			Status = self:GetStatusForPlayer(player),
+		}
+	end
+
+	claimRequestsInFlight[player] = true
+
+	local function finish(result)
+		claimRequestsInFlight[player] = nil
+		return result
+	end
+
+	local success, err, status, reward = PlaytimeRewardManager.GetClaimableReward(profile.Data, rewardId)
 	if not success then
 		AnalyticsFunnelsService:HandlePlaytimeRewardClaimFailure(player, rewardId, err or "Unknown")
-		setPlayerAttributes(player, status)
-		return {
+		if status then
+			setPlayerAttributes(player, status)
+		end
+		return finish({
 			Success = false,
 			Error = err,
 			Status = status,
-		}
+		})
 	end
 
 	local applied, applyError = self:ApplyReward(player, reward)
 	if not applied then
-		return {
+		AnalyticsFunnelsService:HandlePlaytimeRewardClaimFailure(player, rewardId, applyError or "ApplyFailed")
+		if status then
+			setPlayerAttributes(player, status)
+		end
+		return finish({
 			Success = false,
 			Error = applyError,
 			Status = status,
-		}
+		})
 	end
 
-	setPlayerAttributes(player, status)
-	AnalyticsFunnelsService:HandlePlaytimeRewardClaimSuccess(player, rewardId, status)
+	local marked, markError, updatedStatus = PlaytimeRewardManager.MarkRewardClaimed(profile.Data, rewardId)
+	if not marked then
+		AnalyticsFunnelsService:HandlePlaytimeRewardClaimFailure(player, rewardId, markError or "MarkFailed")
+		if updatedStatus then
+			setPlayerAttributes(player, updatedStatus)
+		end
+		warn("[PlaytimeRewardController] Failed to mark reward claimed after grant:", player.Name, rewardId, markError)
+		return finish({
+			Success = false,
+			Error = markError,
+			Status = updatedStatus,
+		})
+	end
+
+	setPlayerAttributes(player, updatedStatus)
+	AnalyticsFunnelsService:HandlePlaytimeRewardClaimSuccess(player, rewardId, updatedStatus)
 	if statusUpdatedRemote then
-		statusUpdatedRemote:FireClient(player, status)
+		statusUpdatedRemote:FireClient(player, updatedStatus)
 	end
 
-	return {
+	return finish({
 		Success = true,
-		Status = status,
+		Status = updatedStatus,
 		Reward = reward,
-	}
+	})
 end
 
 function PlaytimeRewardController:Init(controllers)
@@ -273,6 +309,7 @@ function PlaytimeRewardController:Init(controllers)
 	end)
 
 	Players.PlayerRemoving:Connect(function(player)
+		claimRequestsInFlight[player] = nil
 		player:SetAttribute("PlaytimeRewardDayKey", nil)
 		player:SetAttribute("PlaytimeRewardSeconds", nil)
 		player:SetAttribute("PlaytimeRewardNextId", nil)

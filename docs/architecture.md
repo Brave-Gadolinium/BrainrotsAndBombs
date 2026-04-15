@@ -9,10 +9,11 @@ Server systems:
 - `FriendBoostController` owns online-friend boost recalculation
 - `OfflineIncomeController` owns pending offline reward calculation, claim state, and reward payout
 - `MonetizationController` owns developer product receipts and paid reward fulfillment
-- `PlotManager.server.lua` owns runtime plot spawning and stamps each player plot with ownership and base identity attributes
+- `PlotManager.server.lua` owns runtime plot spawning, stamps each player plot with ownership/base identity attributes, and plays the temporary `UpgradeBase` floor effect after slot upgrades
+- `TerrainGeneratorManager` owns mine terrain baseline snapshots and restores only dirty chunks at round end while keeping the fixed timer flow unchanged
 
 Client systems:
-- `BombCameraController` owns the temporary bomb follow camera, FOV handoff, blast punch, and immediate recovery when the Roblox menu opens
+- `BombCameraController` owns the temporary bomb follow camera, FOV handoff, blast punch, and immediate recovery when the Roblox menu opens after FTUE completion
 - `HUDController` owns HUD money, offline-per-hour, invite prompt, and boost labels
 - `OnboardingController` owns tutorial step presentation, UI masking, world guidance beams, and post-tutorial prompts
 - `QuestChainUIController` owns the HUD quest-chain widget and reward-claim rendering

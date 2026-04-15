@@ -145,7 +145,7 @@ local function setupHUD()
 	local moneyStat = leaderstats:WaitForChild("Money") :: NumberValue
 
 	local function updateMoney()
-		moneyLabel.Text = NumberFormatter.Format(moneyStat.Value)
+		moneyLabel.Text = "$" .. NumberFormatter.Format(moneyStat.Value)
 	end
 	moneyStat.Changed:Connect(updateMoney)
 	updateMoney()

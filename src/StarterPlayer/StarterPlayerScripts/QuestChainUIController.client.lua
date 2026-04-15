@@ -6,6 +6,7 @@ local TweenService = game:GetService("TweenService")
 
 local NotificationManager = require(ReplicatedStorage.Modules.NotificationManager)
 local NumberFormatter = require(ReplicatedStorage.Modules.NumberFormatter)
+local QuestChainConfiguration = require(ReplicatedStorage.Modules.QuestChainConfiguration)
 local TutorialConfiguration = require(ReplicatedStorage.Modules.TutorialConfiguration)
 
 local player = Players.LocalPlayer
@@ -170,6 +171,13 @@ local HOVER_SCALE = 1.03
 local CLICK_SCALE = 0.97
 local TWEEN_INFO = TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 local latestState = nil
+local questRewardsById: {[string]: number} = {}
+
+for _, quest in ipairs(QuestChainConfiguration.Quests or {}) do
+	if type(quest.Id) == "string" then
+		questRewardsById[quest.Id] = math.max(0, tonumber(quest.Reward) or 0)
+	end
+end
 
 local function setupButtonAnimation(button: GuiButton)
 	local uiScale = button:FindFirstChildOfClass("UIScale")
@@ -214,6 +222,24 @@ local function formatQuestText(questState): string
 	)
 end
 
+local function getQuestRewardValue(questState): number
+	local questId = questState and questState.id
+	local configReward = if type(questId) == "string" then questRewardsById[questId] else nil
+	if configReward ~= nil then
+		return configReward
+	end
+
+	return math.max(0, tonumber(questState and questState.rewardValue) or 0)
+end
+
+local function findDescendantByName(root: Instance?, name: string): Instance?
+	if not root then
+		return nil
+	end
+
+	return root:FindFirstChild(name, true)
+end
+
 local function renderQuest(questState)
 	local questItem = template:Clone()
 	questItem.Name = questState.id or "Quest"
@@ -227,26 +253,18 @@ local function renderQuest(questState)
 		questText.Text = formatQuestText(questState)
 	end
 
-	local claimFrame = questItem:FindFirstChild("ClaimFrame") :: Frame?
-	local collectButton = claimFrame and claimFrame:FindFirstChild("Collect") :: TextButton?
+	local claimFrame = questItem:FindFirstChild("ClaimFrame")
+	local collectButtonInstance = findDescendantByName(claimFrame, "Collect")
+	local collectButton = if collectButtonInstance and collectButtonInstance:IsA("GuiButton") then collectButtonInstance else nil
 	local claimText: TextLabel? = nil
-	local coin: Frame? = nil
 	local rewardAmount: TextLabel? = nil
 	if collectButton then
-		local claimTextInstance = collectButton:FindFirstChild("TextClaim")
+		local claimTextInstance = findDescendantByName(collectButton, "TextClaim")
 		if claimTextInstance and claimTextInstance:IsA("TextLabel") then
 			claimText = claimTextInstance
 		end
 
-		local coinFrame = collectButton:FindFirstChild("Coin")
-		if coinFrame and coinFrame:IsA("Frame") then
-			coin = coinFrame
-		end
-	end
-
-	if coin then
-		coin.Visible = true
-		local rewardAmountLabel = coin:FindFirstChild("RewardAmount")
+		local rewardAmountLabel = findDescendantByName(collectButton, "RewardAmount")
 		if rewardAmountLabel and rewardAmountLabel:IsA("TextLabel") then
 			rewardAmount = rewardAmountLabel
 			rewardAmount.Visible = true
@@ -257,12 +275,12 @@ local function renderQuest(questState)
 	end
 
 	local canClaim = questState.isCompleted == true and questState.isClaimed ~= true
-	if claimFrame then
+	if claimFrame and claimFrame:IsA("GuiObject") then
 		claimFrame.Visible = canClaim
 	end
 
 	if rewardAmount then
-		rewardAmount.Text = NumberFormatter.Format(tonumber(questState.rewardValue) or 0)
+		rewardAmount.Text = "+" .. NumberFormatter.Format(getQuestRewardValue(questState))
 	end
 
 	if not collectButton then

@@ -37,8 +37,9 @@ local mobileBombCooldownToken = 0
 local activeHighlights: {[BasePart]: SelectionBox} = {}
 local highlightLoop: RBXScriptConnection? = nil
 
-local MOBILE_BOMB_READY_ICON = "rbxassetid://123855876242070"
-local MOBILE_BOMB_COOLDOWN_ICON = "rbxassetid://135164909685622"
+local MOBILE_BOMB_READY_ICON = "rbxassetid://97598957013767"
+local MOBILE_BOMB_COOLDOWN_ICON = "rbxassetid://73789947519628"
+local MOBILE_BOMB_ICON_TRANSPARENCY = 0.5
 local MOBILE_BOMB_MIN_SIZE = 68
 local MOBILE_BOMB_MAX_SIZE = 93
 local MOBILE_BOMB_SIZE_RATIO = 0.16
@@ -349,7 +350,7 @@ function updateMobileBombButtonState()
 	button.BackgroundColor3 = if isReady then Color3.fromRGB(26, 28, 37) else Color3.fromRGB(33, 33, 39)
 	button.BackgroundTransparency = if isReady then 0.08 else 0.16
 	icon.Image = if isReady then MOBILE_BOMB_READY_ICON else MOBILE_BOMB_COOLDOWN_ICON
-	icon.ImageTransparency = if hasBomb then (if isReady then 0 else 0.12) else 0.2
+	icon.ImageTransparency = MOBILE_BOMB_ICON_TRANSPARENCY
 
 	local stroke = button:FindFirstChildOfClass("UIStroke")
 	if stroke then

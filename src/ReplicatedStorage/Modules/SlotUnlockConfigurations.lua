@@ -10,7 +10,7 @@ SlotUnlockConfigurations.SlotsPerUpgrade = 2
 SlotUnlockConfigurations.new_slots = {
 	{
 		lvl = 1,
-		money_req = 20000,
+		money_req = 0,
 		new_slots = 2,
 	},
 	{

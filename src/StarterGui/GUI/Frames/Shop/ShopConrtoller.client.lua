@@ -27,6 +27,7 @@ local trackedBoosterCards = {}
 local pendingPriceRequests = {}
 local shopPricingActivated = false
 local shopCountdownRefreshToken = 0
+local ROBUX_ICON = utf8.char(0xE002)
 
 local function findAnyChild(parent, childNames)
 	if not parent then
@@ -175,8 +176,40 @@ local function applyBasePriceText(label, text)
 		return
 	end
 
-	label:SetAttribute("BasePriceText", text)
-	setText(label, text)
+	local resolvedText = text
+
+	if label:IsA("TextLabel") or label:IsA("TextButton") then
+		local templateText = label:GetAttribute("TemplatePriceText")
+		if type(templateText) ~= "string" or templateText == "" then
+			templateText = label.Text
+			label:SetAttribute("TemplatePriceText", templateText)
+		end
+
+		if type(resolvedText) == "string" then
+			local hasBuyForTemplate = string.find(string.lower(templateText), "buy for", 1, true) ~= nil
+				and string.find(string.lower(templateText), "robux", 1, true) ~= nil
+			local numericPrice = string.match(resolvedText, "(%d+)%s*$")
+			local hasUnknownPrice = string.match(resolvedText, "%?%s*$") ~= nil
+
+			if numericPrice then
+				local iconPriceText = ROBUX_ICON .. " " .. numericPrice
+				if hasBuyForTemplate then
+					resolvedText = "Buy for " .. iconPriceText
+				else
+					resolvedText = iconPriceText
+				end
+			elseif hasUnknownPrice then
+				if hasBuyForTemplate then
+					resolvedText = "Buy for " .. ROBUX_ICON .. " ?"
+				else
+					resolvedText = ROBUX_ICON .. " ?"
+				end
+			end
+		end
+	end
+
+	label:SetAttribute("BasePriceText", resolvedText)
+	setText(label, resolvedText)
 end
 
 local function restoreBasePriceText(label)
@@ -360,16 +393,21 @@ local function promptGamePassPurchaseWithAnalytics(section, entrypoint, productN
 end
 
 local function findPriceLabel(button)
-	local priceLabel = findNamedDescendant(button, {"Price"}, "TextLabel")
+	local priceLabel = findNamedDescendant(button, {"Price", "Cost", "Text"}, "TextLabel")
 	if priceLabel then
 		return priceLabel
+	end
+
+	local descendantLabel = findTextLabel(button)
+	if descendantLabel then
+		return descendantLabel
 	end
 
 	if button and button:IsA("TextButton") then
 		return button
 	end
 
-	return findTextLabel(button)
+	return nil
 end
 
 local function setImage(target, imageId)
@@ -528,7 +566,7 @@ local function setupHackerLuckyBlockSection()
 			local info = getCachedProductInfo(baseProductId, Enum.InfoType.Product)
 			local price = info and info.PriceInRobux
 			if type(price) == "number" then
-				label.Text = formatRobux(price * multiplier)
+				label.Text = ROBUX_ICON .. " " .. tostring(price * multiplier)
 			end
 		end
 

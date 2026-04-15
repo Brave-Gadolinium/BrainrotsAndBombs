@@ -10,6 +10,7 @@ local NotificationManager = require(ReplicatedStorage.Modules.NotificationManage
 local ProductConfigurations = require(ReplicatedStorage.Modules.ProductConfigurations)
 local RarityConfigurations = require(ReplicatedStorage.Modules.RarityConfigurations)
 local LuckyBlockConfiguration = require(ReplicatedStorage.Modules.LuckyBlockConfiguration)
+local BombsConfigurations = require(ReplicatedStorage.Modules.BombsConfigurations)
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -176,9 +177,10 @@ local function getRewardDisplay(reward)
 	end
 
 	if reward.Type == "Pickaxe" then
+		local bombConfig = reward.PickaxeName and BombsConfigurations.Bombs[reward.PickaxeName] or nil
 		return {
-			name = reward.PickaxeName or "Bomb",
-			image = reward.Image or "",
+			name = (bombConfig and bombConfig.DisplayName) or reward.PickaxeName or "Bomb",
+			image = reward.Image or (bombConfig and bombConfig.ImageId) or "",
 			rarityText = nil,
 			rarityColor = nil,
 		}

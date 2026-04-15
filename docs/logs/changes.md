@@ -4,6 +4,8 @@
 - Added HUD boost labels for friend and rebirth multipliers
 - Reworked offline income from auto-credit into pending claim flow with x1, Robux x5, and `Play15`
 - Added `OfflineIncomeX5` product configuration placeholder
+- Assigned `OfflineIncomeX5` developer product id `3575770865`
+- Increased xRay brainrot highlight radius to `100`
 - Added a TopbarPlus feedback button that opens Roblox's in-experience feedback prompt
 - Adjusted offline income UI button lookup to use `Content.right.Buttons` with legacy fallback
 - Prioritized limited-time offer before offline income, hid offline window during `Play15`, and removed the tutorial end delay
@@ -23,3 +25,26 @@
 - Re-synced zone-driven HUD controllers on tutorial completion so step 13 now shows the correct mine/base button set immediately based on the player's current zone
 - Deferred the Drop HUD resync after tutorial completion, kept money visible for masked steps after the first placed brainrot, and retried FTUE masking until late-arriving guided buttons become visible
 - Added `TutorialUiConfiguration`, documented the FTUE flow, and preserved the base-upgrade surface button's original visibility so tutorial completion does not hide it
+- Doubled the tutorial guided cursor on both axes while keeping the existing target anchor logic
+- Removed the visible `Buy` text from the limited-time offer purchase button and kept the Robux price label path intact
+- Reworked playtime reward claims to validate, grant, and only then mark rewards claimed while adding client-side status retries and fallback card rendering
+- Made base `InfoGUI` rendering resilient to missing item configuration metadata so placed brainrots still show UI
+- Moved daily reward day 3 and day 7 bomb icons to `BombsConfigurations` image ids with a client fallback for pickaxe rewards
+- Verified quest-chain money rewards still resolve from `QuestChainConfiguration` in the live quest service path
+- Disabled custom `ESC` menu handling during FTUE so tutorial players no longer trigger camera FOV resets or the exit-reward intercept before step `13`
+- Set the first base slot upgrade cost to `0` in `SlotUnlockConfigurations`
+- Increased the guided tutorial cursor again so the current FTUE arrow now renders at `4x` the base template size
+- Hardened playtime reward card rendering against mismatched runtime `Template` hierarchies and missing grid/canvas layout objects
+- Forced `JoinLikeStand` `InfoUnit`-style GUIs back on when the stand is visible and changed the stand flow to claim immediately after join instead of requiring a second prompt interaction
+- Moved group reward claiming to a verify -> grant -> mark-claimed flow so failed item grants do not consume the reward
+- Replaced the mobile bomb button ready/cooldown art and set both mobile bomb icon states to `0.5` transparency
+- Added a temporary `UpgradeBase` floor effect for `2` seconds after successful base slot upgrades
+- Hid the TopbarPlus feedback button behind a local client flag
+- Resolved quest claim `RewardAmount` text from `QuestChainConfiguration`, rendered it with a leading `+`, and switched the quest claim UI lookup to descendant-based runtime matching
+- Wired `RobuxShop` tagged parts into the existing touch-trigger UI flow so they open the `Shop` frame without `UpgradePart` own-base gating
+- Added a `$` prefix to the live HUD money balance
+- Normalized shop Robux button text to the shared Robux icon format, including nested `Buy for ... Robux` labels
+- Made `UpgradeBase` effects anchor to `UpgradeBasePrimary` inside the player plot when that part exists
+- Reversed `OnboardingBeam` attachment order so the tutorial and xray guidance beam now flows from the player toward the target
+- Replaced end-of-round full mine terrain rebuilds with baseline chunk snapshots plus dirty-chunk `WriteVoxels` restore while keeping the fixed timer flow unchanged
+- Restored the original `OnboardingBeam` attachment order so tutorial and xray guidance use the previous arrow rotation again

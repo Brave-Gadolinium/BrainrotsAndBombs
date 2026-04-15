@@ -171,8 +171,8 @@ local function ensureBeam(targetPart: BasePart)
 		and activeAttachment0
 		and activeAttachment1
 		and activeBeamTarget == targetPart
-		and activeAttachment0.Parent == rootPart
-		and activeAttachment1.Parent == targetPart then
+		and activeAttachment0.Parent == targetPart
+		and activeAttachment1.Parent == rootPart then
 		return
 	end
 
@@ -186,18 +186,18 @@ local function ensureBeam(targetPart: BasePart)
 
 	local attachment0 = Instance.new("Attachment")
 	attachment0.Name = "XrayBeamRootAttachment"
-	attachment0.Parent = rootPart
+	attachment0.Parent = targetPart
 	activeAttachment0 = attachment0
 
 	local attachment1 = Instance.new("Attachment")
 	attachment1.Name = "XrayBeamTargetAttachment"
-	attachment1.Parent = targetPart
+	attachment1.Parent = rootPart
 	activeAttachment1 = attachment1
 
 	local beam = beamTemplate:Clone()
 	beam.Name = "XrayBeam"
-	beam.Attachment0 = attachment1
-	beam.Attachment1 = attachment0
+	beam.Attachment0 = attachment0
+	beam.Attachment1 = attachment1
 	beam.Parent = rootPart
 	activeBeam = beam
 	activeBeamTarget = targetPart

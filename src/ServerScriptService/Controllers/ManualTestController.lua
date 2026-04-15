@@ -2275,7 +2275,7 @@ registerAction({
 		end
 
 		local rewardId = normalizeInteger(params.rewardId, 1, 1, PlaytimeRewardConfiguration.GetMaxRewardId())
-		local success, err, _, reward = PlaytimeRewardManager.Claim(profile.Data, rewardId)
+		local success, err, _, reward = PlaytimeRewardManager.GetClaimableReward(profile.Data, rewardId)
 		if not success then
 			return false, err or "Reward is not claimable."
 		end
@@ -2283,6 +2283,11 @@ registerAction({
 		local granted, grantMessage = grantPlaytimeRewardForTesting(target, reward)
 		if not granted then
 			return false, grantMessage
+		end
+
+		local marked, markError = PlaytimeRewardManager.MarkRewardClaimed(profile.Data, rewardId)
+		if not marked then
+			return false, markError or "Reward could not be marked claimed."
 		end
 
 		refreshTargetState(target)

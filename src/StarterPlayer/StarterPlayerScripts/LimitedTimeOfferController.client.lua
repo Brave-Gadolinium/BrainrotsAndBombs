@@ -264,7 +264,7 @@ local function refreshOfferState()
 end
 
 if buyButton then
-	buyButton.Text = "Buy"
+	buyButton.Text = ""
 	buyButton.Activated:Connect(function()
 		if not isOfferAvailable() then
 			hideOffer()

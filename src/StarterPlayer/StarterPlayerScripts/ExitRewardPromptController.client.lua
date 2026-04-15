@@ -8,6 +8,7 @@ local Workspace = game:GetService("Workspace")
 local Debris = game:GetService("Debris")
 
 local FrameManager = require(ReplicatedStorage.Modules:WaitForChild("FrameManager"))
+local TutorialConfiguration = require(ReplicatedStorage.Modules:WaitForChild("TutorialConfiguration"))
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -29,6 +30,11 @@ local cachedFrame: GuiObject? = nil
 local hasInterceptedThisSession = false
 local pendingMenuIntercept = false
 local menuOpenedAt = 0
+
+local function isTutorialActive(): boolean
+	local onboardingStep = tonumber(player:GetAttribute("OnboardingStep")) or 0
+	return onboardingStep > 0 and onboardingStep < TutorialConfiguration.FinalStep
+end
 
 local function playRewardPromptSound()
 	if not globalSounds or globalSounds.Parent == nil then
@@ -295,6 +301,10 @@ local function ensureBindings()
 end
 
 local function showPromptIfEligible()
+	if isTutorialActive() then
+		return
+	end
+
 	if hasInterceptedThisSession then
 		return
 	end
@@ -315,7 +325,7 @@ local function showPromptIfEligible()
 end
 
 GuiService.MenuOpened:Connect(function()
-	if hasInterceptedThisSession or not shouldFastCheckPrompt() then
+	if isTutorialActive() or hasInterceptedThisSession or not shouldFastCheckPrompt() then
 		pendingMenuIntercept = false
 		return
 	end
@@ -331,6 +341,11 @@ GuiService.MenuOpened:Connect(function()
 end)
 
 GuiService.MenuClosed:Connect(function()
+	if isTutorialActive() then
+		pendingMenuIntercept = false
+		return
+	end
+
 	if not pendingMenuIntercept then
 		return
 	end

@@ -60,6 +60,7 @@ local tutorialGuiOverlay: ScreenGui? = nil
 local tutorialGuiBlackout: Frame? = nil
 local tutorialGuiProxyButton: GuiButton? = nil
 local tutorialGuiCursor: ImageLabel? = nil
+local tutorialGuiCursorBaseSize: UDim2? = nil
 local tutorialGuiStepLabel: TextLabel? = nil
 local tutorialGuiPulseScale: UIScale? = nil
 local tutorialGuiPulseTween: Tween? = nil
@@ -78,6 +79,7 @@ local DEBUG_TUTORIAL = true
 local lastMaskKey: string? = nil
 local maskActive = false
 local maskDirty = false
+local TUTORIAL_CURSOR_SCALE = 4
 local hasAppliedTutorialCompletionCleanup = false
 local DEFAULT_CAMERA_FOV = 70
 
@@ -161,17 +163,17 @@ local function setupBeam(targetPart: BasePart)
 
 	local att0 = Instance.new("Attachment")
 	att0.Name = "TutorialAtt0"
-	att0.Parent = rootPart
+	att0.Parent = targetPart
 	activeAttachment0 = att0
 
 	local att1 = Instance.new("Attachment")
 	att1.Name = "TutorialAtt1"
-	att1.Parent = targetPart
+	att1.Parent = rootPart
 	activeAttachment1 = att1
 
 	local beam = BeamTemplate:Clone()
-	beam.Attachment0 = att1
-	beam.Attachment1 = att0
+	beam.Attachment0 = att0
+	beam.Attachment1 = att1
 	beam.Parent = rootPart
 	activeBeam = beam
 	worldTarget = targetPart
@@ -656,6 +658,15 @@ local function getTutorialProxyOffset(step: number): Vector2
 	return Vector2.zero
 end
 
+local function scaleUdim2(size: UDim2, multiplier: number): UDim2
+	return UDim2.new(
+		size.X.Scale * multiplier,
+		size.X.Offset * multiplier,
+		size.Y.Scale * multiplier,
+		size.Y.Offset * multiplier
+	)
+end
+
 local function syncTutorialGuiLayout(targetButton: GuiButton)
 	local presentation = getCurrentStepPresentation()
 	local proxyOffset = getTutorialProxyOffset(currentStep)
@@ -714,7 +725,8 @@ local function createTutorialGuiCursor()
 	cursor.Parent = tutorialGuiOverlay
 	cursor.AnchorPoint = Vector2.zero
 	cursor.Position = UDim2.new(0.7, 0, 0.3, 0)
-	cursor.Size = UDim2.new(cursor.Size.X.Scale * 2, cursor.Size.X.Offset * 2, cursor.Size.Y.Scale, cursor.Size.Y.Offset)
+	tutorialGuiCursorBaseSize = cursor.Size
+	cursor.Size = scaleUdim2(tutorialGuiCursorBaseSize, TUTORIAL_CURSOR_SCALE)
 	applyOverlayZIndex(cursor, 16)
 	tutorialGuiCursor = cursor
 end

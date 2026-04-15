@@ -7,6 +7,7 @@ local MarketplaceService = game:GetService("MarketplaceService")
 
 local NotificationManager = require(ReplicatedStorage.Modules.NotificationManager)
 local NumberFormatter = require(ReplicatedStorage.Modules.NumberFormatter)
+local PlaytimeRewardConfiguration = require(ReplicatedStorage.Modules.PlaytimeRewardConfiguration)
 local ProductConfigurations = require(ReplicatedStorage.Modules.ProductConfigurations)
 
 local player = Players.LocalPlayer
@@ -34,10 +35,29 @@ local claimRewardRemote = playtimeRewardsRemotes:WaitForChild("ClaimReward") :: 
 local statusUpdatedRemote = playtimeRewardsRemotes:WaitForChild("StatusUpdated") :: RemoteEvent
 local reportAnalyticsIntent = ReplicatedStorage:WaitForChild("Events"):WaitForChild("ReportAnalyticsIntent") :: RemoteEvent
 
+local rewardDefinitions = PlaytimeRewardConfiguration.Rewards
 local rewardButtons: { [number]: ImageButton } = {}
 local rewardCountdowns: { [number]: number } = {}
 local currentStatus = nil
+local hasAuthoritativeStatus = false
 local isClaiming = false
+local statusRequestGeneration = 0
+local rewardsGridLayout: UIGridLayout | UIListLayout? = nil
+local loggedMissingRewardCardView = false
+
+local INITIAL_STATUS_RETRY_DELAYS = {0, 0.5, 1, 2}
+local REOPEN_STATUS_RETRY_DELAYS = {0, 0.25, 0.75}
+local CLAIM_STATUS_RETRY_DELAYS = {0, 0.5, 1}
+
+type RewardCardView = {
+	Container: GuiObject,
+	RewardAmount: TextLabel?,
+	RewardImage: ImageLabel?,
+	RewardTime: TextLabel?,
+	Checkmark: GuiObject?,
+	QuestionMark: GuiObject?,
+	Stroke: UIStroke?,
+}
 
 local function reportStoreOpened(surface: string)
 	reportAnalyticsIntent:FireServer("StoreOpened", {
@@ -112,6 +132,93 @@ local function formatTime(totalSeconds: number): string
 	return string.format("%02d:%02d", minutes, seconds)
 end
 
+local function findFirstDescendantByClass(root: Instance, className: string): Instance?
+	for _, descendant in ipairs(root:GetDescendants()) do
+		if descendant.ClassName == className then
+			return descendant
+		end
+	end
+
+	return nil
+end
+
+local function ensureRewardsGridLayout(): UIGridLayout | UIListLayout
+	if rewardsGridLayout and rewardsGridLayout.Parent == rewardsGrid then
+		return rewardsGridLayout
+	end
+
+	local existingGrid = rewardsGrid:FindFirstChildWhichIsA("UIGridLayout")
+	if existingGrid then
+		rewardsGridLayout = existingGrid
+		return existingGrid
+	end
+
+	local existingList = rewardsGrid:FindFirstChildWhichIsA("UIListLayout")
+	if existingList then
+		rewardsGridLayout = existingList
+		return existingList
+	end
+
+	local fallbackLayout = Instance.new("UIListLayout")
+	fallbackLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	fallbackLayout.FillDirection = Enum.FillDirection.Horizontal
+	fallbackLayout.Padding = UDim.new(0, 12)
+	fallbackLayout.Parent = rewardsGrid
+	rewardsGridLayout = fallbackLayout
+	return fallbackLayout
+end
+
+local function updateRewardsGridCanvas()
+	local layout = ensureRewardsGridLayout()
+	local contentSize = layout.AbsoluteContentSize
+	rewardsGrid.AutomaticCanvasSize = Enum.AutomaticSize.None
+	rewardsGrid.CanvasSize = UDim2.fromOffset(
+		math.max(contentSize.X + 12, rewardsGrid.AbsoluteSize.X),
+		math.max(contentSize.Y + 12, rewardsGrid.AbsoluteSize.Y)
+	)
+end
+
+local function bindRewardsGridCanvas()
+	local layout = ensureRewardsGridLayout()
+	layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(updateRewardsGridCanvas)
+	rewardsGrid:GetPropertyChangedSignal("AbsoluteSize"):Connect(updateRewardsGridCanvas)
+	updateRewardsGridCanvas()
+end
+
+local function resolveRewardCardView(button: ImageButton): RewardCardView?
+	local container = button:FindFirstChild("Frame")
+	if not container or not container:IsA("GuiObject") then
+		container = button
+	end
+
+	local rewardAmount = container:FindFirstChild("RewardAmount", true)
+	local rewardImage = container:FindFirstChild("ImageLabel", true)
+	local rewardTime = container:FindFirstChild("RewardTime", true)
+	local checkmark = container:FindFirstChild("Checkmark", true)
+	local questionMark = container:FindFirstChild("QuestionMark", true)
+	local stroke = findFirstDescendantByClass(container, "UIStroke")
+
+	if not rewardAmount or not rewardAmount:IsA("TextLabel")
+		or not rewardImage or not rewardImage:IsA("ImageLabel")
+		or not rewardTime or not rewardTime:IsA("TextLabel")
+	then
+		if not loggedMissingRewardCardView then
+			loggedMissingRewardCardView = true
+			warn("[PlaytimeRewardUIController] Reward card template is missing expected descendants; using partial rendering fallback.")
+		end
+	end
+
+	return {
+		Container = container,
+		RewardAmount = if rewardAmount and rewardAmount:IsA("TextLabel") then rewardAmount else nil,
+		RewardImage = if rewardImage and rewardImage:IsA("ImageLabel") then rewardImage else nil,
+		RewardTime = if rewardTime and rewardTime:IsA("TextLabel") then rewardTime else nil,
+		Checkmark = if checkmark and checkmark:IsA("GuiObject") then checkmark else nil,
+		QuestionMark = if questionMark and questionMark:IsA("GuiObject") then questionMark else nil,
+		Stroke = if stroke and stroke:IsA("UIStroke") then stroke else nil,
+	}
+end
+
 local function getRewardAmountText(reward): string
 	if reward.Type == "Money" then
 		return "$" .. NumberFormatter.Format(reward.Amount or 0)
@@ -184,6 +291,42 @@ local function getCurrentSpeedMultiplier(): number
 	return 1
 end
 
+local function buildFallbackStatus()
+	local playtimeSeconds = math.max(0, tonumber(player:GetAttribute("PlaytimeRewardSeconds")) or 0)
+	local claimableCountHint = math.max(0, tonumber(player:GetAttribute("PlaytimeRewardClaimableCount")) or 0)
+	local claimableRewardIds = {}
+	local nextRewardId = nil
+	local secondsUntilNextReward = 0
+
+	for _, reward in ipairs(rewardDefinitions) do
+		if playtimeSeconds >= reward.RequiredSeconds then
+			if claimableCountHint > 0 then
+				table.insert(claimableRewardIds, reward.Id)
+			end
+		elseif nextRewardId == nil then
+			nextRewardId = reward.Id
+			secondsUntilNextReward = reward.RequiredSeconds - playtimeSeconds
+		end
+	end
+
+	return {
+		DayKey = tonumber(player:GetAttribute("PlaytimeRewardDayKey")) or 0,
+		PlaytimeSeconds = playtimeSeconds,
+		ClaimedRewards = {},
+		ClaimableRewardIds = claimableRewardIds,
+		NextRewardId = nextRewardId,
+		SecondsUntilNextReward = math.max(0, secondsUntilNextReward),
+		Rewards = rewardDefinitions,
+		HasSpeedX2 = player:GetAttribute("PlaytimeRewardHasSpeedX2") == true,
+		HasSpeedX5 = player:GetAttribute("PlaytimeRewardHasSpeedX5") == true,
+		SpeedMultiplier = getCurrentSpeedMultiplier(),
+	}
+end
+
+local function invalidatePendingStatusRequests()
+	statusRequestGeneration += 1
+end
+
 local function updateSpeedButtons()
 	local hasSpeedX2 = player:GetAttribute("PlaytimeRewardHasSpeedX2") == true
 	local hasSpeedX5 = player:GetAttribute("PlaytimeRewardHasSpeedX5") == true
@@ -192,53 +335,127 @@ local function updateSpeedButtons()
 	speedX5Button.Visible = not hasSpeedX5
 end
 
-local function updateButtonVisual(button: ImageButton, reward, status)
-	local state = getButtonState(reward.Id, status)
-	local frame = button:WaitForChild("Frame") :: Frame
-	local stroke = frame:FindFirstChild("UIStroke") :: UIStroke?
-	local rewardAmount = frame:WaitForChild("RewardAmount") :: TextLabel
-	local rewardImage = frame:WaitForChild("ImageLabel") :: ImageLabel
-	local rewardTime = frame:WaitForChild("RewardTime") :: TextLabel
-	local checkmark = frame:WaitForChild("Checkmark") :: ImageLabel
-	local questionMark = frame:WaitForChild("QuestionMark") :: ImageLabel
-	local colors = STATE_COLORS[state]
+local renderRewards
 
-	rewardAmount.Text = getRewardAmountText(reward)
-	rewardImage.Image = reward.Image or ""
-	checkmark.Visible = state == "Collected"
-	questionMark.Visible = false
-	button.AutoButtonColor = state == "Claim"
-
-	frame.BackgroundColor3 = colors.Background
-	if stroke then
-		stroke.Color = colors.Stroke
+local function fetchStatus()
+	local ok, result = pcall(function()
+		return getStatusRemote:InvokeServer()
+	end)
+	if not ok then
+		warn("[PlaytimeRewardUIController] Failed to request status:", result)
+		return nil
 	end
 
-	rewardAmount.TextColor3 = colors.Text
-	rewardTime.TextColor3 = colors.Text
+	if result and result.Success and result.Status then
+		return result.Status
+	end
+
+	if result then
+		warn("[PlaytimeRewardUIController] Status request returned an invalid payload:", result.Error or "Unknown")
+	end
+
+	return nil
+end
+
+local function requestStatusWithRetry(retryDelays: {number})
+	invalidatePendingStatusRequests()
+	local generation = statusRequestGeneration
+
+	task.spawn(function()
+		for _, delaySeconds in ipairs(retryDelays) do
+			if delaySeconds > 0 then
+				task.wait(delaySeconds)
+			end
+
+			if generation ~= statusRequestGeneration then
+				return
+			end
+
+			local status = fetchStatus()
+			if status then
+				if generation == statusRequestGeneration then
+					renderRewards(status, true)
+					updateSpeedButtons()
+				end
+				return
+			end
+		end
+
+		if generation == statusRequestGeneration then
+			renderRewards(nil, false)
+			updateSpeedButtons()
+		end
+	end)
+end
+
+local function updateButtonVisual(button: ImageButton, reward, status)
+	local state = getButtonState(reward.Id, status)
+	local cardView = resolveRewardCardView(button)
+	local colors = STATE_COLORS[state]
+
+	if not cardView then
+		return
+	end
+
+	if cardView.RewardAmount then
+		cardView.RewardAmount.Text = getRewardAmountText(reward)
+		cardView.RewardAmount.TextColor3 = colors.Text
+	end
+
+	if cardView.RewardImage then
+		cardView.RewardImage.Image = reward.Image or ""
+	end
+
+	if cardView.Checkmark then
+		cardView.Checkmark.Visible = state == "Collected"
+	end
+	if cardView.QuestionMark then
+		cardView.QuestionMark.Visible = false
+	end
+
+	button.AutoButtonColor = state == "Claim"
+
+	cardView.Container.BackgroundColor3 = colors.Background
+	if cardView.Stroke then
+		cardView.Stroke.Color = colors.Stroke
+	end
 
 	if state == "Collected" then
-		rewardTime.Text = "Collected"
+		if cardView.RewardTime then
+			cardView.RewardTime.Text = "Collected"
+			cardView.RewardTime.TextColor3 = colors.Text
+		end
 		rewardCountdowns[reward.Id] = 0
 	elseif state == "Claim" then
-		rewardTime.Text = "Claim!"
+		if cardView.RewardTime then
+			cardView.RewardTime.Text = "Claim!"
+			cardView.RewardTime.TextColor3 = colors.Text
+		end
 		rewardCountdowns[reward.Id] = 0
 	else
 		local remaining = math.max(0, reward.RequiredSeconds - (status.PlaytimeSeconds or 0))
-		rewardTime.Text = formatTime(remaining)
+		if cardView.RewardTime then
+			cardView.RewardTime.Text = formatTime(remaining)
+			cardView.RewardTime.TextColor3 = colors.Text
+		end
 		rewardCountdowns[reward.Id] = remaining
 	end
 end
 
-local function renderRewards(status)
-	if not status then
+renderRewards = function(status, isAuthoritative: boolean?)
+	if not status and hasAuthoritativeStatus then
 		return
 	end
 
-	currentStatus = status
-	updateHeader(status)
+	if status then
+		hasAuthoritativeStatus = isAuthoritative ~= false
+	end
 
-	for _, reward in ipairs(status.Rewards) do
+	local resolvedStatus = status or buildFallbackStatus()
+	currentStatus = resolvedStatus
+	updateHeader(resolvedStatus)
+
+	for _, reward in ipairs(rewardDefinitions) do
 		local button = rewardButtons[reward.Id]
 		if not button then
 			button = template:Clone()
@@ -258,32 +475,44 @@ local function renderRewards(status)
 				end
 
 				isClaiming = true
-				local result = claimRewardRemote:InvokeServer(reward.Id)
+				local ok, result = pcall(function()
+					return claimRewardRemote:InvokeServer(reward.Id)
+				end)
 				isClaiming = false
 
+				if not ok then
+					warn("[PlaytimeRewardUIController] Claim request failed:", result)
+					NotificationManager.show("Playtime reward is not available right now.", "Error")
+					requestStatusWithRetry(CLAIM_STATUS_RETRY_DELAYS)
+					return
+				end
+
+				if result and result.Status then
+					renderRewards(result.Status, true)
+				end
+
 				if result and result.Success and result.Status then
-					renderRewards(result.Status)
-				elseif result and result.Status then
-					renderRewards(result.Status)
-					NotificationManager.show("Playtime reward is not available right now.", "Error")
-				else
-					NotificationManager.show("Playtime reward is not available right now.", "Error")
+					return
+				end
+
+				NotificationManager.show("Playtime reward is not available right now.", "Error")
+				if not result or not result.Status then
+					requestStatusWithRetry(CLAIM_STATUS_RETRY_DELAYS)
 				end
 			end)
 		end
 
-		updateButtonVisual(button, reward, status)
+		updateButtonVisual(button, reward, resolvedStatus)
 	end
+
+	updateRewardsGridCanvas()
 end
 
-local function requestInitialStatus()
-	local result = getStatusRemote:InvokeServer()
-	if result and result.Success and result.Status then
-		renderRewards(result.Status)
-	else
-		updateHeader(nil)
-	end
-end
+template.Visible = false
+bindRewardsGridCanvas()
+updateSpeedButtons()
+renderRewards(nil, false)
+requestStatusWithRetry(INITIAL_STATUS_RETRY_DELAYS)
 
 openAllButton.MouseButton1Click:Connect(function()
 	reportAnalyticsIntent:FireServer("RewardBulkClaimClicked", {
@@ -300,23 +529,35 @@ speedX5Button.MouseButton1Click:Connect(function()
 	promptPlaytimeProduct("PlaytimeRewardsSpeedX5", "Playtime x5 Speed product ID is not configured yet.")
 end)
 
-template.Visible = false
-updateHeader(nil)
-updateSpeedButtons()
-requestInitialStatus()
-
 statusUpdatedRemote.OnClientEvent:Connect(function(status)
-	renderRewards(status)
+	invalidatePendingStatusRequests()
+	renderRewards(status, true)
 	updateSpeedButtons()
 end)
 
 player:GetAttributeChangedSignal("PlaytimeRewardHasSpeedX2"):Connect(updateSpeedButtons)
 player:GetAttributeChangedSignal("PlaytimeRewardHasSpeedX5"):Connect(updateSpeedButtons)
 
+for _, attributeName in ipairs({
+	"PlaytimeRewardDayKey",
+	"PlaytimeRewardSeconds",
+	"PlaytimeRewardNextId",
+	"PlaytimeRewardSecondsUntilNext",
+	"PlaytimeRewardClaimableCount",
+	"PlaytimeRewardSpeedMultiplier",
+}) do
+	player:GetAttributeChangedSignal(attributeName):Connect(function()
+		if not hasAuthoritativeStatus then
+			renderRewards(nil, false)
+		end
+	end)
+end
+
 playtimeRewardsFrame:GetPropertyChangedSignal("Visible"):Connect(function()
 	if playtimeRewardsFrame.Visible then
 		reportAnalyticsIntent:FireServer("PlaytimeRewardsOpened")
 		reportStoreOpened("playtime_rewards")
+		requestStatusWithRetry(REOPEN_STATUS_RETRY_DELAYS)
 	end
 end)
 
@@ -337,8 +578,10 @@ task.spawn(function()
 				rewardCountdowns[rewardId] = math.max(0, remaining - speedMultiplier)
 				local button = rewardButtons[rewardId]
 				if button and currentStatus and getButtonState(rewardId, currentStatus) == "Locked" then
-					local rewardTime = (button:WaitForChild("Frame") :: Frame):WaitForChild("RewardTime") :: TextLabel
-					rewardTime.Text = formatTime(rewardCountdowns[rewardId])
+					local cardView = resolveRewardCardView(button)
+					if cardView and cardView.RewardTime then
+						cardView.RewardTime.Text = formatTime(rewardCountdowns[rewardId])
+					end
 				end
 			end
 		end

@@ -39,6 +39,9 @@ local hudGui = mainGui:WaitForChild("HUD")
 
 local lastInteraction = 0
 local OWN_BASE_INTERACTION_RADIUS = 100
+local OWN_BASE_TOUCH_TAGS = {
+	UpgradePart = true,
+}
 
 local function isTouchFrameAllowedByTutorial(frameName: string): boolean
 	local onboardingStep = tonumber(player:GetAttribute("OnboardingStep")) or 0
@@ -279,7 +282,7 @@ local function isWithinOwnBaseInteractionRange(position: Vector3): boolean
 end
 
 local function isTouchPartOwnedByPlayerBase(touchPart: BasePart, rootPosition: Vector3, tagName: string): boolean
-	if tagName == "UpgradePart" then
+	if OWN_BASE_TOUCH_TAGS[tagName] == true then
 		local playerBaseNumber = getPlayerBaseNumber()
 		local partBaseNumber = getInstanceBaseNumber(touchPart)
 		if playerBaseNumber ~= nil and partBaseNumber ~= nil then
@@ -430,6 +433,7 @@ function UIInitializer:Init()
 	setupHudButtons()
 	setupTaggedTouchTrigger("UpgradePart", "Upgrades")
 	setupTaggedTouchTrigger("ShopPart", "Pickaxes")
+	setupTaggedTouchTrigger("RobuxShop", "Shop")
 
 	print("[UIInitializer] Ready.")
 end

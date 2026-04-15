@@ -11,7 +11,7 @@ local notificationText = utf8.char(
 
 local XrayBonusConfiguration = {
 	Enabled = true,
-	HighlightRadius = 20,
+	HighlightRadius = 100,
 	SpawnChancePerRound = 1,
 	InitialSpawnDelaySeconds = 12,
 	RetryDelaySecondsWhenNoEligiblePlayers = 6,

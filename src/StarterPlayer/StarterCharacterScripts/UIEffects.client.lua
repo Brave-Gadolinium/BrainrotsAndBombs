@@ -9,6 +9,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 local Debris = game:GetService("Debris")
 local Workspace = game:GetService("Workspace")
+local TutorialConfiguration = require(ReplicatedStorage.Modules:WaitForChild("TutorialConfiguration"))
 
 print("[UIEffects] Initialized (StarterPlayerScripts)")
 
@@ -21,6 +22,11 @@ local Events = ReplicatedStorage:WaitForChild("Events")
 -- Player
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
+
+local function isTutorialActive(): boolean
+	local onboardingStep = tonumber(player:GetAttribute("OnboardingStep")) or 0
+	return onboardingStep > 0 and onboardingStep < TutorialConfiguration.FinalStep
+end
 
 -- Script State
 local sunburstObjects: {[GuiObject]: boolean} = {}
@@ -294,6 +300,10 @@ local function clearBombHitTweens()
 end
 
 local function resetMenuFovEffects()
+	if isTutorialActive() then
+		return
+	end
+
 	fovPopToken += 1
 	bombHitFovToken += 1
 	isFovPopping = false

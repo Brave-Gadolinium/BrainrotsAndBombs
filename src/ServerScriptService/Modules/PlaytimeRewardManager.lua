@@ -149,23 +149,57 @@ function PlaytimeRewardManager.SkipAll(profileData, now: number?)
 	return PlaytimeRewardManager.GetStatus(profileData, now)
 end
 
-function PlaytimeRewardManager.Claim(profileData, rewardId: number, now: number?)
+function PlaytimeRewardManager.GetClaimableReward(profileData, rewardId: number, now: number?)
 	local data = PlaytimeRewardManager.EnsureData(profileData, now)
+	local status = PlaytimeRewardManager.GetStatus(profileData, now)
 	local reward = Config.GetRewardById(rewardId)
 	if not reward then
-		return false, "RewardNotFound", PlaytimeRewardManager.GetStatus(profileData, now), nil
+		return false, "RewardNotFound", status, nil
 	end
 
 	if data.ClaimedRewards[rewardId] then
-		return false, "AlreadyClaimed", PlaytimeRewardManager.GetStatus(profileData, now), nil
+		return false, "AlreadyClaimed", status, nil
 	end
 
 	if data.PlaytimeSeconds < reward.RequiredSeconds then
-		return false, "RewardLocked", PlaytimeRewardManager.GetStatus(profileData, now), nil
+		return false, "RewardLocked", status, nil
+	end
+
+	return true, nil, status, reward
+end
+
+function PlaytimeRewardManager.MarkRewardClaimed(profileData, rewardId: number, now: number?)
+	local data = PlaytimeRewardManager.EnsureData(profileData, now)
+	local status = PlaytimeRewardManager.GetStatus(profileData, now)
+	local reward = Config.GetRewardById(rewardId)
+	if not reward then
+		return false, "RewardNotFound", status
+	end
+
+	if data.ClaimedRewards[rewardId] then
+		return false, "AlreadyClaimed", status
+	end
+
+	if data.PlaytimeSeconds < reward.RequiredSeconds then
+		return false, "RewardLocked", status
 	end
 
 	data.ClaimedRewards[rewardId] = true
-	return true, nil, PlaytimeRewardManager.GetStatus(profileData, now), reward
+	return true, nil, PlaytimeRewardManager.GetStatus(profileData, now)
+end
+
+function PlaytimeRewardManager.Claim(profileData, rewardId: number, now: number?)
+	local success, err, status, reward = PlaytimeRewardManager.GetClaimableReward(profileData, rewardId, now)
+	if not success then
+		return false, err, status, nil
+	end
+
+	local marked, markError, updatedStatus = PlaytimeRewardManager.MarkRewardClaimed(profileData, rewardId, now)
+	if not marked then
+		return false, markError, updatedStatus, nil
+	end
+
+	return true, nil, updatedStatus, reward
 end
 
 function PlaytimeRewardManager.GrantSpeedProduct(profileData, productName: string, now: number?)

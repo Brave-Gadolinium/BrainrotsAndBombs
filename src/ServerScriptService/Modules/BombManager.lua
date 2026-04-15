@@ -13,6 +13,7 @@ local TutorialService = require(ServerScriptService.Modules.TutorialService)
 local AnalyticsFunnelsService = require(ServerScriptService.Modules.AnalyticsFunnelsService)
 local AnalyticsEconomyService = require(ServerScriptService.Modules.AnalyticsEconomyService)
 local DepthLevelUtils = require(ServerScriptService.Modules.DepthLevelUtils)
+local TerrainGeneratorManager = require(ServerScriptService.Modules.TerrainGeneratorManager)
 local Utils = require(ServerScriptService.Modules.Utils)
 
 local PlayerController
@@ -608,6 +609,7 @@ local function explodeBomb(player: Player, bombPart: BasePart, hitPosition: Vect
 
 	if terrainRadius > 0 then
 		Terrain:FillBall(hitPosition, terrainRadius, Enum.Material.Air)
+		TerrainGeneratorManager.MarkSphereDirty(hitPosition, terrainRadius)
 	end
 
 	local explosion = Instance.new("Explosion")

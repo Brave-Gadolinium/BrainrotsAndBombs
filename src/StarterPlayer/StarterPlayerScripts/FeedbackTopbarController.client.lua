@@ -6,6 +6,11 @@ local RunService = game:GetService("RunService")
 local SocialService = game:GetService("SocialService")
 
 local NotificationManager = require(ReplicatedStorage.Modules.NotificationManager)
+local FEEDBACK_BUTTON_ENABLED = false
+
+if not FEEDBACK_BUTTON_ENABLED then
+	return
+end
 
 local function resolveTopbarPlusModule(): ModuleScript?
 	local satchelFolder = ReplicatedStorage:FindFirstChild("Satchel")

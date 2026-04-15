@@ -53,6 +53,36 @@ Dependencies:
 - `ProductConfigurations`
 - `AnalyticsEconomyService`
 
+Service: PlaytimeRewardController
+
+Location:
+- `src/ServerScriptService/Controllers/PlaytimeRewardController.lua`
+
+Responsibility:
+- Expose playtime reward remotes, tick daily playtime progress, and grant/claim timed rewards without losing claimability on reward-grant failure
+
+Dependencies:
+- `PlayerController`
+- `PlaytimeRewardManager`
+- `ItemManager`
+- `AnalyticsFunnelsService`
+- `AnalyticsEconomyService`
+
+Service: GroupRewardController
+
+Location:
+- `src/ServerScriptService/Modules/GroupRewardController.lua`
+
+Responsibility:
+- Validate creator-group membership, grant the join reward, and only mark the reward claimed after the item grant succeeds
+
+Dependencies:
+- `PlayerController`
+- `ItemManager`
+- `ProductConfigurations`
+- `AnalyticsFunnelsService`
+- `AnalyticsEconomyService`
+
 Service: MonetizationController
 
 Location:
@@ -66,3 +96,18 @@ Dependencies:
 - `PlaytimeRewardController`
 - `DailyRewardController`
 - `RebirthSystem`
+
+Service: TerrainGeneratorManager
+
+Location:
+- `src/ServerScriptService/Modules/TerrainGeneratorManager.lua`
+
+Responsibility:
+- Normalize the mine terrain baseline on server start, snapshot voxel chunks, and restore only dirty terrain chunks when a round ends
+
+Dependencies:
+- `Workspace.Terrain`
+- `Workspace.Mines`
+- `ReplicatedStorage.Remotes.Timer.FinishTime`
+- `BombManager`
+- `ItemManager`

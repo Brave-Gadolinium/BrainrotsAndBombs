@@ -8,6 +8,7 @@ local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
 
 local CameraShaker = require(ReplicatedStorage.Modules:WaitForChild("CameraShaker"))
+local TutorialConfiguration = require(ReplicatedStorage.Modules:WaitForChild("TutorialConfiguration"))
 
 local player = Players.LocalPlayer
 local events = ReplicatedStorage:WaitForChild("Events")
@@ -93,6 +94,11 @@ local function getHumanoidAndRoot(): (Humanoid?, BasePart?)
 	end
 
 	return nil, nil
+end
+
+local function isTutorialActive(): boolean
+	local onboardingStep = tonumber(player:GetAttribute("OnboardingStep")) or 0
+	return onboardingStep > 0 and onboardingStep < TutorialConfiguration.FinalStep
 end
 
 local function isInsideZone(position: Vector3, zonePart: BasePart): boolean
@@ -611,5 +617,9 @@ player.CharacterRemoving:Connect(function()
 end)
 
 GuiService.MenuOpened:Connect(function()
+	if isTutorialActive() then
+		return
+	end
+
 	forceRestoreImmediate()
 end)

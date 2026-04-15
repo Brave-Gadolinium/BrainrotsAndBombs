@@ -204,7 +204,11 @@ local function applyVisibilityToInstance(record: PlotRecord, instance: Instance,
 
 	if instance:IsA("BillboardGui") or instance:IsA("SurfaceGui") then
 		local originalEnabled = ensureOriginalProperty(record, instance, "Enabled")
-		instance.Enabled = if isVisible then originalEnabled else false
+		local instanceToken = string.lower(string.gsub(instance.Name, "[%W_]+", ""))
+		local shouldForceInfoVisible = instanceToken == "infounit"
+			or string.find(instanceToken, "infounit", 1, true) ~= nil
+			or instanceToken == "info"
+		instance.Enabled = if isVisible then (if shouldForceInfoVisible then true else originalEnabled) else false
 		return
 	end
 
@@ -590,6 +594,50 @@ local function refreshStandState(record: PlotRecord)
 	ensureIdleAnimationPlaying(record)
 end
 
+local function resolveGroupRewardOutcome(result): (string, string?, string?)
+	if type(result) ~= "table" then
+		return "Error", "Reward is unavailable right now.", "Error"
+	end
+
+	if result.Success == true then
+		rewardClaimedOverride = true
+		return "Claimed", "Reward Claimed Successfully!", "Success"
+	end
+
+	local errorCode = if type(result.Error) == "string" then result.Error else nil
+	local message = if type(result.Msg) == "string" then result.Msg else nil
+
+	if errorCode == "AlreadyClaimed" or message == "Already claimed!" then
+		rewardClaimedOverride = true
+		return "AlreadyClaimed", message or "Already claimed!", "Success"
+	end
+
+	if errorCode == "NotInGroup" then
+		return "NotInGroup", nil, nil
+	end
+
+	return "Error", message or "Reward is unavailable right now.", "Error"
+end
+
+local function tryClaimReward(): string
+	local success, resultOrError = pcall(function()
+		return requestGroupReward:InvokeServer()
+	end)
+
+	if not success then
+		warn("[JoinLikeStandController] Reward request failed:", resultOrError)
+		NotificationManager.show("Reward is unavailable right now.", "Error")
+		return "Error"
+	end
+
+	local outcome, message, messageType = resolveGroupRewardOutcome(resultOrError)
+	if message and messageType then
+		NotificationManager.show(message, messageType)
+	end
+
+	return outcome
+end
+
 local function handlePromptTriggered(record: PlotRecord, triggeringPlayer: Player?)
 	if triggeringPlayer and triggeringPlayer ~= localPlayer then
 		return
@@ -608,30 +656,14 @@ local function handlePromptTriggered(record: PlotRecord, triggeringPlayer: Playe
 	end
 
 	record.IsInGroup = queryGroupMembership()
+	local claimOutcome = tryClaimReward()
+	if claimOutcome == "Claimed" or claimOutcome == "AlreadyClaimed" then
+		refreshStandState(record)
+		record.Busy = false
+		return
+	end
 
-	if record.IsInGroup then
-		local success, resultOrError = pcall(function()
-			return requestGroupReward:InvokeServer()
-		end)
-
-		if not success then
-			warn("[JoinLikeStandController] Reward request failed:", resultOrError)
-			NotificationManager.show("Reward is unavailable right now.", "Error")
-		else
-			local result = resultOrError
-			if type(result) == "table" and result.Success == true then
-				rewardClaimedOverride = true
-				NotificationManager.show("Reward Claimed Successfully!", "Success")
-			elseif type(result) == "table" and type(result.Msg) == "string" then
-				if result.Msg == "Already claimed!" then
-					rewardClaimedOverride = true
-				end
-				NotificationManager.show(result.Msg, if result.Msg == "Already claimed!" then "Success" else "Error")
-			else
-				NotificationManager.show("Reward is unavailable right now.", "Error")
-			end
-		end
-
+	if claimOutcome ~= "NotInGroup" then
 		refreshStandState(record)
 		record.Busy = false
 		return
@@ -648,7 +680,10 @@ local function handlePromptTriggered(record: PlotRecord, triggeringPlayer: Playe
 
 	record.IsInGroup = queryGroupMembership()
 	if record.IsInGroup then
-		NotificationManager.show("Group joined. Interact again to claim your reward.", "Success")
+		local postJoinClaimOutcome = tryClaimReward()
+		if postJoinClaimOutcome == "NotInGroup" then
+			NotificationManager.show("Group membership is still syncing. Try again in a moment.", "Error")
+		end
 	end
 
 	refreshStandState(record)

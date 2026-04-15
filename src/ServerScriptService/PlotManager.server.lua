@@ -2,6 +2,7 @@
 -- LOCATION: ServerScriptService/PlotManager
 
 local Players = game:GetService("Players")
+local Debris = game:GetService("Debris")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 local Workspace = game:GetService("Workspace")
@@ -29,6 +30,10 @@ local COLLECT_ALL_GAMEPASS = ProductConfigurations.GamePasses.CollectAll or 1783
 local COLLECT_ALL_COOLDOWN = 0.8
 local COLLECT_ALL_BUTTON_NAME = "CollectAll"
 local UPGRADE_SLOTS_BUTTON_NAME = "UpgradeSlotsButton"
+local UPGRADE_BASE_TEMPLATE_NAME = "UpgradeBase"
+local UPGRADE_BASE_EFFECT_NAME = "_UpgradeBaseEffect"
+local UPGRADE_BASE_EFFECT_DURATION = 2
+local UPGRADE_BASE_EFFECT_LIFT = 0.05
 local TRANSACTION_TYPES = AnalyticsEconomyService:GetTransactionTypes()
 
 -- State
@@ -61,6 +66,144 @@ local function getFreePlotIndex(): number?
 		end
 	end
 	return nil
+end
+
+local function getRotationOnly(cf: CFrame): CFrame
+	return cf - cf.Position
+end
+
+local function findUpgradeBaseAnchorPart(root: Instance): BasePart?
+	local bestPart: BasePart? = nil
+	local bestScore = -math.huge
+
+	local function considerPart(part: BasePart)
+		local areaScore = part.Size.X * part.Size.Z
+		local nameScore = 0
+		local lowerName = string.lower(part.Name)
+
+		if string.find(lowerName, "floor", 1, true) then
+			nameScore += 1000000
+		end
+
+		if string.find(lowerName, "base", 1, true) then
+			nameScore += 500000
+		end
+
+		if part.Transparency >= 1 then
+			nameScore -= 250000
+		end
+
+		local score = areaScore + nameScore
+		if score > bestScore then
+			bestScore = score
+			bestPart = part
+		end
+	end
+
+	if root:IsA("BasePart") then
+		considerPart(root)
+	end
+
+	for _, descendant in ipairs(root:GetDescendants()) do
+		if descendant:IsA("BasePart") then
+			considerPart(descendant)
+		end
+	end
+
+	return bestPart
+end
+
+local function getUpgradeBaseAnchor(plotModel: Model): (CFrame, number)
+	local explicitAnchor = plotModel:FindFirstChild("UpgradeBasePrimary", true)
+	if explicitAnchor and explicitAnchor:IsA("BasePart") then
+		return explicitAnchor.CFrame, explicitAnchor.Size.Y
+	end
+
+	local floorRoot = plotModel:FindFirstChild("Floor1") or plotModel
+	local floorPart = findUpgradeBaseAnchorPart(floorRoot)
+
+	if floorPart then
+		return floorPart.CFrame, floorPart.Size.Y
+	end
+
+	return plotModel:GetPivot(), 0
+end
+
+local function prepareUpgradeBaseEffect(effectInstance: Instance)
+	local partsToPrepare: { BasePart } = {}
+
+	if effectInstance:IsA("BasePart") then
+		table.insert(partsToPrepare, effectInstance)
+	end
+
+	for _, descendant in ipairs(effectInstance:GetDescendants()) do
+		if descendant:IsA("BasePart") then
+			table.insert(partsToPrepare, descendant)
+		end
+	end
+
+	for _, part in ipairs(partsToPrepare) do
+		part.Anchored = true
+		part.CanCollide = false
+		part.CanTouch = false
+		part.CanQuery = false
+		part.Massless = true
+	end
+end
+
+local function showUpgradeBaseEffect(plotModel: Model)
+	local effectTemplate = Templates:FindFirstChild(UPGRADE_BASE_TEMPLATE_NAME, true)
+	if not effectTemplate then
+		warn(`[PlotManager] Missing template "{UPGRADE_BASE_TEMPLATE_NAME}" for base upgrade effect`)
+		return
+	end
+
+	local existingEffect = plotModel:FindFirstChild(UPGRADE_BASE_EFFECT_NAME)
+	if existingEffect then
+		existingEffect:Destroy()
+	end
+
+	local effectClone = effectTemplate:Clone()
+	effectClone.Name = UPGRADE_BASE_EFFECT_NAME
+	prepareUpgradeBaseEffect(effectClone)
+
+	local effectHeight = 0
+	local templateRotation = CFrame.new()
+
+	if effectClone:IsA("Model") then
+		local pivot = effectClone:GetPivot()
+		local success, _, boundingSize = pcall(function()
+			return effectClone:GetBoundingBox()
+		end)
+		if not success or not boundingSize then
+			warn(`[PlotManager] "{UPGRADE_BASE_TEMPLATE_NAME}" model has no bounding box and cannot be placed`)
+			effectClone:Destroy()
+			return
+		end
+		effectHeight = boundingSize.Y
+		templateRotation = getRotationOnly(pivot)
+	elseif effectClone:IsA("BasePart") then
+		effectHeight = effectClone.Size.Y
+		templateRotation = getRotationOnly(effectClone.CFrame)
+	else
+		warn(`[PlotManager] Unsupported "{UPGRADE_BASE_TEMPLATE_NAME}" template class "{effectClone.ClassName}"`)
+		effectClone:Destroy()
+		return
+	end
+
+	local anchorCFrame, anchorHeight = getUpgradeBaseAnchor(plotModel)
+	local targetPosition = (anchorCFrame * CFrame.new(0, (anchorHeight * 0.5) + (effectHeight * 0.5) + UPGRADE_BASE_EFFECT_LIFT, 0)).Position
+	local targetCFrame = CFrame.new(targetPosition) * getRotationOnly(anchorCFrame) * templateRotation
+
+	effectClone.Parent = plotModel
+
+	if effectClone:IsA("Model") then
+		effectClone:PivotTo(targetCFrame)
+	else
+		effectClone.CFrame = targetCFrame
+	end
+
+	Debris:AddItem(effectClone, UPGRADE_BASE_EFFECT_DURATION)
 end
 
 local function normalizeSlotPartCollision(plotModel: Model)
@@ -456,6 +599,7 @@ local function purchaseSlotUpgrade(player: Player)
 		AnalyticsFunnelsService:HandleExtraSlotsBought(player, newUnlockedSlots)
 		TutorialService:HandlePostTutorialBaseUpgradePurchased(player)
 		updatePlotVisuals(player)
+		showUpgradeBaseEffect(plotModel)
 
 		if notif then
 			notif:FireClient(player, "Unlocked slots: " .. tostring(newUnlockedSlots), "Success")
