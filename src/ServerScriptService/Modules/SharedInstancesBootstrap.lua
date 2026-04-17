@@ -92,6 +92,14 @@ local REMOTE_NAMESPACES: {NamespaceDescriptor} = {
 			{Name = "StateUpdated", ClassName = "RemoteEvent"},
 		},
 	},
+	{
+		Name = "CandyEvent",
+		Children = {
+			{Name = "GetState", ClassName = "RemoteFunction"},
+			{Name = "Spin", ClassName = "RemoteFunction"},
+			{Name = "StateUpdated", ClassName = "RemoteEvent"},
+		},
+	},
 }
 
 local function ensureFolder(parent: Instance, name: string): Folder

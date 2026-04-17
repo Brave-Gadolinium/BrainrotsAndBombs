@@ -73,6 +73,22 @@ Used by:
 - `OfflineIncomeController`
 - `MonetizationController`
 
+Config: ProductConfigurations.Products.CandySpinsX3 / CandySpinsX9
+
+Location:
+- `src/ReplicatedStorage/Modules/ProductConfigurations.lua`
+
+Purpose:
+- Developer product ids for the candy wheel paid-spin fallback packs
+
+Parameters:
+- `CandySpinsX3 = 3577073654`
+- `CandySpinsX9 = 3577073717`
+
+Used by:
+- `CandySpinController`
+- `MonetizationController`
+
 Config: DailyRewardConfiguration
 
 Location:
@@ -89,6 +105,28 @@ Parameters:
 Used by:
 - `DailyRewardController`
 - `DailyRewardUIController`
+
+Config: CandyEventConfiguration
+
+Location:
+- `src/ReplicatedStorage/Modules/CandyEventConfiguration.lua`
+
+Purpose:
+- Defines the hourly candy-event schedule, mine candy density by zone, wheel rewards, UI copy, and candy spin product keys
+
+Parameters:
+- `ActiveDurationSeconds = 600`
+- `SpinCost = 20`
+- `SpinAnimationSeconds = 6`
+- `ZoneCandyCounts.Zone1..Zone5`
+- `Rewards[1..6]` with weighted odds for `matteo`, random mythic, random legendary, `+1 Player Speed`, `$50,000`, and `$100,000`
+- `ProductKeys.SpinsX3 = CandySpinsX3`
+- `ProductKeys.SpinsX9 = CandySpinsX9`
+
+Used by:
+- `CandyEventService`
+- `CandyEventController`
+- `CandySpinController`
 
 Config: PlaytimeRewardConfiguration
 

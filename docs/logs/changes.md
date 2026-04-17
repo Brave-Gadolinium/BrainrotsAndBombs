@@ -58,3 +58,9 @@
 - Reversed `OnboardingBeam` attachment order so the tutorial and xray guidance beam now flows from the player toward the target
 - Replaced end-of-round full mine terrain rebuilds with baseline chunk snapshots plus dirty-chunk `WriteVoxels` restore while keeping the fixed timer flow unchanged
 - Restored the original `OnboardingBeam` attachment order so tutorial and xray guidance use the previous arrow rotation again
+- Added an hourly candy event with mine touch pickups, a separate `CandyWheel`, and persisted candy balances
+- Added `CandySpinsX3` and `CandySpinsX9` developer product support for paid candy spin fallback
+- Shared mine spawn positioning between `ItemManager` and `CandyEventService` through `MineSpawnUtils`
+- Moved candy event countdown rendering to `Workspace.TimerWorkspace.SurfaceGui.TitleLabel`
+- Added `START EVENT` and `END EVENT` timer-surface buttons gated by existing manual test access
+- Removed the Robux icon glyph from the bomb-shop Robux purchase button so it shows only the numeric price

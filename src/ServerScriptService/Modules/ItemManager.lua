@@ -21,6 +21,7 @@ local TutorialService = require(ServerScriptService.Modules.TutorialService)
 local AnalyticsFunnelsService = require(ServerScriptService.Modules.AnalyticsFunnelsService)
 local Constants = require(ReplicatedStorage.Modules.Constants)
 local RebirthRequirements = require(ReplicatedStorage.Modules.RebirthRequirements)
+local MineSpawnUtils = require(ServerScriptService.Modules.MineSpawnUtils)
 
 -- [ LAZY DEPENDENCIES ]
 local CarrySystem 
@@ -110,7 +111,6 @@ local fallbackItemTemplates: {[string]: Model} = {}
 local VISUAL_ITEM_VERTICAL_OFFSET = -0.75
 local FALLBACK_ITEM_SIZE = Vector3.new(2.4, 2.4, 2.4)
 local WORLD_ITEM_PICKUP_DISTANCE = 16
-local ZONE1_SPAWN_Y_OFFSET = 2
 local LUCKY_BLOCK_TOOL_FORWARD_OFFSET = 2.25
 local EVENT_WORLD_ITEM_TAG = "EventBrainrotWorldItem"
 local queuedMineZones: {[BasePart]: boolean} = {}
@@ -753,68 +753,39 @@ function ItemManager.SpawnInMine(mineZonePart: BasePart)
 	local rarity = getRarityFromTier(tier)
 	local spawnedThisPass = 0
 
-	for i = 1, itemsToSpawn do
-		local maxAttempts = 15
-		local spawnCFrame
-		local randomRot = CFrame.Angles(0, math.rad(math.random(0, 360)), 0)
+	local spawnCFrames = MineSpawnUtils.BuildSpawnCFrames(mineZonePart, itemsToSpawn, existingPositions, {
+		MinSpacing = MIN_ITEM_SPACING,
+	})
 
-		for attempt = 1, maxAttempts do
-			local randomX = (math.random() - 0.5) * (mineZonePart.Size.X * 0.9)
-			local randomZ = (math.random() - 0.5) * (mineZonePart.Size.Z * 0.9)
-			local randomY = (math.random() - 0.5) * mineZonePart.Size.Y
-
-			if mineZonePart.Name == "Zone1" then
-				randomY += ZONE1_SPAWN_Y_OFFSET
-			end
-
-
-			spawnCFrame = CFrame.new((mineZonePart.CFrame * CFrame.new(randomX, randomY, randomZ)).Position)
-
-			local tooClose = false
-			for _, pos in ipairs(existingPositions) do
-				local dist = Vector2.new(spawnCFrame.Position.X - pos.X, spawnCFrame.Position.Z - pos.Z).Magnitude
-				if dist < MIN_ITEM_SPACING then
-					tooClose = true
-					break
-				end
-			end
-
-			if not tooClose then break end
+	for _, spawnCFrame in ipairs(spawnCFrames) do
+		local mutationName = getMutationForMinePosition(mineZonePart, spawnCFrame.Position)
+		local spawnableItems = getSpawnableItemsByRarity(rarity, mutationName)
+		if #spawnableItems == 0 then
+			warn("[ItemManager] No spawnable items found for rarity:", rarity)
+			return
 		end
 
-		if spawnCFrame then
-			local mutationName = getMutationForMinePosition(mineZonePart, spawnCFrame.Position)
-			local spawnableItems = getSpawnableItemsByRarity(rarity, mutationName)
-			if #spawnableItems == 0 then
-				warn("[ItemManager] No spawnable items found for rarity:", rarity)
-				return
-			end
+		local randomItemName = spawnableItems[math.random(1, #spawnableItems)]
+		local newItem = createWorldItemModel(randomItemName, mutationName, rarity, 1, nil)
+		if not newItem then
+			continue
+		end
 
-			local randomItemName = spawnableItems[math.random(1, #spawnableItems)]
-			local newItem = createWorldItemModel(randomItemName, mutationName, rarity, 1, nil)
-			if not newItem then
-				continue
-			end
+		local itemExtents = newItem:GetExtentsSize()
+		local distToBottom = newItem:GetPivot().Position.Y - (newItem:GetBoundingBox().Position.Y - (itemExtents.Y / 2))
 
-			local itemExtents = newItem:GetExtentsSize()
-			local distToBottom = newItem:GetPivot().Position.Y - (newItem:GetBoundingBox().Position.Y - (itemExtents.Y / 2))
+		newItem:PivotTo(spawnCFrame + Vector3.new(0, distToBottom, 0))
+		newItem.Parent = mineZonePart
 
-			table.insert(existingPositions, spawnCFrame.Position)
+		setupItemGUI(newItem, 1, 0, false)
 
-			newItem:PivotTo(spawnCFrame * randomRot + Vector3.new(0, distToBottom, 0))
-			newItem.Parent = mineZonePart
+		if newItem.PrimaryPart then
+			createPickupPrompt(newItem, randomItemName, WORLD_ITEM_PICKUP_DISTANCE)
+		end
 
-			setupItemGUI(newItem, 1, 0, false)
-
-			if newItem.PrimaryPart then
-				createPickupPrompt(newItem, randomItemName, WORLD_ITEM_PICKUP_DISTANCE)
-			end
-
-			spawnedThisPass += 1
-			if spawnedThisPass % ITEM_SPAWN_BATCH_SIZE == 0 then
-				task.wait(ITEM_SPAWN_BATCH_YIELD)
-			end
-
+		spawnedThisPass += 1
+		if spawnedThisPass % ITEM_SPAWN_BATCH_SIZE == 0 then
+			task.wait(ITEM_SPAWN_BATCH_YIELD)
 		end
 	end
 end

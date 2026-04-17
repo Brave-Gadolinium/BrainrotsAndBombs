@@ -574,6 +574,25 @@ function MonetizationController.ProcessReceipt(receiptInfo)
 		end
 	end
 
+	if productName == "CandySpinsX3" or productName == "CandySpinsX9" then
+		if not PlayerController then PlayerController = require(ServerScriptService.Controllers.PlayerController) end
+		local profile = PlayerController:GetProfile(player)
+		if profile then
+			local spinAmount = (productName == "CandySpinsX3") and 3 or 9
+			PlayerController:AddPaidCandySpins(player, spinAmount)
+			AnalyticsEconomyService:LogEntitlementGranted(player, "CandySpinPack", productName, nil, {
+				feature = "candy_spin",
+				content_id = productName,
+				context = "shop",
+			})
+			logStorePurchaseSuccess(player, "product", productId, productName, "robux", "candy_wheel")
+
+			if notif then notif:FireClient(player, "+" .. spinAmount .. " Candy Spins Purchased!", "Success") end
+			playPurchaseEffects(player)
+			return Enum.ProductPurchaseDecision.PurchaseGranted
+		end
+	end
+
 	return Enum.ProductPurchaseDecision.NotProcessedYet
 end
 

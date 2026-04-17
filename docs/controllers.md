@@ -27,6 +27,33 @@ Features:
 - Formats the live money balance with a leading `$`
 - Keeps invite prompt on the existing HUD button
 
+Controller: CandyEventController
+
+Location:
+- `src/StarterPlayer/StarterPlayerScripts/CandyEventController.client.lua`
+
+Responsibility:
+- Render the hourly candy-event countdown on `Workspace.TimerWorkspace.SurfaceGui.TitleLabel` and announce the active event start
+
+Features:
+- Pulls the initial event state from `ReplicatedStorage.Remotes.CandyEvent.GetState`
+- Recomputes the countdown locally from server time while `StateUpdated` pushes authoritative schedule changes
+- Shows `CANDY EVENT STARTED!` and `COLLECT CANDIES IN THE MINE` notifications when the event switches from inactive to active
+- Adds `START EVENT` and `END EVENT` buttons onto `Workspace.TimerWorkspace.SurfaceGui` for users who already have access to the existing `ManualTestController` actions
+
+Controller: CandySpinController
+
+Location:
+- `src/StarterPlayer/StarterPlayerScripts/CandySpinController.client.lua`
+
+Responsibility:
+- Drive the separate `GUI.Frames.CandyWheel` UI, open it only from `Workspace.CandyWheel`, and animate the 6-slot candy wheel
+
+Features:
+- Opens and closes `CandyWheel` from world bounds instead of a HUD button
+- Renders reward slots from `CandyEventConfiguration` and keeps the main button text synced with `CandyCount` and `CandyPaidSpinCount`
+- Prompts `CandySpinsX3` / `CandySpinsX9` purchases and uses `ReplicatedStorage.Remotes.CandyEvent.Spin` for server-authoritative results
+
 Controller: HUDModeController
 
 Location:

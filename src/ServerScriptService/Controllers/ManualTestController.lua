@@ -21,6 +21,7 @@ local PlotRuntimeBridge = require(ServerScriptService.Modules.PlotRuntimeBridge)
 local SpawnUtils = require(ServerScriptService.Modules.SpawnUtils)
 local TutorialService = require(ServerScriptService.Modules.TutorialService)
 local RoundBrainrotEventManager = require(ServerScriptService.Modules.RoundBrainrotEventManager)
+local CandyEventService = require(ServerScriptService.Modules.CandyEventService)
 
 local BrainrotEventConfiguration = require(ReplicatedStorage.Modules.BrainrotEventConfiguration)
 local ProductConfigurations = require(ReplicatedStorage.Modules.ProductConfigurations)
@@ -706,6 +707,8 @@ local function buildTargetSnapshot(player: Player, executor: Player, accessLevel
 		Money = tonumber(profile.Data.Money) or 0,
 		TotalMoneyEarned = tonumber(profile.Data.TotalMoneyEarned) or 0,
 		Spins = tonumber(profile.Data.SpinNumber) or 0,
+		CandyCount = tonumber(profile.Data.CandyCount) or 0,
+		CandyPaidSpinCount = tonumber(profile.Data.CandyPaidSpinCount) or 0,
 		LastDailySpin = tonumber(profile.Data.LastDailySpin) or 0,
 		FreeSpinReady = freeSpinRemaining <= 0,
 		FreeSpinRemaining = freeSpinRemaining,
@@ -1416,6 +1419,47 @@ registerAction({
 		profile.Data.LastDailySpin = os.time() - FREE_SPIN_COOLDOWN_SECONDS
 		target:SetAttribute("LastDailySpin", profile.Data.LastDailySpin)
 		return true, "Free spin is now ready."
+	end,
+})
+
+registerAction({
+	id = "set_candy_count",
+	label = "Set Candy Count",
+	description = "Overrides the saved candy balance used by CandyWheel.",
+	category = "Economy",
+	order = 75,
+	minAccess = "tester",
+	allowOtherTarget = true,
+	inputs = {
+		numberInput("amount", "Amount", 20, { 0, 20, 100, 500 }, 0, 100000),
+	},
+	handler = function(_executor, target, params)
+		local amount = normalizeInteger(params.amount, 20, 0, 100000)
+		if PlayerController and PlayerController.SetCandyCountForTesting and PlayerController:SetCandyCountForTesting(target, amount) then
+			return true, `Set CandyCount to {amount}.`
+		end
+		return false, "Failed to set CandyCount."
+	end,
+})
+
+registerAction({
+	id = "add_paid_candy_spins",
+	label = "Add Paid Candy Spins",
+	description = "Adds paid candy spins used as fallback when candies are below the spin cost.",
+	category = "Economy",
+	order = 80,
+	minAccess = "tester",
+	allowOtherTarget = true,
+	inputs = {
+		numberInput("amount", "Amount", 3, { 1, 3, 9, 25 }, 0, 100000),
+	},
+	handler = function(_executor, target, params)
+		local amount = normalizeInteger(params.amount, 3, 0, 100000)
+		if PlayerController and PlayerController.AddPaidCandySpins then
+			PlayerController:AddPaidCandySpins(target, amount)
+			return true, `Added {amount} paid candy spin(s).`
+		end
+		return false, "Failed to add paid candy spins."
 	end,
 })
 
@@ -2675,6 +2719,34 @@ registerAction({
 	inputs = {},
 	handler = function()
 		return RoundBrainrotEventManager:ForceClearActiveEvent()
+	end,
+})
+
+registerAction({
+	id = "force_candy_event_active",
+	label = "Force Candy Event Active",
+	description = "Immediately forces the candy event on for a fresh 10-minute test window.",
+	category = "World / QA",
+	order = 58,
+	minAccess = "tester",
+	allowOtherTarget = false,
+	inputs = {},
+	handler = function()
+		return CandyEventService:ForceStartForTesting()
+	end,
+})
+
+registerAction({
+	id = "force_candy_event_inactive",
+	label = "Force Candy Event Inactive",
+	description = "Stops the active candy event and prevents it from resuming until the next scheduled hour.",
+	category = "World / QA",
+	order = 59,
+	minAccess = "tester",
+	allowOtherTarget = false,
+	inputs = {},
+	handler = function()
+		return CandyEventService:ForceStopForTesting()
 	end,
 })
 

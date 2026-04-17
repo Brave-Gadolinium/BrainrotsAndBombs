@@ -256,6 +256,33 @@ local function getRobuxPriceText(productId: number?): string?
 		return priceText
 	end
 
+return "N/A"
+end
+
+getRobuxPriceText = function(productId: number?): string?
+	if type(productId) ~= "number" or productId <= 0 then
+		return nil
+	end
+
+	local cachedPrice = robuxPriceCache[productId]
+	if cachedPrice then
+		return cachedPrice
+	end
+
+	if not isPickaxesFrameVisible() then
+		return nil
+	end
+
+	local success, info = pcall(function()
+		return MarketplaceService:GetProductInfo(productId, Enum.InfoType.Product)
+	end)
+
+	if success and info and info.PriceInRobux then
+		local priceText = tostring(info.PriceInRobux)
+		robuxPriceCache[productId] = priceText
+		return priceText
+	end
+
 	return "N/A"
 end
 

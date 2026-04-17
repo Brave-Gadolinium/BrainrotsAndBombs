@@ -18,6 +18,7 @@ local UpgradesConfiguration = require(ReplicatedStorage.Modules.UpgradesConfigur
 local SlotUnlockConfigurations = require(ReplicatedStorage.Modules.SlotUnlockConfigurations)
 local BombsConfigurations = require(ReplicatedStorage.Modules.BombsConfigurations)
 local TutorialConfiguration = require(ReplicatedStorage.Modules.TutorialConfiguration)
+local SharedInstancesBootstrap = require(ServerScriptService.Modules.SharedInstancesBootstrap)
 local BadgeManager = require(ServerScriptService.Modules.BadgeManager)
 local ItemManager 
 local SlotManager 
@@ -58,6 +59,8 @@ type PlayerData = {
 	LastSaveTime: number,
 	SpinNumber: number,
 	LastDailySpin: number,
+	CandyCount: number,
+	CandyPaidSpinCount: number,
 	TotalBrainrotsCollected: number,
 	Inventory: {ItemData},
 	Plots: { [string]: FloorData },
@@ -97,6 +100,8 @@ local Template: PlayerData = {
 	LastSaveTime = 0,
 	SpinNumber = 0,     
 	LastDailySpin = 0,   
+	CandyCount = 0,
+	CandyPaidSpinCount = 0,
 	TotalBrainrotsCollected = 0,
 	Inventory = {},
 	Plots = { Floor1 = {}, Floor2 = {}, Floor3 = {} },
@@ -201,6 +206,15 @@ local function syncLimitedTimeOfferAttributes(player: Player, data)
 
 	player:SetAttribute(LimitedTimeOfferConfiguration.StartAttribute, collectAllStartTime)
 	player:SetAttribute(LimitedTimeOfferConfiguration.EndAttribute, collectAllEndTime)
+end
+
+local function syncCandyAttributes(player: Player, data)
+	if type(data) ~= "table" then
+		return
+	end
+
+	player:SetAttribute("CandyCount", math.max(0, math.floor(tonumber(data.CandyCount) or 0)))
+	player:SetAttribute("CandyPaidSpinCount", math.max(0, math.floor(tonumber(data.CandyPaidSpinCount) or 0)))
 end
 
 local function playPurchaseEffects(player: Player)
@@ -575,29 +589,89 @@ function PlayerController:IncrementBrainrotsCollected(player: Player, amount: nu
 	return profile.Data.TotalBrainrotsCollected
 end
 
-function PlayerController:SetupSharedInstances()
-	local eventsFolder = ReplicatedStorage:FindFirstChild("Events")
-	if not eventsFolder then 
-		eventsFolder = Instance.new("Folder"); eventsFolder.Name = "Events"; eventsFolder.Parent = ReplicatedStorage
+function PlayerController:GetCandyCount(player: Player): number
+	local profile = profiles[player]
+	if not profile or not profile.Data then
+		return 0
 	end
-	local function createRemote(type: "RemoteEvent", name: string)
-		if not eventsFolder:FindFirstChild(name) then
-			local r = Instance.new(type); r.Name = name; r.Parent = eventsFolder
+
+	return math.max(0, math.floor(tonumber(profile.Data.CandyCount) or 0))
+end
+
+function PlayerController:AddCandies(player: Player, amount: number?): number
+	local profile = profiles[player]
+	if not profile or not profile.Data then
+		return 0
+	end
+
+	local increment = math.max(0, math.floor(tonumber(amount) or 0))
+	profile.Data.CandyCount = math.max(0, math.floor(tonumber(profile.Data.CandyCount) or 0) + increment)
+	player:SetAttribute("CandyCount", profile.Data.CandyCount)
+	return profile.Data.CandyCount
+end
+
+function PlayerController:AddPaidCandySpins(player: Player, amount: number?): number
+	local profile = profiles[player]
+	if not profile or not profile.Data then
+		return 0
+	end
+
+	local increment = math.max(0, math.floor(tonumber(amount) or 0))
+	profile.Data.CandyPaidSpinCount = math.max(0, math.floor(tonumber(profile.Data.CandyPaidSpinCount) or 0) + increment)
+	player:SetAttribute("CandyPaidSpinCount", profile.Data.CandyPaidSpinCount)
+	return profile.Data.CandyPaidSpinCount
+end
+
+function PlayerController:ConsumeCandySpinCost(player: Player, candyCost: number): (boolean, boolean)
+	local profile = profiles[player]
+	if not profile or not profile.Data then
+		return false, false
+	end
+
+	local resolvedCost = math.max(0, math.floor(tonumber(candyCost) or 0))
+	local currentCandyCount = math.max(0, math.floor(tonumber(profile.Data.CandyCount) or 0))
+	local currentPaidSpins = math.max(0, math.floor(tonumber(profile.Data.CandyPaidSpinCount) or 0))
+
+	if resolvedCost > 0 and currentCandyCount >= resolvedCost then
+		profile.Data.CandyCount = currentCandyCount - resolvedCost
+		player:SetAttribute("CandyCount", profile.Data.CandyCount)
+		return true, false
+	end
+
+	if currentPaidSpins > 0 then
+		profile.Data.CandyPaidSpinCount = currentPaidSpins - 1
+		player:SetAttribute("CandyPaidSpinCount", profile.Data.CandyPaidSpinCount)
+		return true, true
+	end
+
+	return false, false
+end
+
+function PlayerController:AddUpgradeStat(player: Player, statId: string, amount: number?): number
+	local profile = profiles[player]
+	if not profile or not profile.Data or type(statId) ~= "string" or statId == "" then
+		return 0
+	end
+
+	ensureUpgradeDefaults(profile.Data)
+
+	local increment = math.max(0, math.floor(tonumber(amount) or 0))
+	profile.Data[statId] = math.max(0, math.floor(tonumber(profile.Data[statId]) or 0) + increment)
+	player:SetAttribute(statId, profile.Data[statId])
+
+	if statId == "BonusSpeed" then
+		local character = player.Character
+		local hum = character and character:FindFirstChild("Humanoid")
+		if hum and hum:IsA("Humanoid") then
+			hum.WalkSpeed = 20 + profile.Data[statId]
 		end
 	end
-	createRemote("RemoteEvent", "ShowNotification") 
-	createRemote("RemoteEvent", "RequestSlotPurchase")
-	createRemote("RemoteEvent", "RequestRebirth")
-	createRemote("RemoteEvent", "UpdateRebirthUI")
-	createRemote("RemoteEvent", "RefreshIndex")
-	createRemote("RemoteEvent", "ReportTutorialAction") 
-	createRemote("RemoteEvent", "ReportAnalyticsIntent")
-	createRemote("RemoteEvent", "TriggerUIEffect") 
-	createRemote("RemoteEvent", "ShowPostTutorialCompletion")
-	createRemote("RemoteEvent", "RequestRewardedAd")
-	createRemote("RemoteEvent", "RewardedAdResult")
-	createRemote("RemoteEvent", "RequestAutoBombState")
-	createRemote("RemoteEvent", "ShowContextualOffer")
+
+	return profile.Data[statId]
+end
+
+function PlayerController:SetupSharedInstances()
+	SharedInstancesBootstrap:Ensure()
 end
 
 local function toolToData(tool: Tool): ItemData?
@@ -719,6 +793,7 @@ local function createLeaderstats(player: Player, data: PlayerData)
 	player:SetAttribute("PostTutorialStage", data.PostTutorialStage or 0)
 	player:SetAttribute("SpinNumber", data.SpinNumber or 0)
 	player:SetAttribute("LastDailySpin", data.LastDailySpin or 0)
+	syncCandyAttributes(player, data)
 	player:SetAttribute("UnlockedSlots", SlotUnlockConfigurations.ClampSlots(tonumber(data.unlocked_slots) or SlotUnlockConfigurations.StartSlots))
 
 	-- Note: TimePlayed gets set continuously in the Start loop, but we can initialize it here:
@@ -792,6 +867,7 @@ local function onPlayerAdded(player: Player)
 	player:SetAttribute("PostTutorialStage", profile.Data.PostTutorialStage or 0)
 	player:SetAttribute("SpinNumber", profile.Data.SpinNumber or 0)
 	player:SetAttribute("LastDailySpin", profile.Data.LastDailySpin or 0)
+	syncCandyAttributes(player, profile.Data)
 	player:SetAttribute("UnlockedSlots", SlotUnlockConfigurations.ClampSlots(profile.Data.unlocked_slots))
 	player:SetAttribute(LimitedTimeOfferConfiguration.ReadyAttribute, false)
 
@@ -822,6 +898,8 @@ local function onPlayerAdded(player: Player)
 	if profile.Data.DiscoveredItems == nil then profile.Data.DiscoveredItems = {} end
 	if profile.Data.ClaimedPacks == nil then profile.Data.ClaimedPacks = {} end
 	if type(profile.Data.RedeemedCodes) ~= "table" then profile.Data.RedeemedCodes = {} end
+	if type(profile.Data.CandyCount) ~= "number" then profile.Data.CandyCount = 0 end
+	if type(profile.Data.CandyPaidSpinCount) ~= "number" then profile.Data.CandyPaidSpinCount = 0 end
 	if type(profile.Data.TotalBrainrotsCollected) ~= "number" then profile.Data.TotalBrainrotsCollected = 0 end
 	if type(profile.Data.PostTutorialStage) ~= "number" then profile.Data.PostTutorialStage = 0 end
 	if type(profile.Data.TotalMoneyEarned) ~= "number" then
@@ -938,6 +1016,13 @@ function PlayerController:SyncSpinData(player: Player)
 	end
 end
 
+function PlayerController:SyncCandyData(player: Player)
+	local profile = self:GetProfile(player)
+	if profile and profile.Data then
+		syncCandyAttributes(player, profile.Data)
+	end
+end
+
 function PlayerController:CreateDefaultData()
 	local data = deepCopy(Template)
 	ensureUpgradeDefaults(data)
@@ -1039,6 +1124,28 @@ function PlayerController:SetSpinNumberForTesting(player: Player, amount: number
 
 	profile.Data.SpinNumber = math.max(0, math.floor(tonumber(amount) or 0))
 	player:SetAttribute("SpinNumber", profile.Data.SpinNumber)
+	return true
+end
+
+function PlayerController:SetCandyCountForTesting(player: Player, amount: number): boolean
+	local profile = profiles[player]
+	if not profile or not profile.Data then
+		return false
+	end
+
+	profile.Data.CandyCount = math.max(0, math.floor(tonumber(amount) or 0))
+	player:SetAttribute("CandyCount", profile.Data.CandyCount)
+	return true
+end
+
+function PlayerController:SetCandyPaidSpinCountForTesting(player: Player, amount: number): boolean
+	local profile = profiles[player]
+	if not profile or not profile.Data then
+		return false
+	end
+
+	profile.Data.CandyPaidSpinCount = math.max(0, math.floor(tonumber(amount) or 0))
+	player:SetAttribute("CandyPaidSpinCount", profile.Data.CandyPaidSpinCount)
 	return true
 end
 

@@ -6,7 +6,7 @@ Location:
 - `src/ServerScriptService/Controllers/PlayerController.lua`
 
 Responsibility:
-- Profile lifecycle, public player attributes, entitlement sync, inventory loading, and session timestamps
+- Profile lifecycle, public player attributes, entitlement sync, inventory loading, session timestamps, and persisted candy balances
 
 Dependencies:
 - `ProfileStore`
@@ -96,6 +96,23 @@ Dependencies:
 - `PlaytimeRewardController`
 - `DailyRewardController`
 - `RebirthSystem`
+
+Service: CandyEventService
+
+Location:
+- `src/ServerScriptService/Modules/CandyEventService.lua`
+
+Responsibility:
+- Run the hourly candy event, spawn touch-collectible candies in mine zones, keep candy wheel remotes in sync, and grant wheel rewards
+
+Dependencies:
+- `PlayerController`
+- `ItemManager`
+- `CandyEventConfiguration`
+- `MineSpawnUtils`
+- `ItemConfigurations`
+- `UpgradesConfigurations`
+- `BadgeManager`
 
 Service: TerrainGeneratorManager
 
