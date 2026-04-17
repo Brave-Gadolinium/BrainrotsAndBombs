@@ -59,8 +59,7 @@ local reportDebounce: {[string]: number} = {}
 local tutorialGuiOverlay: ScreenGui? = nil
 local tutorialGuiBlackout: Frame? = nil
 local tutorialGuiProxyButton: GuiButton? = nil
-local tutorialGuiCursor: ImageLabel? = nil
-local tutorialGuiCursorBaseSize: UDim2? = nil
+local tutorialGuiCursor: GuiObject? = nil
 local tutorialGuiStepLabel: TextLabel? = nil
 local tutorialGuiPulseScale: UIScale? = nil
 local tutorialGuiPulseTween: Tween? = nil
@@ -73,13 +72,13 @@ local shouldUseTutorialGuiProxy: ((number) -> boolean)? = nil
 local getTutorialGuiTarget: ((number) -> GuiButton?)? = nil
 local maskedGuiVisibility: {[GuiObject]: boolean} = {}
 local maskedGuiEnabled: {[Instance]: boolean} = {}
+local tutorialCursorState: {[GuiObject]: {Visible: boolean, ZIndex: number}} = {}
 local lastTutorialInventoryVisible: boolean? = nil
 local isRefreshingStep = false
 local DEBUG_TUTORIAL = true
 local lastMaskKey: string? = nil
 local maskActive = false
 local maskDirty = false
-local TUTORIAL_CURSOR_SCALE = 4
 local hasAppliedTutorialCompletionCleanup = false
 local DEFAULT_CAMERA_FOV = 70
 
@@ -275,6 +274,10 @@ end
 
 local function removeScripts(instance: Instance)
 	for _, descendant in ipairs(instance:GetDescendants()) do
+		if descendant:FindFirstAncestor("TutorialCursor") then
+			continue
+		end
+
 		if descendant:IsA("Script") or descendant:IsA("LocalScript") then
 			descendant:Destroy()
 		end
@@ -297,6 +300,10 @@ local function destroyTutorialGuiProxyButton()
 	stopGuiPulseTween()
 
 	if tutorialGuiProxyButton then
+		if tutorialGuiCursor and tutorialGuiCursor:IsDescendantOf(tutorialGuiProxyButton) then
+			tutorialCursorState[tutorialGuiCursor] = nil
+			tutorialGuiCursor = nil
+		end
 		tutorialGuiProxyButton:Destroy()
 		tutorialGuiProxyButton = nil
 	end
@@ -305,9 +312,22 @@ local function destroyTutorialGuiProxyButton()
 	tutorialGuiTargetStep = nil
 end
 
+local function restoreTutorialGuiCursor(cursor: GuiObject)
+	local originalState = tutorialCursorState[cursor]
+	if not originalState then
+		return
+	end
+
+	tutorialCursorState[cursor] = nil
+	if cursor.Parent then
+		cursor.Visible = originalState.Visible
+		cursor.ZIndex = originalState.ZIndex
+	end
+end
+
 local function destroyTutorialGuiCursor()
 	if tutorialGuiCursor then
-		tutorialGuiCursor:Destroy()
+		restoreTutorialGuiCursor(tutorialGuiCursor)
 		tutorialGuiCursor = nil
 	end
 end
@@ -658,13 +678,66 @@ local function getTutorialProxyOffset(step: number): Vector2
 	return Vector2.zero
 end
 
-local function scaleUdim2(size: UDim2, multiplier: number): UDim2
-	return UDim2.new(
-		size.X.Scale * multiplier,
-		size.X.Offset * multiplier,
-		size.Y.Scale * multiplier,
-		size.Y.Offset * multiplier
-	)
+local function getTutorialGuiCursorTarget(targetButton: GuiButton): GuiObject
+	if tutorialGuiProxyButton and shouldUseTutorialGuiProxy and shouldUseTutorialGuiProxy(currentStep) then
+		return tutorialGuiProxyButton
+	end
+
+	return targetButton
+end
+
+local function getHighestGuiZIndex(root: Instance, excluded: Instance?): number
+	local highestZIndex = 1
+
+	if root ~= excluded and root:IsA("GuiObject") then
+		highestZIndex = root.ZIndex
+	end
+
+	for _, descendant in ipairs(root:GetDescendants()) do
+		if descendant ~= excluded and descendant:IsA("GuiObject") and descendant.ZIndex > highestZIndex then
+			highestZIndex = descendant.ZIndex
+		end
+	end
+
+	return highestZIndex
+end
+
+local function findTutorialCursor(root: Instance?): GuiObject?
+	if not root then
+		return nil
+	end
+
+	local cursor = root:FindFirstChild("TutorialCursor", true)
+	if cursor and cursor:IsA("GuiObject") then
+		return cursor
+	end
+
+	return nil
+end
+
+local function syncTutorialGuiCursor(targetButton: GuiButton)
+	local cursorTarget = getTutorialGuiCursorTarget(targetButton)
+	local targetCursor = findTutorialCursor(cursorTarget)
+
+	if tutorialGuiCursor and tutorialGuiCursor ~= targetCursor then
+		restoreTutorialGuiCursor(tutorialGuiCursor)
+		tutorialGuiCursor = nil
+	end
+
+	if not targetCursor then
+		return
+	end
+
+	if tutorialCursorState[targetCursor] == nil then
+		tutorialCursorState[targetCursor] = {
+			Visible = targetCursor.Visible,
+			ZIndex = targetCursor.ZIndex,
+		}
+	end
+
+	targetCursor.Visible = true
+	targetCursor.ZIndex = getHighestGuiZIndex(cursorTarget, targetCursor) + 1
+	tutorialGuiCursor = targetCursor
 end
 
 local function syncTutorialGuiLayout(targetButton: GuiButton)
@@ -687,48 +760,7 @@ local function syncTutorialGuiLayout(targetButton: GuiButton)
 		tutorialGuiProxyButton.Rotation = targetButton.Rotation
 	end
 
-	if tutorialGuiCursor then
-		local cursorTarget = targetButton
-		if tutorialGuiProxyButton and shouldUseTutorialGuiProxy and shouldUseTutorialGuiProxy(currentStep) then
-			cursorTarget = tutorialGuiProxyButton
-		end
-
-		if tutorialGuiOverlay and tutorialGuiCursor.Parent ~= tutorialGuiOverlay then
-			tutorialGuiCursor.Parent = tutorialGuiOverlay
-		end
-
-		local targetPos = cursorTarget.AbsolutePosition
-		local targetSize = cursorTarget.AbsoluteSize
-		tutorialGuiCursor.AnchorPoint = Vector2.zero
-		tutorialGuiCursor.Position = UDim2.fromOffset(
-			targetPos.X + targetSize.X * 0.7,
-			targetPos.Y + targetSize.Y * 0.3
-		)
-		applyOverlayZIndex(tutorialGuiCursor, 16)
-	end
-end
-
-local function createTutorialGuiCursor()
-	if tutorialGuiCursor or not tutorialGuiOverlay then
-		return
-	end
-
-	local cursorTemplate = ReplicatedStorage:FindFirstChild("Cursor", true)
-	if not cursorTemplate or not cursorTemplate:IsA("ImageLabel") then
-		return
-	end
-
-	local cursor = cursorTemplate:Clone()
-	removeScripts(cursor)
-	cursor.Name = "TutorialCursor"
-	cursor.Visible = true
-	cursor.Parent = tutorialGuiOverlay
-	cursor.AnchorPoint = Vector2.zero
-	cursor.Position = UDim2.new(0.7, 0, 0.3, 0)
-	tutorialGuiCursorBaseSize = cursor.Size
-	cursor.Size = scaleUdim2(tutorialGuiCursorBaseSize, TUTORIAL_CURSOR_SCALE)
-	applyOverlayZIndex(cursor, 16)
-	tutorialGuiCursor = cursor
+	syncTutorialGuiCursor(targetButton)
 end
 
 local function createTutorialGuiLabel(text: string)
@@ -1256,10 +1288,6 @@ local function refreshTutorialGuiOverlay()
 		tutorialGuiBlackout.Active = showBlackout
 	end
 
-	if not tutorialGuiCursor or tutorialGuiCursor.Parent ~= tutorialGuiOverlay then
-		createTutorialGuiCursor()
-	end
-
 	destroyTutorialGuiLabel()
 
 	if shouldUseTutorialGuiProxy(currentStep) then
@@ -1432,6 +1460,30 @@ local function findClosestFreeSlot(): BasePart?
 	end)
 
 	return closestSlot
+end
+
+local function findTutorialBaseTarget(): BasePart?
+	local freeSlot = findClosestFreeSlot()
+	if freeSlot then
+		return freeSlot
+	end
+
+	local plot = getPlayerPlot()
+	if not plot then
+		return nil
+	end
+
+	local spawnPart = plot:FindFirstChild("Spawn", true)
+	if spawnPart and spawnPart:IsA("BasePart") then
+		return spawnPart
+	end
+
+	local primaryPart = plot.PrimaryPart or plot:FindFirstChildWhichIsA("BasePart", true)
+	if primaryPart then
+		return primaryPart
+	end
+
+	return nil
 end
 
 local function findClosestCollectTouch(): BasePart?
@@ -1615,6 +1667,8 @@ local function resolveWorldTargetForStep(step: number): Instance?
 		return findTutorialMiningZonePart()
 	elseif step == 3 then
 		return findClosestBrainrot()
+	elseif step == 4 then
+		return findTutorialBaseTarget()
 	elseif step == 5 then
 		return findClosestFreeSlot()
 	elseif step == 6 then

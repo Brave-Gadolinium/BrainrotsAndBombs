@@ -691,7 +691,7 @@ function onItemPickedUp(player: Player, itemModel: Model)
 		end
 
 		if pickedUp then 
-			TutorialService:HandleBrainrotPickedUp(player)
+			TutorialService:HandleBrainrotPickedUp(player, inZone)
 			AnalyticsFunnelsService:HandleMineBrainrotPickedUp(player)
 			itemModel:Destroy() 
 

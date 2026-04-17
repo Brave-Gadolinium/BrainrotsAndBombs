@@ -28,7 +28,7 @@ Purpose:
 
 Parameters:
 - `MinimumOfflineSeconds = 60`
-- `MaxOfflineSeconds = 28800`
+- `MaxOfflineSeconds = 1800`
 - `Play15Seconds = 900`
 - `RobuxMultiplier = 5`
 - `Play15Multiplier = 5`

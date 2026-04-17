@@ -86,7 +86,8 @@ Responsibility:
 Features:
 - Applies per-step UI presentation rules from `TutorialConfiguration`
 - Points players to world targets with beams/highlights and opens guided upgrade flows
-- Stores the tutorial cursor base size and scales the guided cursor `4x` on both axes across FTUE steps
+- Keeps the step `4` back-button pointer while also aiming a world beam at the player's base after the first brainrot pickup
+- Uses prebuilt `TutorialCursor` descendants inside the active target button or proxy, toggles them visible only for the active FTUE step, and restores their original hidden state afterwards
 - Resets tutorial completion state by closing all non-notification frames and forcing the camera back to the default FOV on the final tutorial step
 - Invalidates cached masking only when top-level HUD/frame children change during tutorial so dynamic UI still restores correctly without mask spam inside animated frames
 - Re-applies FTUE masking when guided targets arrive late so money HUD, purchase buttons, and the base-upgrade surface button do not remain hidden after step transitions

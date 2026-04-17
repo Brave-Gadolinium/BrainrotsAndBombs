@@ -4,7 +4,7 @@
 local OfflineIncomeConfiguration = {}
 
 OfflineIncomeConfiguration.MinimumOfflineSeconds = 60
-OfflineIncomeConfiguration.MaxOfflineSeconds = 8 * 60 * 60
+OfflineIncomeConfiguration.MaxOfflineSeconds = 30 * 60
 OfflineIncomeConfiguration.Play15Seconds = 15 * 60
 OfflineIncomeConfiguration.RobuxMultiplier = 5
 OfflineIncomeConfiguration.Play15Multiplier = 5

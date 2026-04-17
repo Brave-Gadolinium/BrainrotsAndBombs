@@ -1,5 +1,7 @@
 # Changes
 
+- Reduced offline income maximum counted time from `4` hours to `30` minutes
+- Reduced offline income maximum counted time from `8` hours to `4` hours
 - Added online friend income boost calculation with `FriendBoostMultiplier` and `FriendBoostCount`
 - Added HUD boost labels for friend and rebirth multipliers
 - Reworked offline income from auto-credit into pending claim flow with x1, Robux x5, and `Play15`
@@ -9,6 +11,12 @@
 - Added a TopbarPlus feedback button that opens Roblox's in-experience feedback prompt
 - Adjusted offline income UI button lookup to use `Content.right.Buttons` with legacy fallback
 - Prioritized limited-time offer before offline income, hid offline window during `Play15`, and removed the tutorial end delay
+- Removed the FTUE rejoin reset that forced step `2` and step `3` back to step `1`
+- Reset FTUE back to step `1` when a player rejoins after leaving on step `2` or `3`
+- Switched FTUE guided buttons to use prebuilt `TutorialCursor` descendants, toggling their `Visible` state instead of cloning a runtime cursor
+- Preserved `TutorialCursor` animation scripts inside FTUE proxy-button clones by skipping script removal under the cursor subtree
+- Added a world beam to the player base during FTUE step `4` after the first brainrot pickup while keeping the guided `Back` button
+- Skipped the FTUE bomb/use-surface-return steps when a brainrot is picked up on the surface before the player throws a bomb
 - Restored tutorial text and target guidance for non-masked step 5 after returning to base
 - Prevented `FrameManagerBlur` from activating on tutorial-forced `Pickaxes` and `Upgrades` frames
 - Stopped tutorial step 6 from auto-skipping to 7 before the player reaches the bomb shop

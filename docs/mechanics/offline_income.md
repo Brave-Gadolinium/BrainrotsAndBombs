@@ -5,7 +5,7 @@ Description:
 
 Rules:
 - Minimum offline time is 60 seconds
-- Maximum counted offline time is 8 hours
+- Maximum counted offline time is 30 minutes
 - Formula uses item income, mutation, level, rebirth multiplier, and VIP multiplier
 - Friend boost does not affect offline income
 

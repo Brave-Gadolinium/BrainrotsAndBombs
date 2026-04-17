@@ -306,6 +306,14 @@ local function isMainTutorialCompleted(profile: any): boolean
 	return (tonumber(profile.Data.OnboardingStep) or 1) >= TutorialConfiguration.FinalStep
 end
 
+local function getStepAfterBrainrotPickup(pickedUpInMine: boolean): number
+	if pickedUpInMine then
+		return 4
+	end
+
+	return 5
+end
+
 local function firePostTutorialCompletion(player: Player, message: string)
 	if postTutorialCompletionEvent then
 		postTutorialCompletionEvent:FireClient(player, message, PostTutorialConfiguration.CompletionMessageDuration)
@@ -595,10 +603,12 @@ function TutorialService:HandleBombThrown(player: Player)
 	end
 end
 
-function TutorialService:HandleBrainrotPickedUp(player: Player)
-	debugTutorialLog(player, "HandleBrainrotPickedUp")
-	if getCurrentStep(player) == 3 then
-		self:AdvanceToStep(player, 4)
+function TutorialService:HandleBrainrotPickedUp(player: Player, pickedUpInMine: boolean?)
+	local isPickupInMine = pickedUpInMine ~= false
+	local currentStep = getCurrentStep(player)
+	debugTutorialLog(player, ("HandleBrainrotPickedUp inMine=%s step=%d"):format(tostring(isPickupInMine), currentStep))
+	if currentStep == 2 or currentStep == 3 then
+		self:AdvanceToStep(player, getStepAfterBrainrotPickup(isPickupInMine))
 	else
 		self:EvaluateCurrentStep(player)
 	end

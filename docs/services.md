@@ -111,3 +111,19 @@ Dependencies:
 - `ReplicatedStorage.Remotes.Timer.FinishTime`
 - `BombManager`
 - `ItemManager`
+
+Service: TutorialService
+
+Location:
+- `src/ServerScriptService/Modules/TutorialService.lua`
+
+Responsibility:
+- Own FTUE/post-tutorial progression, reconcile onboarding steps with the live player state, and sync tutorial attributes/events
+
+Dependencies:
+- `PlayerController`
+- `TutorialConfiguration`
+- `PostTutorialConfiguration`
+- `SlotUnlockConfigurations`
+- `UpgradesConfigurations`
+- `AnalyticsFunnelsService`
