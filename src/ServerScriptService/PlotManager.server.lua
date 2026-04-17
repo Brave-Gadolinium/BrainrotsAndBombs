@@ -52,6 +52,20 @@ function PlotManager.GetMaxLevel()
 	return #SlotUnlockConfigurations.new_slots
 end
 
+local function getOnboardingStepForSpawn(player: Player): number
+	local attributeStep = tonumber(player:GetAttribute("OnboardingStep"))
+	if attributeStep then
+		return attributeStep
+	end
+
+	local profile = PlayerController:GetProfile(player)
+	if profile and profile.Data then
+		return tonumber(profile.Data.OnboardingStep) or 1
+	end
+
+	return 1
+end
+
 local function getFreePlotIndex(): number?
 	for i = 1, 5 do
 		local taken = false
@@ -654,11 +668,8 @@ end
 
 local function handleCharacterSpawn(player: Player, character: Model)
 	local plotModel = activePlotModels[player]
-	if not plotModel then
-		return
-	end
 
-	local spawnCFrame = SpawnUtils.GetPlotSpawnCFrame(plotModel, 3)
+	local spawnCFrame = SpawnUtils.GetCharacterSpawnCFrame(plotModel, getOnboardingStepForSpawn(player), 3)
 	if spawnCFrame then
 		character:PivotTo(spawnCFrame)
 	end

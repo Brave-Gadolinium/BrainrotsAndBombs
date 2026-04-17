@@ -30,6 +30,7 @@ TutorialConfiguration.TutorialCharacterUpgradeId = "Speed1"
 TutorialConfiguration.TutorialBaseUpgradeMode = "FirstSlotUnlock"
 TutorialConfiguration.LegacyCompletedFinalStep = 9
 TutorialConfiguration.BaseUpgradeApproachDistance = 20
+TutorialConfiguration.PlotSpawnUnlockStep = 5
 TutorialConfiguration.CompletionMessageDuration = 10
 
 local DEFAULT_STEP_PRESENTATION: TutorialStepPresentation = {

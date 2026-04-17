@@ -155,6 +155,7 @@ Parameters:
 - `TutorialCharacterUpgradeId = Speed1`
 - `TutorialBaseUpgradeMode = FirstSlotUnlock`
 - `BaseUpgradeApproachDistance = 20`
+- `PlotSpawnUnlockStep = 5`
 
 Used by:
 - `TutorialService`

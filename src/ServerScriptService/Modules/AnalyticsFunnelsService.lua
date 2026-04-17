@@ -34,13 +34,14 @@ local autoBombToggleSurfaces: {[Player]: {Surface: string, ExpiresAt: number}} =
 local initialized = false
 
 local TUTORIAL_VERSION = "ftue_v3"
+local TUTORIAL_FUNNEL_NAME = "Tutor_17/04"
 local SECONDS_PER_DAY = 86400
 local FREE_SPIN_COOLDOWN_SECONDS = math.max(0, tonumber(DailySpinConfiguration.FreeSpinCooldownSeconds) or (15 * 60))
 local PURCHASE_ATTRIBUTION_TTL = 120
 local OneTimeFunnels = {
 	TutorialFTUE = {
 		Kind = "Standard",
-		FunnelName = "TutorialFTUE",
+		FunnelName = TUTORIAL_FUNNEL_NAME,
 		LegacyKey = "OnboardingFunnelStep",
 		Steps = {
 			[1] = "JoinGame",

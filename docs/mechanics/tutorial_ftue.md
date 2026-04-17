@@ -9,6 +9,7 @@ Core flow:
 - Step `3`: pick up a brainrot.
 - Step `4`: leave the mine.
 - Step `5`: place the brainrot on a free slot.
+- While `OnboardingStep` is still below `5`, character spawn uses `Workspace.Zones.NewPlayerPart` (with `NewPlayerPart` tag fallback) instead of the plot spawn; reaching step `5` restores the normal base spawn.
 - After the pickup, step `4` keeps the guided `Back` button and also shows a world beam toward the player's base so the return path stays visible.
 - If the player picks up a brainrot before throwing a bomb, FTUE now treats the bomb step as completed; pickups in the mine continue at step `4`, while pickups on the surface skip straight to step `5`.
 - Step `6+`: keep the money HUD visible for the rest of the masked tutorial flow.
@@ -21,6 +22,7 @@ Core flow:
 UI nuances:
 - `TutorialConfiguration` owns step presentations and targets.
 - `TutorialUiConfiguration` owns FTUE UI-specific exceptions such as persistent money visibility, retry targets for delayed buttons, and restore policies for special controls.
+- FTUE analytics step events are sent to the `Tutor_17/04` funnel while server save data keeps the legacy `TutorialFTUE` progress key so partially completed profiles continue safely.
 - Guided GUI targets now use prebuilt `TutorialCursor` descendants inside the relevant button/proxy, toggling `Visible` on while the FTUE step is active and restoring the original hidden state afterwards.
 - The base upgrade surface button preserves its original outside-tutorial visibility snapshot so finishing the tutorial does not restore it to a hidden state.
 - Late-arriving guided targets during FTUE set the mask dirty and trigger another mask apply pass on the next refresh.

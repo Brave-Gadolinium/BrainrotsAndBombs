@@ -10,6 +10,8 @@
 - Increased xRay brainrot highlight radius to `100`
 - Added a TopbarPlus feedback button that opens Roblox's in-experience feedback prompt
 - Adjusted offline income UI button lookup to use `Content.right.Buttons` with legacy fallback
+- Routed early FTUE character spawns to `Workspace.Zones.NewPlayerPart` until onboarding reaches step `5`, with a `NewPlayerPart` tag fallback
+- Routed FTUE analytics funnel events to `Tutor_17/04` while keeping the saved `TutorialFTUE` progress key for compatibility
 - Prioritized limited-time offer before offline income, hid offline window during `Play15`, and removed the tutorial end delay
 - Removed the FTUE rejoin reset that forced step `2` and step `3` back to step `1`
 - Reset FTUE back to step `1` when a player rejoins after leaving on step `2` or `3`
