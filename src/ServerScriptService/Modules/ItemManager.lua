@@ -22,6 +22,7 @@ local AnalyticsFunnelsService = require(ServerScriptService.Modules.AnalyticsFun
 local Constants = require(ReplicatedStorage.Modules.Constants)
 local RebirthRequirements = require(ReplicatedStorage.Modules.RebirthRequirements)
 local MineSpawnUtils = require(ServerScriptService.Modules.MineSpawnUtils)
+local TerrainGeneratorManager = require(ServerScriptService.Modules.TerrainGeneratorManager)
 
 -- [ LAZY DEPENDENCIES ]
 local CarrySystem 
@@ -113,10 +114,40 @@ local FALLBACK_ITEM_SIZE = Vector3.new(2.4, 2.4, 2.4)
 local WORLD_ITEM_PICKUP_DISTANCE = 16
 local LUCKY_BLOCK_TOOL_FORWARD_OFFSET = 2.25
 local EVENT_WORLD_ITEM_TAG = "EventBrainrotWorldItem"
-local queuedMineZones: {[BasePart]: boolean} = {}
-local mineSpawnQueue: {BasePart} = {}
+
+type MineSpawnJob = {
+	Key: string,
+	Zone: BasePart,
+	Mode: string,
+	RequestedCount: number?,
+	MinDepthRatio: number?,
+	MaxDepthRatio: number?,
+	OnCompleted: ((BasePart, number) -> ())?,
+}
+
+local queuedSpawnJobKeys: {[string]: boolean} = {}
+local mineSpawnQueue: {MineSpawnJob} = {}
 local spawnWorkerRunning = false
 local pendingRoundRefill = false
+local started = false
+local startupFinalized = false
+local startupSeededZones: {[string]: boolean} = {}
+local startupAllZonesReadyQueued = false
+local startupFinalReconcileJobsRemaining = 0
+local STARTUP_ZONE_ORDER = if type(Constants.MINE_STARTUP_ZONE_ORDER) == "table"
+	then Constants.MINE_STARTUP_ZONE_ORDER
+	else {"Zone1", "Zone2", "Zone3", "Zone4", "Zone5"}
+local STARTUP_INITIAL_SEED_RATIO = math.max(0, tonumber(Constants.MINE_STARTUP_INITIAL_SEED_RATIO) or 0.15)
+local STARTUP_INITIAL_SEED_MINIMUM = math.max(1, math.floor(tonumber(Constants.MINE_STARTUP_INITIAL_SEED_MINIMUM) or 12))
+local STARTUP_BACKFILL_CHUNK_RATIO = math.max(0, tonumber(Constants.MINE_STARTUP_BACKFILL_CHUNK_RATIO) or 0.05)
+local STARTUP_BACKFILL_MINIMUM = 6
+local STARTUP_DEPTH_BANDS = if type(Constants.MINE_STARTUP_DEPTH_BANDS) == "table"
+	then Constants.MINE_STARTUP_DEPTH_BANDS
+	else {
+		{ MinDepthRatio = 0.00, MaxDepthRatio = 0.35 },
+		{ MinDepthRatio = 0.35, MaxDepthRatio = 0.65 },
+		{ MinDepthRatio = 0.65, MaxDepthRatio = 1.00 },
+	}
 
 local function getConcreteItemTemplate(itemName: string, mutation: string?): Model?
 	local normalFolder = ItemsFolder:FindFirstChild("Normal")
@@ -734,11 +765,10 @@ function ItemManager.SpawnVisualItem(parentPart: BasePart, itemName: string, mut
 	CollectionService:AddTag(model, "FloatingItem")
 end
 
-function ItemManager.SpawnInMine(mineZonePart: BasePart)
-	if not mineZonePart or not mineZonePart.Parent then return end
-
+local function countMineItems(mineZonePart: BasePart): (number, {Vector3})
 	local currentItems = 0
 	local existingPositions = {}
+
 	for _, child in ipairs(mineZonePart:GetChildren()) do
 		if child.Name == "SpawnedItem" and child:IsA("Model") then
 			currentItems += 1
@@ -746,16 +776,42 @@ function ItemManager.SpawnInMine(mineZonePart: BasePart)
 		end
 	end
 
-	local targetItemCount = getTargetItemCountForMine(mineZonePart)
-	local itemsToSpawn = targetItemCount - currentItems
-	if itemsToSpawn <= 0 then return end
+	return currentItems, existingPositions
+end
 
-	local tier = mineZonePart.Name 
+function ItemManager.SpawnInMine(mineZonePart: BasePart, options: {[string]: any}?)
+	if not mineZonePart or not mineZonePart.Parent then
+		return 0
+	end
+
+	local currentItems, existingPositions = countMineItems(mineZonePart)
+	local targetItemCount = getTargetItemCountForMine(mineZonePart)
+	local remainingCapacity = math.max(0, targetItemCount - currentItems)
+	local explicitCount = if type(options) == "table" and type(options.RequestedCount) == "number"
+		then math.max(0, math.floor(options.RequestedCount))
+		else nil
+	local itemsToSpawn = if explicitCount ~= nil
+		then math.min(explicitCount, remainingCapacity)
+		else remainingCapacity
+
+	if itemsToSpawn <= 0 then
+		return 0
+	end
+
+	local minDepthRatio = if type(options) == "table" and type(options.MinDepthRatio) == "number"
+		then math.clamp(options.MinDepthRatio, 0, 1)
+		else 0
+	local maxDepthRatio = if type(options) == "table" and type(options.MaxDepthRatio) == "number"
+		then math.clamp(options.MaxDepthRatio, minDepthRatio, 1)
+		else 1
+	local tier = mineZonePart.Name
 	local rarity = getRarityFromTier(tier)
 	local spawnedThisPass = 0
 
 	local spawnCFrames = MineSpawnUtils.BuildSpawnCFrames(mineZonePart, itemsToSpawn, existingPositions, {
 		MinSpacing = MIN_ITEM_SPACING,
+		MinDepthRatio = minDepthRatio,
+		MaxDepthRatio = maxDepthRatio,
 	})
 
 	for _, spawnCFrame in ipairs(spawnCFrames) do
@@ -763,7 +819,7 @@ function ItemManager.SpawnInMine(mineZonePart: BasePart)
 		local spawnableItems = getSpawnableItemsByRarity(rarity, mutationName)
 		if #spawnableItems == 0 then
 			warn("[ItemManager] No spawnable items found for rarity:", rarity)
-			return
+			break
 		end
 
 		local randomItemName = spawnableItems[math.random(1, #spawnableItems)]
@@ -789,6 +845,8 @@ function ItemManager.SpawnInMine(mineZonePart: BasePart)
 			task.wait(ITEM_SPAWN_BATCH_YIELD)
 		end
 	end
+
+	return spawnedThisPass
 end
 
 function ItemManager.SpawnWorldItemAtPosition(
@@ -875,7 +933,66 @@ function ItemManager.SpawnDroppedItem(
 	return ItemManager.SpawnWorldItemAtPosition(itemName, mutation, rarity, targetPos, spawnOptions)
 end
 
-local function ensureSpawnWorker()
+local ensureSpawnWorker: () -> ()
+
+local function getZoneOrderRank(zoneName: string): number
+	for index, orderedZoneName in ipairs(STARTUP_ZONE_ORDER) do
+		if orderedZoneName == zoneName then
+			return index
+		end
+	end
+
+	return math.huge
+end
+
+local function getSpawnJobPriority(mode: string): number
+	if mode == "seed" then
+		return 1
+	end
+
+	if mode == "backfill" then
+		return 2
+	end
+
+	return 3
+end
+
+local function insertSpawnJobSorted(spawnJob: MineSpawnJob)
+	local jobPriority = getSpawnJobPriority(spawnJob.Mode)
+	local jobZoneRank = getZoneOrderRank(spawnJob.Zone.Name)
+
+	for index, queuedJob in ipairs(mineSpawnQueue) do
+		local queuedPriority = getSpawnJobPriority(queuedJob.Mode)
+		local queuedZoneRank = getZoneOrderRank(queuedJob.Zone.Name)
+		local shouldInsertFirst = jobPriority < queuedPriority
+			or (jobPriority == queuedPriority and jobZoneRank < queuedZoneRank)
+			or (jobPriority == queuedPriority and jobZoneRank == queuedZoneRank and spawnJob.Key < queuedJob.Key)
+
+		if shouldInsertFirst then
+			table.insert(mineSpawnQueue, index, spawnJob)
+			return
+		end
+	end
+
+	table.insert(mineSpawnQueue, spawnJob)
+end
+
+local function queueSpawnJob(spawnJob: MineSpawnJob): boolean
+	if not spawnJob.Zone or not spawnJob.Zone.Parent then
+		return false
+	end
+
+	if queuedSpawnJobKeys[spawnJob.Key] then
+		return false
+	end
+
+	queuedSpawnJobKeys[spawnJob.Key] = true
+	insertSpawnJobSorted(spawnJob)
+	ensureSpawnWorker()
+	return true
+end
+
+function ensureSpawnWorker()
 	if spawnWorkerRunning or Workspace:GetAttribute("TerrainResetInProgress") == true then
 		return
 	end
@@ -884,39 +1001,197 @@ local function ensureSpawnWorker()
 
 	task.spawn(function()
 		while #mineSpawnQueue > 0 do
-			local mineZonePart = table.remove(mineSpawnQueue, 1)
-			if mineZonePart and mineZonePart.Parent and mineZonePart:IsA("BasePart") then
-				queuedMineZones[mineZonePart] = nil
-				ItemManager.SpawnInMine(mineZonePart)
+			local spawnJob = table.remove(mineSpawnQueue, 1)
+			if spawnJob then
+				queuedSpawnJobKeys[spawnJob.Key] = nil
+			end
+
+			if spawnJob and spawnJob.Zone and spawnJob.Zone.Parent and spawnJob.Zone:IsA("BasePart") then
+				local spawnedCount = 0
+				if TerrainGeneratorManager.IsZoneReady(spawnJob.Zone.Name) then
+					spawnedCount = ItemManager.SpawnInMine(spawnJob.Zone, {
+						RequestedCount = spawnJob.RequestedCount,
+						MinDepthRatio = spawnJob.MinDepthRatio,
+						MaxDepthRatio = spawnJob.MaxDepthRatio,
+					})
+				end
+
+				if spawnJob.OnCompleted then
+					spawnJob.OnCompleted(spawnJob.Zone, spawnedCount)
+				end
 			end
 
 			task.wait()
 		end
 
 		spawnWorkerRunning = false
+
+		if #mineSpawnQueue > 0 and Workspace:GetAttribute("TerrainResetInProgress") ~= true then
+			ensureSpawnWorker()
+		end
 	end)
 end
 
-local function queueMineSpawn(mineZonePart: BasePart?)
-	if not mineZonePart or not mineZonePart.Parent then
-		return
+local function getOrderedMineZoneParts(): {BasePart}
+	local orderedParts = {}
+	local seenNames: {[string]: boolean} = {}
+
+	for _, zoneName in ipairs(STARTUP_ZONE_ORDER) do
+		local zonePart = MinesFolder:FindFirstChild(zoneName)
+		if zonePart and zonePart:IsA("BasePart") then
+			seenNames[zoneName] = true
+			table.insert(orderedParts, zonePart)
+		end
 	end
 
-	if queuedMineZones[mineZonePart] then
-		return
+	local extraParts = {}
+	for _, child in ipairs(MinesFolder:GetChildren()) do
+		if child:IsA("BasePart") and not seenNames[child.Name] then
+			table.insert(extraParts, child)
+		end
 	end
 
-	queuedMineZones[mineZonePart] = true
-	table.insert(mineSpawnQueue, mineZonePart)
-	ensureSpawnWorker()
+	table.sort(extraParts, function(left, right)
+		return left.Name < right.Name
+	end)
+
+	for _, child in ipairs(extraParts) do
+		table.insert(orderedParts, child)
+	end
+
+	return orderedParts
+end
+
+local function queueZoneReconcile(mineZonePart: BasePart, keySuffix: string?, onCompleted: ((BasePart, number) -> ())?): boolean
+	local key = string.format("reconcile:%s:%s", mineZonePart.Name, keySuffix or "default")
+	return queueSpawnJob({
+		Key = key,
+		Zone = mineZonePart,
+		Mode = "reconcile",
+		OnCompleted = onCompleted,
+	})
 end
 
 local function queueAllMineSpawns()
-	for _, spawner in ipairs(MinesFolder:GetChildren()) do
-		if spawner:IsA("BasePart") then
-			queueMineSpawn(spawner)
+	for _, mineZonePart in ipairs(getOrderedMineZoneParts()) do
+		if TerrainGeneratorManager.IsZoneReady(mineZonePart.Name) then
+			queueZoneReconcile(mineZonePart, "round", nil)
 		end
 	end
+end
+
+local function maybeFinalizeStartup()
+	if startupFinalized or not startupAllZonesReadyQueued then
+		return
+	end
+
+	if startupFinalReconcileJobsRemaining > 0 then
+		return
+	end
+
+	startupFinalized = true
+end
+
+local function maybeQueueStartupFinalReconcile()
+	if startupFinalized or startupAllZonesReadyQueued then
+		return
+	end
+
+	local orderedZoneParts = getOrderedMineZoneParts()
+	if #orderedZoneParts == 0 then
+		startupFinalized = true
+		return
+	end
+
+	for _, mineZonePart in ipairs(orderedZoneParts) do
+		if not TerrainGeneratorManager.IsZoneReady(mineZonePart.Name) then
+			return
+		end
+	end
+
+	startupAllZonesReadyQueued = true
+
+	for _, mineZonePart in ipairs(orderedZoneParts) do
+		local queued = queueZoneReconcile(mineZonePart, "startup-final", function()
+			startupFinalReconcileJobsRemaining = math.max(0, startupFinalReconcileJobsRemaining - 1)
+			maybeFinalizeStartup()
+		end)
+
+		if queued then
+			startupFinalReconcileJobsRemaining += 1
+		end
+	end
+
+	maybeFinalizeStartup()
+end
+
+local function queueStartupBackfill(mineZonePart: BasePart)
+	local targetItemCount = getTargetItemCountForMine(mineZonePart)
+	local requestedCount = math.max(STARTUP_BACKFILL_MINIMUM, math.ceil(targetItemCount * STARTUP_BACKFILL_CHUNK_RATIO))
+
+	for bandIndex, band in ipairs(STARTUP_DEPTH_BANDS) do
+		local minDepthRatio = math.clamp(tonumber((band :: any).MinDepthRatio) or 0, 0, 1)
+		local maxDepthRatio = math.clamp(tonumber((band :: any).MaxDepthRatio) or 1, minDepthRatio, 1)
+		queueSpawnJob({
+			Key = string.format("backfill:%s:%d", mineZonePart.Name, bandIndex),
+			Zone = mineZonePart,
+			Mode = "backfill",
+			RequestedCount = requestedCount,
+			MinDepthRatio = minDepthRatio,
+			MaxDepthRatio = maxDepthRatio,
+		})
+	end
+end
+
+local function handleStartupSeedCompleted(mineZonePart: BasePart)
+	startupSeededZones[mineZonePart.Name] = true
+	queueStartupBackfill(mineZonePart)
+
+	local playableZoneName = STARTUP_ZONE_ORDER[1]
+	if mineZonePart.Name == playableZoneName then
+		Workspace:SetAttribute("MineStartupProgress", 1)
+		Workspace:SetAttribute("MineStartupPlayable", true)
+	end
+
+	maybeQueueStartupFinalReconcile()
+end
+
+local function queueStartupSeed(mineZonePart: BasePart)
+	if startupSeededZones[mineZonePart.Name] then
+		return
+	end
+
+	if not TerrainGeneratorManager.IsZoneReady(mineZonePart.Name) then
+		return
+	end
+
+	local targetItemCount = getTargetItemCountForMine(mineZonePart)
+	local requestedCount = math.min(
+		targetItemCount,
+		math.max(STARTUP_INITIAL_SEED_MINIMUM, math.ceil(targetItemCount * STARTUP_INITIAL_SEED_RATIO))
+	)
+
+	queueSpawnJob({
+		Key = string.format("seed:%s", mineZonePart.Name),
+		Zone = mineZonePart,
+		Mode = "seed",
+		RequestedCount = requestedCount,
+		MinDepthRatio = 0,
+		MaxDepthRatio = 0.35,
+		OnCompleted = function(zonePart)
+			handleStartupSeedCompleted(zonePart)
+		end,
+	})
+end
+
+local function bootstrapReadyZones()
+	for _, mineZonePart in ipairs(getOrderedMineZoneParts()) do
+		if TerrainGeneratorManager.IsZoneReady(mineZonePart.Name) then
+			queueStartupSeed(mineZonePart)
+		end
+	end
+
+	maybeQueueStartupFinalReconcile()
 end
 
 local function flushPendingRoundRefill()
@@ -933,6 +1208,11 @@ local function flushPendingRoundRefill()
 	end
 
 	pendingRoundRefill = false
+	if not startupFinalized then
+		bootstrapReadyZones()
+		return
+	end
+
 	queueAllMineSpawns()
 end
 
@@ -946,7 +1226,7 @@ function ItemManager.RespawnItem(mineZonePart: BasePart)
 			return
 		end
 
-		queueMineSpawn(mineZonePart)
+		queueZoneReconcile(mineZonePart, "respawn", nil)
 	end)
 end
 
@@ -954,25 +1234,6 @@ function ItemManager.SpawnAllItems()
 	queueAllMineSpawns()
 end
 
-FinishTime.Event:Connect(function()
-	clearSessionWorldItems()
-end)
-
-RoundStarted.Event:Connect(function()
-	if not RunService:IsRunning() then
-		return
-	end
-
-	pendingRoundRefill = true
-	flushPendingRoundRefill()
-end)
-
-Workspace:GetAttributeChangedSignal("TerrainResetInProgress"):Connect(function()
-	if Workspace:GetAttribute("TerrainResetInProgress") == false then
-		ensureSpawnWorker()
-		flushPendingRoundRefill()
-	end
-end)
 
 -- =========================================================================
 -- ## GOLD EVENT GLOBAL LOOP ##
@@ -1012,17 +1273,53 @@ end)
 -- =========================================================================
 -- ## INITIAL ROUND FILL ##
 -- =========================================================================
-task.defer(function()
-	if not RunService:IsRunning() then
+function ItemManager:Start()
+	if started then
 		return
 	end
+
+	started = true
+	validateRebirthRequirementTemplates()
+
+	FinishTime.Event:Connect(function()
+		clearSessionWorldItems()
+	end)
+
+	RoundStarted.Event:Connect(function()
+		if not RunService:IsRunning() then
+			return
+		end
+
+		pendingRoundRefill = true
+		flushPendingRoundRefill()
+	end)
+
+	Workspace:GetAttributeChangedSignal("TerrainResetInProgress"):Connect(function()
+		if Workspace:GetAttribute("TerrainResetInProgress") == false then
+			ensureSpawnWorker()
+			flushPendingRoundRefill()
+		end
+	end)
+
+	TerrainGeneratorManager.ZoneReadyChanged:Connect(function(zoneName: string)
+		local zonePart = MinesFolder:FindFirstChild(zoneName)
+		if zonePart and zonePart:IsA("BasePart") then
+			queueStartupSeed(zonePart)
+		end
+
+		maybeQueueStartupFinalReconcile()
+	end)
+
+	task.spawn(function()
+		local _events = ReplicatedStorage:WaitForChild("Events")
+	end)
+
+	bootstrapReadyZones()
 
 	if type(Workspace:GetAttribute("SessionRoundId")) == "number" and Workspace:GetAttribute("SessionEnded") ~= true then
 		pendingRoundRefill = true
 		flushPendingRoundRefill()
 	end
-end)
-
-validateRebirthRequirementTemplates()
+end
 
 return ItemManager

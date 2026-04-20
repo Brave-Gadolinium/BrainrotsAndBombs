@@ -10,8 +10,7 @@ local playerGui = player:WaitForChild("PlayerGui")
 
 local FADE_IN_INFO = TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 local FADE_OUT_INFO = TweenInfo.new(0.22, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
-local MIN_VISIBLE_TIME = 5
-local HARD_TIMEOUT = 8
+local MIN_VISIBLE_TIME = 2
 local READINESS_POLL_INTERVAL = 0.05
 
 local function playTween(target: Instance, tweenInfo: TweenInfo, goal: {[string]: any}): Tween
@@ -48,12 +47,63 @@ local function isCharacterReady(): boolean
 	return humanoid ~= nil and root ~= nil
 end
 
+local function getStartupProgress(): number
+	return math.clamp(tonumber(Workspace:GetAttribute("MineStartupProgress")) or 0, 0, 1)
+end
+
+local function findSlider(root: Instance): GuiObject?
+	local slider = root:FindFirstChild("Slider", true)
+	if slider and slider:IsA("GuiObject") then
+		return slider
+	end
+
+	return nil
+end
+
+local function findSliderFill(slider: GuiObject?): GuiObject?
+	if not slider then
+		return nil
+	end
+
+	for _, candidateName in ipairs({ "Fill", "Progress", "Bar" }) do
+		local candidate = slider:FindFirstChild(candidateName, true)
+		if candidate and candidate:IsA("GuiObject") then
+			return candidate
+		end
+	end
+
+	for _, child in ipairs(slider:GetChildren()) do
+		if child:IsA("GuiObject") then
+			return child
+		end
+	end
+
+	return nil
+end
+
+local function setSliderProgress(fill: GuiObject?, progress: number)
+	if not fill then
+		return
+	end
+
+	local currentSize = fill.Size
+	fill.Size = UDim2.new(progress, 0, currentSize.Y.Scale, currentSize.Y.Offset)
+end
+
 local function isClientReady(): boolean
 	if Workspace:GetAttribute("ServerSystemsReady") ~= true then
 		return false
 	end
 
+	if Workspace:GetAttribute("MineStartupPlayable") ~= true then
+		return false
+	end
+
 	if Workspace:GetAttribute("TerrainResetInProgress") == true then
+		return false
+	end
+
+	if player:GetAttribute("ProfileReady") ~= true then
 		return false
 	end
 
@@ -74,14 +124,17 @@ local function playLoadingScreen()
 	local loadingScreen = getLoadingScreen()
 	local background = loadingScreen:WaitForChild("Background") :: GuiObject
 	local canvasGroup = loadingScreen:WaitForChild("Frame") :: CanvasGroup
-	local slider = loadingScreen:FindFirstChild("Slider")
+	local slider = findSlider(loadingScreen)
+	local sliderFill = findSliderFill(slider)
 
 	canvasGroup.GroupTransparency = 1
 	background.Visible = true
 	canvasGroup.Visible = true
-	if slider and slider:IsA("GuiObject") then
-		slider.Visible = false
+	if slider then
+		slider.Visible = true
 	end
+
+	setSliderProgress(sliderFill, getStartupProgress())
 
 	local fadeInTween = playTween(canvasGroup, FADE_IN_INFO, {
 		GroupTransparency = 0,
@@ -91,16 +144,16 @@ local function playLoadingScreen()
 
 	while true do
 		local elapsed = os.clock() - startedAt
-		if isClientReady() and elapsed >= MIN_VISIBLE_TIME then
-			break
-		end
+		setSliderProgress(sliderFill, getStartupProgress())
 
-		if elapsed >= HARD_TIMEOUT then
+		if isClientReady() and elapsed >= MIN_VISIBLE_TIME then
 			break
 		end
 
 		task.wait(READINESS_POLL_INTERVAL)
 	end
+
+	setSliderProgress(sliderFill, 1)
 
 	local fadeOutTween = playTween(canvasGroup, FADE_OUT_INFO, {
 		GroupTransparency = 1,

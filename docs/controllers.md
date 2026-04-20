@@ -252,7 +252,7 @@ Features:
 - Uses `ReplicatedStorage.Modules.PlaytimeRewardConfiguration` as the canonical reward-card source instead of depending on the first status payload
 - Wraps `GetStatus` / `ClaimReward` remote calls in defensive retries and refreshes status again whenever the frame opens
 - Resolves reward-card descendants defensively and falls back to a code-built reward card plus local layout/canvas sync when the runtime `Template` hierarchy is incomplete or missing
-- Defers reward-grid canvas writes and skips duplicate `CanvasSize` assignments so `AbsoluteContentSize` updates cannot recurse into a client UI lockup
+- Coalesces reward-grid canvas writes onto `Heartbeat` and skips duplicate `CanvasSize` assignments so `AbsoluteContentSize` layout bursts cannot recurse into a `task.defer` client UI lockup
 - Preserves reward availability when server-side reward grant fails by waiting for the authoritative status update instead of mutating the local card list
 
 Controller: JoinLikeStandController

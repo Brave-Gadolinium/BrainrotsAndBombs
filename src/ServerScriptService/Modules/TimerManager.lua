@@ -85,9 +85,22 @@ local function teleportPlayerToBase(player: Player)
 	end
 end
 
+local function waitForMineStartupPlayable()
+	while Workspace:GetAttribute("MineStartupPlayable") ~= true do
+		task.wait(0.1)
+	end
+end
+
 function TimerManager:Start()
 	task.spawn(function()
+		local isFirstRound = true
+
 		while true do
+			if isFirstRound then
+				waitForMineStartupPlayable()
+				isFirstRound = false
+			end
+
 			currentRoundId += 1
 			local remaining = Constants.SESSION_DURATION
 			local startedAt = Workspace:GetServerTimeNow()

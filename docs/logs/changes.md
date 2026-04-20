@@ -78,4 +78,9 @@
 - Deferred playtime reward grid canvas sync and skipped duplicate canvas writes to stop `AbsoluteContentSize` re-entrancy in `PlaytimeRewardUIController`
 - Added a code-built `PlaytimeRewards` fallback card template so the reward list still renders when `RewardsGrid.Template` is missing or invalid at runtime
 - Delayed FTUE mine-exit step advancement until the carried brainrot is converted into a real tool and refreshed tutorial step `5` immediately on brainrot inventory/carry changes
+- Preserved live FTUE step `4`/`5` brainrot tools during the first profile inventory hydrate so mine-exit brainrots no longer disappear a few seconds later
 - Increased the startup loading screen minimum visible time from `0.35` seconds to `5` seconds
+- Added staged mine startup with `Zone1 -> Zone5` terrain bootstrap, per-zone readiness, and startup blocker plates for unready deeper layers
+- Switched mine brainrot startup spawning to seed upper layers first, then backfill depth bands and reconcile to full caps after startup
+- Delayed the first round and loading-screen exit until `MineStartupPlayable`, and deferred candy/event spawns plus bomb actions away from unready mine zones
+- Replaced `PlaytimeRewardUIController` reward-grid `task.defer` canvas scheduling with a heartbeat-coalesced flush to stop maximum re-entrancy depth errors

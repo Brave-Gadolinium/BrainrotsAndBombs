@@ -6,7 +6,10 @@ Location:
 - `src/ServerScriptService/Controllers/PlayerController.lua`
 
 Responsibility:
-- Profile lifecycle, public player attributes, entitlement sync, inventory loading, session timestamps, and persisted candy balances
+- Profile lifecycle, public player attributes, entitlement sync, inventory loading, session timestamps, persisted candy balances, and FTUE-safe first inventory hydration
+
+Main Features:
+- Preserves live FTUE step `4`/`5` brainrot tools by merging them into saved inventory before the first character inventory hydrate clears `Backpack`
 
 Dependencies:
 - `ProfileStore`
@@ -106,7 +109,7 @@ Responsibility:
 - Run the hourly candy event, spawn touch-collectible candies in mine zones, keep candy wheel remotes in sync, and grant wheel rewards
 
 Main Features:
-- Spawns live mine candies only during the active hourly window and clears them again on round/event end
+- Spawns live mine candies only during the active hourly window, fills only terrain-ready zones during startup, and clears them again on round/event end
 - Awards `CandyCount` immediately on touch pickup and fires the shared `ShowCandyPopUp` UI event for `+1` feedback
 - Applies a `90` degree yaw to spawned candy models and tags them with the existing `Rotate` world-animation flow for hover/rotation feedback
 - Keeps candy-wheel reward fulfillment authoritative on the server after the client spin animation delay
@@ -126,7 +129,12 @@ Location:
 - `src/ServerScriptService/Modules/TerrainGeneratorManager.lua`
 
 Responsibility:
-- Normalize the mine terrain baseline on server start, snapshot voxel chunks, and restore only dirty terrain chunks when a round ends
+- Bootstrap the mine in staged top-down zone slices, expose startup readiness/progress, snapshot voxel chunks, and restore only dirty terrain chunks when a round ends
+
+Main Features:
+- Builds `Workspace.Mines` in deterministic `Zone1 -> Zone5` order, marks each zone ready independently, and keeps invisible blockers above unready deeper zones during startup
+- Exposes `Workspace.MineStartupProgress` and `Workspace.MineStartupPlayable` so the first round and loading screen wait only for the playable startup slice instead of the full mine
+- Keeps `TerrainResetInProgress` reserved for round-end/full-rebuild restores while startup terrain generation runs in the background without blocking the whole game
 
 Dependencies:
 - `Workspace.Terrain`

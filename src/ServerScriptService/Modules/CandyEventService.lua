@@ -14,6 +14,7 @@ local UpgradesConfigurations = require(ReplicatedStorage.Modules.UpgradesConfigu
 
 local BadgeManager = require(ServerScriptService.Modules.BadgeManager)
 local MineSpawnUtils = require(ServerScriptService.Modules.MineSpawnUtils)
+local TerrainGeneratorManager = require(ServerScriptService.Modules.TerrainGeneratorManager)
 
 type CandyReward = CandyEventConfiguration.CandyReward
 type CandyEventState = CandyEventConfiguration.CandyEventState
@@ -38,6 +39,7 @@ local roundStartedEvent: BindableEvent
 local currentState: CandyEventState
 local pendingRoundSpawn = false
 local spawnedCandies: {Model} = {}
+local spawnedCandyZones: {[string]: boolean} = {}
 local spinRequestsInFlight: {[number]: boolean} = {}
 local started = false
 local cachedCandyTemplate: Model? = nil
@@ -247,6 +249,7 @@ local function clearAllCandies()
 		end
 	end
 	table.clear(spawnedCandies)
+	table.clear(spawnedCandyZones)
 
 	for _, mineZonePart in ipairs(MinesFolder:GetChildren()) do
 		if mineZonePart:IsA("BasePart") then
@@ -438,38 +441,70 @@ local function attachCandyTouch(model: Model)
 	end)
 end
 
-local function spawnCandiesForRound()
-	clearAllCandies()
-
+local function spawnCandiesForZone(mineZonePart: BasePart)
 	if not currentState.isActive or not hasLiveRound() then
 		return
 	end
 
+	if spawnedCandyZones[mineZonePart.Name] then
+		return
+	end
+
+	if not TerrainGeneratorManager.IsZoneReady(mineZonePart.Name) then
+		return
+	end
+
+	local zoneCandyCount = math.max(0, math.floor(tonumber(CandyEventConfiguration.ZoneCandyCounts[mineZonePart.Name]) or 0))
+	if zoneCandyCount <= 0 then
+		spawnedCandyZones[mineZonePart.Name] = true
+		return
+	end
+
+	local spawnCFrames = MineSpawnUtils.BuildSpawnCFrames(mineZonePart, zoneCandyCount, nil, {
+		MinSpacing = Constants.MIN_ITEM_SPACING,
+	})
+
+	for _, spawnCFrame in ipairs(spawnCFrames) do
+		local candyModel = buildCandyModel()
+		if candyModel then
+			local visualBottomOffset = tonumber(candyModel:GetAttribute("VisualBottomOffset")) or 0
+			local yawDegrees = tonumber(CandyEventConfiguration.WorldVisualYawDegrees) or 90
+			local spawnPivot = (spawnCFrame + Vector3.new(0, visualBottomOffset, 0))
+				* CFrame.Angles(0, math.rad(yawDegrees), 0)
+			candyModel:PivotTo(spawnPivot)
+			candyModel.Parent = mineZonePart
+			CollectionService:AddTag(candyModel, ROTATE_TAG)
+			table.insert(spawnedCandies, candyModel)
+			attachCandyTouch(candyModel)
+		end
+	end
+
+	spawnedCandyZones[mineZonePart.Name] = true
+end
+
+local function spawnPendingCandyZones()
+	local waitingForReadyZone = false
+
 	for _, mineZonePart in ipairs(MinesFolder:GetChildren()) do
 		if mineZonePart:IsA("BasePart") then
 			local zoneCandyCount = math.max(0, math.floor(tonumber(CandyEventConfiguration.ZoneCandyCounts[mineZonePart.Name]) or 0))
-			if zoneCandyCount > 0 then
-				local spawnCFrames = MineSpawnUtils.BuildSpawnCFrames(mineZonePart, zoneCandyCount, nil, {
-					MinSpacing = Constants.MIN_ITEM_SPACING,
-				})
-
-				for _, spawnCFrame in ipairs(spawnCFrames) do
-					local candyModel = buildCandyModel()
-					if candyModel then
-						local visualBottomOffset = tonumber(candyModel:GetAttribute("VisualBottomOffset")) or 0
-						local yawDegrees = tonumber(CandyEventConfiguration.WorldVisualYawDegrees) or 90
-						local spawnPivot = (spawnCFrame + Vector3.new(0, visualBottomOffset, 0))
-							* CFrame.Angles(0, math.rad(yawDegrees), 0)
-						candyModel:PivotTo(spawnPivot)
-						candyModel.Parent = mineZonePart
-						CollectionService:AddTag(candyModel, ROTATE_TAG)
-						table.insert(spawnedCandies, candyModel)
-						attachCandyTouch(candyModel)
-					end
+			if zoneCandyCount > 0 and not spawnedCandyZones[mineZonePart.Name] then
+				if TerrainGeneratorManager.IsZoneReady(mineZonePart.Name) then
+					spawnCandiesForZone(mineZonePart)
+				else
+					waitingForReadyZone = true
 				end
 			end
 		end
 	end
+
+	return waitingForReadyZone == false
+end
+
+local function beginRoundCandySpawn()
+	clearAllCandies()
+	pendingRoundSpawn = true
+	spawnPendingCandyZones()
 end
 
 local function flushPendingRoundSpawn()
@@ -485,13 +520,14 @@ local function flushPendingRoundSpawn()
 		return
 	end
 
-	pendingRoundSpawn = false
-	spawnCandiesForRound()
+	if spawnPendingCandyZones() then
+		pendingRoundSpawn = false
+	end
 end
 
 local function handleRoundStarted()
 	if currentState.isActive then
-		pendingRoundSpawn = true
+		beginRoundCandySpawn()
 		flushPendingRoundSpawn()
 	end
 end
@@ -509,7 +545,7 @@ local function refreshState(forcePush: boolean?)
 
 	if didChange then
 		if currentState.isActive and not wasActive then
-			pendingRoundSpawn = true
+			beginRoundCandySpawn()
 			flushPendingRoundSpawn()
 		elseif not currentState.isActive and wasActive then
 			pendingRoundSpawn = false
@@ -643,6 +679,10 @@ function CandyEventService:Init(controllers)
 		end
 	end)
 
+	TerrainGeneratorManager.ZoneReadyChanged:Connect(function()
+		flushPendingRoundSpawn()
+	end)
+
 	Players.PlayerRemoving:Connect(function(player)
 		spinRequestsInFlight[player.UserId] = nil
 	end)
@@ -659,7 +699,7 @@ function CandyEventService:Start()
 	currentState = getPublicState()
 
 	if currentState.isActive then
-		pendingRoundSpawn = true
+		beginRoundCandySpawn()
 		flushPendingRoundSpawn()
 	end
 

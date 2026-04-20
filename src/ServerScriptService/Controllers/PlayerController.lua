@@ -14,6 +14,7 @@ local ProfileStoreModule = require(ServerScriptService.Modules.ProfileStore)
 local ItemConfigurations = require(ReplicatedStorage.Modules.ItemConfigurations)
 local ProductConfigurations = require(ReplicatedStorage.Modules.ProductConfigurations)
 local LimitedTimeOfferConfiguration = require(ReplicatedStorage.Modules.LimitedTimeOfferConfiguration)
+local ProfileReadyUtils = require(ReplicatedStorage.Modules.ProfileReadyUtils)
 local UpgradesConfiguration = require(ReplicatedStorage.Modules.UpgradesConfigurations)
 local SlotUnlockConfigurations = require(ReplicatedStorage.Modules.SlotUnlockConfigurations)
 local BombsConfigurations = require(ReplicatedStorage.Modules.BombsConfigurations)
@@ -682,6 +683,128 @@ local function toolToData(tool: Tool): ItemData?
 	return nil
 end
 
+local function getInventoryItemKey(itemData: ItemData): string
+	return `{itemData.Name}::{itemData.Mutation}::{itemData.Rarity}::{itemData.Level}`
+end
+
+local function isFtueBrainrotTool(tool: Tool): boolean
+	if tool:GetAttribute("IsTemporary") == true then
+		return false
+	end
+
+	local mutation = tool:GetAttribute("Mutation")
+	if type(mutation) ~= "string" or mutation == "" then
+		return false
+	end
+
+	local originalName = tool:GetAttribute("OriginalName")
+	if type(originalName) ~= "string" or originalName == "" then
+		return false
+	end
+
+	return BombsConfigurations.Bombs[tool.Name] == nil and BombsConfigurations.Bombs[originalName] == nil
+end
+
+local function shouldPreserveFtueBrainrotsBeforeHydrate(player: Player, profile: any): boolean
+	if ProfileReadyUtils.IsReady(player) then
+		return false
+	end
+
+	local onboardingStep = tonumber(player:GetAttribute("OnboardingStep"))
+	if onboardingStep == nil and profile and profile.Data then
+		onboardingStep = tonumber(profile.Data.OnboardingStep)
+	end
+
+	return onboardingStep == 4 or onboardingStep == 5
+end
+
+local function collectFtueBrainrotInventoryFromContainer(container: Instance?): {ItemData}
+	local inventoryEntries = {}
+
+	if not container then
+		return inventoryEntries
+	end
+
+	for _, child in ipairs(container:GetChildren()) do
+		if child:IsA("Tool") and isFtueBrainrotTool(child) then
+			local data = toolToData(child)
+			if data then
+				table.insert(inventoryEntries, data)
+			end
+		end
+	end
+
+	return inventoryEntries
+end
+
+local function collectLiveFtueBrainrotInventory(player: Player): {ItemData}
+	local inventoryEntries = collectFtueBrainrotInventoryFromContainer(player.Character)
+
+	for _, itemData in ipairs(collectFtueBrainrotInventoryFromContainer(player:FindFirstChild("Backpack"))) do
+		table.insert(inventoryEntries, itemData)
+	end
+
+	return inventoryEntries
+end
+
+local function buildInventoryItemCounts(entries: {ItemData}): {[string]: number}
+	local counts: {[string]: number} = {}
+	for _, itemData in ipairs(entries) do
+		local key = getInventoryItemKey(itemData)
+		counts[key] = (counts[key] or 0) + 1
+	end
+
+	return counts
+end
+
+local function consumeInventoryItemCount(counts: {[string]: number}?, itemData: ItemData): boolean
+	if not counts then
+		return false
+	end
+
+	local key = getInventoryItemKey(itemData)
+	local availableCount = counts[key] or 0
+	if availableCount <= 0 then
+		return false
+	end
+
+	counts[key] = availableCount - 1
+	return true
+end
+
+local function preserveLiveFtueBrainrotsBeforeHydrate(player: Player, profile: any)
+	if not shouldPreserveFtueBrainrotsBeforeHydrate(player, profile) then
+		return
+	end
+
+	if type(profile.Data.Inventory) ~= "table" then
+		profile.Data.Inventory = {}
+	end
+	if type(profile.Data.DiscoveredItems) ~= "table" then
+		profile.Data.DiscoveredItems = {}
+	end
+
+	local liveEntries = collectLiveFtueBrainrotInventory(player)
+	if #liveEntries == 0 then
+		return
+	end
+
+	local availableSavedCounts = buildInventoryItemCounts(profile.Data.Inventory)
+
+	for _, itemData in ipairs(liveEntries) do
+		if not consumeInventoryItemCount(availableSavedCounts, itemData) then
+			table.insert(profile.Data.Inventory, {
+				Name = itemData.Name,
+				Mutation = itemData.Mutation,
+				Rarity = itemData.Rarity,
+				Level = itemData.Level,
+			})
+		end
+
+		profile.Data.DiscoveredItems[itemData.Mutation .. "_" .. itemData.Name] = true
+	end
+end
+
 local function syncInventoryData(player: Player)
 	local profile = profiles[player]
 	if not profile then return end
@@ -726,6 +849,13 @@ local function loadInventory(player: Player, profile: any)
 
 	loadingInventory[player] = true
 	deadPlayers[player] = false
+	local preservedCharacterItemCounts: {[string]: number}? = nil
+	if shouldPreserveFtueBrainrotsBeforeHydrate(player, profile) then
+		preservedCharacterItemCounts = buildInventoryItemCounts(
+			collectFtueBrainrotInventoryFromContainer(player.Character)
+		)
+	end
+	preserveLiveFtueBrainrotsBeforeHydrate(player, profile)
 
 	local backpack = player:FindFirstChild("Backpack")
 	if backpack then backpack:ClearAllChildren() end
@@ -735,14 +865,19 @@ local function loadInventory(player: Player, profile: any)
 
 	local savedInv = profile.Data.Inventory or {}
 	for _, itemData in ipairs(savedInv) do
-		ItemManager.GiveItemToPlayer(player, itemData.Name, itemData.Mutation, itemData.Rarity, itemData.Level)
 		local key = itemData.Mutation .. "_" .. itemData.Name
+		if not consumeInventoryItemCount(preservedCharacterItemCounts, itemData) then
+			ItemManager.GiveItemToPlayer(player, itemData.Name, itemData.Mutation, itemData.Rarity, itemData.Level)
+		end
 		if not profile.Data.DiscoveredItems[key] then profile.Data.DiscoveredItems[key] = true end
 	end
 
 	task.wait() 
 	loadingInventory[player] = false
 	syncInventoryData(player)
+	if player.Parent and not ProfileReadyUtils.IsReady(player) then
+		player:SetAttribute(ProfileReadyUtils.AttributeName, true)
+	end
 
 	local Events = ReplicatedStorage:FindFirstChild("Events")
 	local refresh = Events and Events:FindFirstChild("RefreshIndex")
@@ -833,6 +968,7 @@ local function onPlayerAdded(player: Player)
 
 	deadPlayers[player] = false
 	loadingInventory[player] = false
+	player:SetAttribute(ProfileReadyUtils.AttributeName, false)
 
 	local profile = GameProfileStore:StartSessionAsync(tostring(player.UserId), {
 		Cancel = function() return player.Parent ~= Players end

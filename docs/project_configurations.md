@@ -129,6 +129,27 @@ Used by:
 - `CandyEventController`
 - `CandySpinController`
 
+Config: Constants startup mine bootstrap
+
+Location:
+- `src/ReplicatedStorage/Modules/Constants.lua`
+
+Purpose:
+- Tunes staged mine startup so terrain and brainrot spawning reach a playable `Zone1` quickly and backfill deeper zones in the background
+
+Parameters:
+- `MINE_STARTUP_ZONE_ORDER = Zone1 -> Zone5`
+- `TERRAIN_STARTUP_SLICE_HEIGHT = 24`
+- `MINE_STARTUP_INITIAL_SEED_RATIO = 0.15`
+- `MINE_STARTUP_INITIAL_SEED_MINIMUM = 12`
+- `MINE_STARTUP_BACKFILL_CHUNK_RATIO = 0.05`
+- `MINE_STARTUP_DEPTH_BANDS = 0.00..0.35, 0.35..0.65, 0.65..1.00`
+
+Used by:
+- `TerrainGeneratorManager`
+- `ItemManager`
+- `MineSpawnUtils`
+
 Config: PlaytimeRewardConfiguration
 
 Location:

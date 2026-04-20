@@ -9,6 +9,7 @@ local BrainrotEventConfiguration = require(ReplicatedStorage.Modules.BrainrotEve
 local Constants = require(ReplicatedStorage.Modules.Constants)
 local ItemConfigurations = require(ReplicatedStorage.Modules.ItemConfigurations)
 local ItemManager = require(ServerScriptService.Modules.ItemManager)
+local TerrainGeneratorManager = require(ServerScriptService.Modules.TerrainGeneratorManager)
 
 type EventDefinition = BrainrotEventConfiguration.EventDefinition
 
@@ -38,6 +39,8 @@ local lastEventTypeId: string? = nil
 local currentRoundId: number? = nil
 local scheduleNonce = 0
 local started = false
+local pendingEventDefinition: EventDefinition? = nil
+local pendingEventRoundId: number? = nil
 
 local function ensureTimerFolder(): Folder
 	local remotesFolder = ReplicatedStorage:FindFirstChild("Remotes")
@@ -216,6 +219,10 @@ local function spawnConfiguredEvent(definition: EventDefinition, roundId: number
 		return false, "Spawn zone not found."
 	end
 
+	if not TerrainGeneratorManager.IsZoneReady(zonePart.Name) then
+		return false, "Spawn zone is not ready yet."
+	end
+
 	local possibleItems = ItemConfigurations.GetItemsByRarity(definition.Rarity)
 	if #possibleItems == 0 then
 		return false, "No items configured for event rarity."
@@ -264,6 +271,41 @@ local function spawnConfiguredEvent(definition: EventDefinition, roundId: number
 	return true, nil
 end
 
+local function trySpawnPendingEvent()
+	local definition = pendingEventDefinition
+	if not definition then
+		return
+	end
+
+	if pendingEventRoundId ~= currentRoundId then
+		pendingEventDefinition = nil
+		pendingEventRoundId = nil
+		return
+	end
+
+	if activeEventState then
+		return
+	end
+
+	local zonePart = getSpawnZonePart()
+	if not zonePart or not TerrainGeneratorManager.IsZoneReady(zonePart.Name) then
+		return
+	end
+
+	local success, errorMessage = spawnConfiguredEvent(definition, pendingEventRoundId)
+	if not success then
+		if errorMessage and errorMessage ~= "Spawn zone is not ready yet." then
+			warn("[RoundBrainrotEventManager]", errorMessage)
+			pendingEventDefinition = nil
+			pendingEventRoundId = nil
+		end
+		return
+	end
+
+	pendingEventDefinition = nil
+	pendingEventRoundId = nil
+end
+
 local function scheduleRoundEvent(roundId: number, roundDuration: number)
 	scheduleNonce += 1
 	local currentNonce = scheduleNonce
@@ -290,9 +332,17 @@ local function scheduleRoundEvent(roundId: number, roundDuration: number)
 		end
 
 		local success, errorMessage = spawnConfiguredEvent(definition, roundId)
-		if not success and errorMessage then
+		if success then
+			return
+		end
+
+		pendingEventDefinition = definition
+		pendingEventRoundId = roundId
+		if errorMessage and errorMessage ~= "Spawn zone is not ready yet." then
 			warn("[RoundBrainrotEventManager]", errorMessage)
 		end
+
+		trySpawnPendingEvent()
 	end)
 end
 
@@ -302,12 +352,16 @@ local function handleRoundStarted(roundId: number, _startedAt: number?, roundDur
 	end
 
 	currentRoundId = roundId
+	pendingEventDefinition = nil
+	pendingEventRoundId = nil
 	clearActiveEventState(true)
 	scheduleRoundEvent(roundId, roundDuration or Constants.SESSION_DURATION)
 end
 
 local function handleRoundFinished()
 	currentRoundId = nil
+	pendingEventDefinition = nil
+	pendingEventRoundId = nil
 	scheduleNonce += 1
 	clearActiveEventState(true)
 end
@@ -392,6 +446,17 @@ function RoundBrainrotEventManager:ForceStartEvent(eventTypeId: string?): (boole
 	clearActiveEventState(true)
 
 	local success, errorMessage = spawnConfiguredEvent(definition, currentRoundId)
+	if success then
+		return true, `Started {definition.Id} event.`
+	end
+
+	pendingEventDefinition = definition
+	pendingEventRoundId = currentRoundId
+	trySpawnPendingEvent()
+	if errorMessage == "Spawn zone is not ready yet." then
+		return true, `Queued {definition.Id} event until {BrainrotEventConfiguration.SpawnZoneName} is ready.`
+	end
+
 	if not success then
 		return false, errorMessage or "Failed to start event."
 	end
@@ -416,6 +481,9 @@ function RoundBrainrotEventManager:Start()
 
 	roundStartedEvent.Event:Connect(handleRoundStarted)
 	finishEvent.Event:Connect(handleRoundFinished)
+	TerrainGeneratorManager.ZoneReadyChanged:Connect(function()
+		trySpawnPendingEvent()
+	end)
 
 	clearWorkspaceActiveState()
 
@@ -424,6 +492,8 @@ function RoundBrainrotEventManager:Start()
 	if liveRoundId and not sessionEnded then
 		handleRoundStarted(liveRoundId, tonumber(Workspace:GetAttribute("SessionRoundStartedAt")), Constants.SESSION_DURATION)
 	end
+
+	trySpawnPendingEvent()
 end
 
 return RoundBrainrotEventManager

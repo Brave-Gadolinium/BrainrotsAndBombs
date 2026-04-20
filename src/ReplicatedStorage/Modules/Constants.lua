@@ -8,6 +8,22 @@ local Constants = {
 	SESSION_END_MESSAGE_DURATION = 2,
 	SESSION_WARNING_THRESHOLD = 10,
 	MIN_ITEM_SPACING = 4.5,
+	MINE_STARTUP_ZONE_ORDER = {
+		"Zone1",
+		"Zone2",
+		"Zone3",
+		"Zone4",
+		"Zone5",
+	},
+	TERRAIN_STARTUP_SLICE_HEIGHT = 24,
+	MINE_STARTUP_INITIAL_SEED_RATIO = 0.15,
+	MINE_STARTUP_INITIAL_SEED_MINIMUM = 12,
+	MINE_STARTUP_BACKFILL_CHUNK_RATIO = 0.05,
+	MINE_STARTUP_DEPTH_BANDS = {
+		{ MinDepthRatio = 0.00, MaxDepthRatio = 0.35 },
+		{ MinDepthRatio = 0.35, MaxDepthRatio = 0.65 },
+		{ MinDepthRatio = 0.65, MaxDepthRatio = 1.00 },
+	},
 	ZONE_ITEM_CAPS = {
 		["Zone1"] = 300,
 		["Zone2"] = 250,

@@ -4,6 +4,7 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local MarketplaceService = game:GetService("MarketplaceService")
+local RunService = game:GetService("RunService")
 
 local NotificationManager = require(ReplicatedStorage.Modules.NotificationManager)
 local NumberFormatter = require(ReplicatedStorage.Modules.NumberFormatter)
@@ -45,6 +46,7 @@ local rewardTemplate: ImageButton? = nil
 local rewardsGridLayout: UIGridLayout | UIListLayout? = nil
 local loggedMissingRewardCardView = false
 local isRewardsGridCanvasUpdateQueued = false
+local isRewardsGridCanvasDirty = false
 local lastRewardsGridCanvasSize: UDim2? = nil
 local hasWarnedAboutMissingRewardTemplate = false
 
@@ -307,16 +309,22 @@ local function applyRewardsGridCanvas()
 end
 
 local function updateRewardsGridCanvas()
+	isRewardsGridCanvasDirty = true
 	if isRewardsGridCanvasUpdateQueued then
 		return
 	end
 
 	isRewardsGridCanvasUpdateQueued = true
 
-	-- Defer canvas writes so layout-driven size changes cannot re-enter the same callback chain.
-	task.defer(function()
+	-- Coalesce layout bursts into at most one canvas write per frame.
+	task.spawn(function()
+		while isRewardsGridCanvasDirty do
+			RunService.Heartbeat:Wait()
+			isRewardsGridCanvasDirty = false
+			applyRewardsGridCanvas()
+		end
+
 		isRewardsGridCanvasUpdateQueued = false
-		applyRewardsGridCanvas()
 	end)
 end
 

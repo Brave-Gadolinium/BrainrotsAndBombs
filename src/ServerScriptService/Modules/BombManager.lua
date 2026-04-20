@@ -47,6 +47,7 @@ local BOMB_TERRAIN_MONITOR_MIN_TRAVEL = 0.05
 local BOMB_TERRAIN_DOWNWARD_PROBE_PADDING = 0.35
 local BOMB_REPAIR_ATTEMPT_COOLDOWN = 0.75
 local NUKE_BLAST_RADIUS_MULTIPLIER = 2
+local notifyPlayer: (player: Player, message: string) -> ()
 
 local function isFiniteNumber(value: number): boolean
 	return value == value and value > -math.huge and value < math.huge
@@ -153,6 +154,14 @@ end
 local function isBombUseBlocked(): boolean
 	return Workspace:GetAttribute("SessionEnded") == true
 		or Workspace:GetAttribute("TerrainResetInProgress") == true
+end
+
+local function isMinePositionReady(position: Vector3): boolean
+	return TerrainGeneratorManager.IsPositionReady(position)
+end
+
+local function notifyMineLayerLoading(player: Player)
+	notifyPlayer(player, "This mine layer is still loading")
 end
 
 local function getTriggerUIEffectEvent(): RemoteEvent?
@@ -587,6 +596,13 @@ local function explodeBomb(player: Player, bombPart: BasePart, hitPosition: Vect
 
 	disconnectTerrainMonitor(state)
 	disconnectTouchMonitor(state)
+
+	if not isMinePositionReady(hitPosition) then
+		activeBombs[bombPart] = nil
+		bombInstance:Destroy()
+		notifyMineLayerLoading(player)
+		return
+	end
 
 	local terrainRadius = BombsConfigurations.GetBlastRadius(bombData, material)
 	local impactDepthLevel = DepthLevelUtils.GetDepthLevelAtPosition(hitPosition)
@@ -1078,6 +1094,13 @@ local function tryThrowBomb(player: Player, cameraLookVector: Vector3?, options:
 		return false
 	end
 
+	if not isMinePositionReady(root.Position) then
+		if not silent then
+			notifyMineLayerLoading(player)
+		end
+		return false
+	end
+
 	local bombTool, bombData, bombName = resolveAvailableBomb(player)
 	if not bombTool or not bombData then
 		tryRepairMissingBomb(player)
@@ -1126,6 +1149,10 @@ local function triggerNukeBlast(player: Player): boolean
 
 	local zonePart = getBombZonePart(root.Position)
 	if not zonePart then
+		return false
+	end
+
+	if not isMinePositionReady(root.Position) then
 		return false
 	end
 
