@@ -35,6 +35,7 @@ local EVENT_DESCRIPTORS: {RemoteDescriptor} = {
 	{Name = "UpdateUpgradesUI", ClassName = "RemoteEvent"},
 	{Name = "RequestSlotUpgrade", ClassName = "RemoteEvent"},
 	{Name = "ShowCashPopUp", ClassName = "RemoteEvent"},
+	{Name = "ShowCandyPopUp", ClassName = "RemoteEvent"},
 	{Name = "RequestJetpackState", ClassName = "RemoteEvent"},
 	{Name = "RequestPickaxeAction", ClassName = "RemoteEvent"},
 	{Name = "GetPickaxeData", ClassName = "RemoteFunction"},

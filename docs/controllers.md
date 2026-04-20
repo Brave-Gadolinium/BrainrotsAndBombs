@@ -54,6 +54,20 @@ Features:
 - Renders reward slots from `CandyEventConfiguration` and keeps the main button text synced with `CandyCount` and `CandyPaidSpinCount`
 - Prompts `CandySpinsX3` / `CandySpinsX9` purchases and uses `ReplicatedStorage.Remotes.CandyEvent.Spin` for server-authoritative results
 
+Controller: PopUpController
+
+Location:
+- `src/StarterPlayer/StarterPlayerScripts/PopUpController.client.lua`
+
+Responsibility:
+- Render the shared floating pickup feedback UI for both money rewards and candy pickups
+
+Features:
+- Listens to `ReplicatedStorage.Events.ShowCashPopUp` and `ShowCandyPopUp` instead of maintaining separate popup systems
+- Reuses the same tweened floating feedback pipeline while formatting cash as `+$amount` and candy as `+1`
+- Falls back to a code-built popup template when the replicated `Templates.PopUp` asset is missing
+- Draws a candy icon locally and plays the configured pickup sound `rbxassetid://136650469995272` for candy feedback
+
 Controller: HUDModeController
 
 Location:

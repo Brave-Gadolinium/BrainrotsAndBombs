@@ -11,7 +11,7 @@ Core flow:
 - The same timer surface can show `START EVENT` and `END EVENT` buttons for testers/admins by reusing existing `ManualTestController` actions instead of a separate debug remote
 - If a mine round is currently live and `TerrainResetInProgress` is false, the service spawns candies across `Workspace.Mines` using the same positioning helper as `ItemManager`
 - Candies do not use carry, backpack, or inventory pickup flow; they are collected instantly through server-side `Touched`
-- Each collected candy immediately increments `PlayerController` saved `CandyCount`
+- Each collected candy immediately increments `PlayerController` saved `CandyCount`, fires `ReplicatedStorage.Events.ShowCandyPopUp`, shows a `+1` popup with a candy icon, and plays the local pickup sound
 - At round end or event end, all live candies are cleared without refill or compensation
 - `GUI.Frames.CandyWheel` opens only from the `Workspace.CandyWheel` world entry and spins through `ReplicatedStorage.Remotes.CandyEvent.Spin`
 - A spin consumes `20` candies first, otherwise falls back to one `CandyPaidSpinCount` if available

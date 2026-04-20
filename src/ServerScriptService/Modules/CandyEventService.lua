@@ -84,10 +84,27 @@ local function getNotificationRemote(): RemoteEvent?
 	return nil
 end
 
+local function getCandyPopUpRemote(): RemoteEvent?
+	local eventsFolder = ReplicatedStorage:FindFirstChild("Events")
+	local remote = eventsFolder and eventsFolder:FindFirstChild("ShowCandyPopUp")
+	if remote and remote:IsA("RemoteEvent") then
+		return remote
+	end
+
+	return nil
+end
+
 local function showNotification(player: Player, message: string, messageType: string)
 	local remote = getNotificationRemote()
 	if remote then
 		remote:FireClient(player, message, messageType)
+	end
+end
+
+local function showCandyPickupPopUp(player: Player, amount: number)
+	local remote = getCandyPopUpRemote()
+	if remote then
+		remote:FireClient(player, math.max(1, math.floor(tonumber(amount) or 1)))
 	end
 end
 
@@ -414,6 +431,7 @@ local function attachCandyTouch(model: Model)
 
 		touchLocked = true
 		PlayerController:AddCandies(player, 1)
+		showCandyPickupPopUp(player, 1)
 		removeSpawnedCandy(model)
 	end)
 end

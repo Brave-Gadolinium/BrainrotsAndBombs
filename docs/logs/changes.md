@@ -72,3 +72,4 @@
 - Blocked duplicate in-flight Robux price lookups in the upgrades UI while the frame is reopening
 - Removed the hard dependency on `ReplicatedStorage.Templates.UpgradeTemplate` by adding a safe fallback upgrade-card template and stripping cloned GUI scripts
 - Disabled manual brainrot dropping from both carried mine stacks and equipped/backpack brainrot tools
+- Added candy pickup `+1` popup feedback with a candy icon and local pickup sound through the shared `PopUpController`

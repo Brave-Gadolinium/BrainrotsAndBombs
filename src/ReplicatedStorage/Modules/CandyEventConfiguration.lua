@@ -78,6 +78,8 @@ CandyEventConfiguration.ProductKeys = {
 	SpinsX9 = "CandySpinsX9",
 }
 
+CandyEventConfiguration.PickupPopUpSoundId = "rbxassetid://136650469995272"
+
 CandyEventConfiguration.Text = {
 	CountdownPrefix = "CANDY EVENT IN",
 	ActivePrefix = "CANDY EVENT LIVE",
