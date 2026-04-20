@@ -137,6 +137,11 @@ Location:
 Responsibility:
 - Own FTUE/post-tutorial progression, reconcile onboarding steps with the live player state, and sync tutorial attributes/events
 
+Main Features:
+- Repairs invalid FTUE rejoin states, including returning step `4`/`5` players to brainrot pickup when the carried or inventory item is gone
+- Computes `PostTutorialStage` from live player state after FTUE completion using the `Speed1` purchase and first base-slot upgrade thresholds
+- Fires the post-tutorial character/base completion prompts only from the matching purchase events, not from passive recomputation
+
 Dependencies:
 - `PlayerController`
 - `TutorialConfiguration`
@@ -144,3 +149,16 @@ Dependencies:
 - `SlotUnlockConfigurations`
 - `UpgradesConfigurations`
 - `AnalyticsFunnelsService`
+
+Service: CarrySystem
+
+Location:
+- `src/ServerScriptService/Modules/CarrySystem.lua`
+
+Responsibility:
+- Own mine carry stacks, convert carried brainrots into backpack tools on zone exit, and reserve forced drop paths for system-driven cases only
+
+Main Features:
+- Tracks carried brainrot visuals and capacity while players are inside mine zones
+- Converts carried brainrots into tool inventory on zone exit and now treats manual player drop requests as disabled
+- Keeps internal forced-drop methods for gameplay systems such as bomb failures, event recovery, and other authoritative server flows

@@ -33,6 +33,7 @@ local carryingData: {[Player]: {any}} = {}
 local playersInZone: {[Player]: boolean} = {}
 local lastLimitNotif: {[Player]: number} = {}
 local lastBombRepairAttempt: {[Player]: number} = {}
+local ALLOW_MANUAL_CARRY_DROP = false
 
 -- [ CONFIG ]
 local CHECK_INTERVAL = 0.2 
@@ -483,7 +484,7 @@ function CarrySystem:Init()
 	end
 
 	dropEvent.OnServerEvent:Connect(function(player)
-		if playersInZone[player] then
+		if ALLOW_MANUAL_CARRY_DROP and playersInZone[player] then
 			CarrySystem.DropItemsAtFeet(player)
 		end
 	end)

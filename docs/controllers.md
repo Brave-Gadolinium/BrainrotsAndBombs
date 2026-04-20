@@ -66,6 +66,18 @@ Features:
 - Shows mine-only HUD elements such as progress/back/auto-bomb while hiding base-only icons
 - Re-syncs HUD mode on zone transitions and when tutorial completion removes the FTUE mask
 
+Controller: DropController
+
+Location:
+- `src/StarterPlayer/StarterPlayerScripts/DropController.client.lua`
+
+Responsibility:
+- Mirror the server-side carry-drop policy onto the HUD so players cannot manually throw carried brainrots out of their hands
+
+Features:
+- Tracks whether the local character is carrying a `StackItem`
+- Keeps the existing `RequestDropItem` wiring dormant by forcing the HUD `Drop` button hidden and inactive while manual carry drop is disabled
+
 Controller: UIInitializer
 
 Location:
@@ -114,10 +126,26 @@ Features:
 - Applies per-step UI presentation rules from `TutorialConfiguration`
 - Points players to world targets with beams/highlights and opens guided upgrade flows
 - Keeps the step `4` back-button pointer while also aiming a world beam at the player's base after the first brainrot pickup
+- Forces Satchel/backpack visibility on step `5` when the player only has the tutorial brainrot in `Backpack`, so the surface-pickup shortcut can still place the item
+- Debounces tutorial-driven `Upgrades` auto-open requests so step `10` cannot enqueue repeated frame-open attempts while the FTUE mask is retrying
 - Uses prebuilt `TutorialCursor` descendants inside the active target button or proxy, toggles them visible only for the active FTUE step, and restores their original hidden state afterwards
 - Resets tutorial completion state by closing all non-notification frames and forcing the camera back to the default FOV on the final tutorial step
 - Invalidates cached masking only when top-level HUD/frame children change during tutorial so dynamic UI still restores correctly without mask spam inside animated frames
-- Re-applies FTUE masking when guided targets arrive late so money HUD, purchase buttons, and the base-upgrade surface button do not remain hidden after step transitions
+- Re-applies FTUE masking when guided targets arrive late so money HUD, purchase buttons, the step `5` hybrid inventory case, and the base-upgrade surface button do not remain hidden after step transitions
+
+Controller: UpgradesUIController
+
+Location:
+- `src/StarterPlayer/StarterPlayerScripts/UpgradesUIController.client.lua`
+
+Responsibility:
+- Render the upgrades store, request authoritative upgrade-state refreshes, and keep the FTUE `Upgrades` frame stable when tutorial auto-open is active
+
+Features:
+- Builds visible upgrade entries from `UpgradesConfigurations` and refreshes price/stat labels from `UpdateUpgradesUI`
+- Debounces `Visible`-driven refreshes so repeated frame-open noise does not spam analytics or `UpdateUpgradesUI` requests
+- Prevents duplicate in-flight `MarketplaceService:GetProductInfo` calls for the same Robux upgrade while the frame is reopening
+- Falls back to a code-built upgrade-card template and strips embedded scripts from cloned cards when the replicated `UpgradeTemplate` asset is missing or unsafe
 
 Controller: ExitRewardPromptController
 

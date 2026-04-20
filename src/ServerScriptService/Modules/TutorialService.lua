@@ -45,14 +45,20 @@ local function getUpgradeConfig(upgradeId: string)
 	return nil
 end
 
-local function getCurrentMoney(player: Player, profile: any): number
-	local leaderstats = player:FindFirstChild("leaderstats")
+local function getCurrentMoney(player: Player?, profile: any): number
+	local leaderstats = if player then player:FindFirstChild("leaderstats") else nil
 	local moneyValue = leaderstats and leaderstats:FindFirstChild("Money")
 	if moneyValue and moneyValue:IsA("NumberValue") then
 		return moneyValue.Value
 	end
 
 	return tonumber(profile.Data.Money) or 0
+end
+
+local function getStoredPostTutorialStage(profile: any): number
+	return PostTutorialConfiguration.ClampStage(
+		tonumber(profile.Data.PostTutorialStage) or PostTutorialConfiguration.Stages.WaitingForCharacterMoney
+	)
 end
 
 local function getProfile(player: Player)
@@ -127,12 +133,10 @@ end
 local function getCurrentPostTutorialStage(player: Player): number
 	local profile = getProfile(player)
 	if not profile or not profile.Data then
-		return PostTutorialConfiguration.Stages.Completed
+		return PostTutorialConfiguration.Stages.WaitingForCharacterMoney
 	end
 
-	return PostTutorialConfiguration.ClampStage(
-		tonumber(profile.Data.PostTutorialStage) or PostTutorialConfiguration.Stages.Completed
-	)
+	return getStoredPostTutorialStage(profile)
 end
 
 local function syncPostTutorialStageAttribute(player: Player, stage: number)
@@ -306,6 +310,35 @@ local function isMainTutorialCompleted(profile: any): boolean
 	return (tonumber(profile.Data.OnboardingStep) or 1) >= TutorialConfiguration.FinalStep
 end
 
+local function resolvePostTutorialStage(player: Player?, profile: any): number
+	if not profile or not profile.Data then
+		return PostTutorialConfiguration.Stages.WaitingForCharacterMoney
+	end
+
+	if not isMainTutorialCompleted(profile) then
+		return getStoredPostTutorialStage(profile)
+	end
+
+	local currentMoney = getCurrentMoney(player, profile)
+	if not hasSpecificCharacterUpgrade(profile, TutorialConfiguration.TutorialCharacterUpgradeId) then
+		if currentMoney >= PostTutorialConfiguration.CharacterUpgradeMoneyThreshold then
+			return PostTutorialConfiguration.Stages.PromptCharacterUpgrade
+		end
+
+		return PostTutorialConfiguration.Stages.WaitingForCharacterMoney
+	end
+
+	if not hasBaseSlotUpgrade(profile) then
+		if currentMoney >= PostTutorialConfiguration.BaseUpgradeMoneyThreshold then
+			return PostTutorialConfiguration.Stages.PromptBaseUpgrade
+		end
+
+		return PostTutorialConfiguration.Stages.WaitingForBaseMoney
+	end
+
+	return PostTutorialConfiguration.Stages.Completed
+end
+
 local function getStepAfterBrainrotPickup(pickedUpInMine: boolean): number
 	if pickedUpInMine then
 		return 4
@@ -376,7 +409,7 @@ local function migrateTutorialProgress(profile: any)
 		if hasBaseSlotUpgrade(profile) then
 			consumeTutorialBaseUpgrade(profile)
 		end
-		profile.Data.PostTutorialStage = PostTutorialConfiguration.Stages.Completed
+		profile.Data.PostTutorialStage = getStoredPostTutorialStage(profile)
 		return
 	end
 
@@ -397,7 +430,7 @@ local function migrateTutorialProgress(profile: any)
 		consumeTutorialBaseUpgrade(profile)
 	end
 
-	profile.Data.PostTutorialStage = PostTutorialConfiguration.Stages.Completed
+	profile.Data.PostTutorialStage = getStoredPostTutorialStage(profile)
 	profile.Data.TutorialVersion = CURRENT_TUTORIAL_VERSION
 end
 
@@ -407,6 +440,11 @@ local function reconcileStepWithCurrentState(player: Player, profile: any): numb
 	-- If the player left during step 4, the carried brainrot is gone on next join,
 	-- so we must return them to step 3 to pick one up again.
 	if currentStep == 4 and not hasBrainrotInHandOrInventory(player) then
+		setCurrentStep(player, profile, 3)
+		return 3
+	end
+
+	if currentStep == 5 and not hasPlacedBrainrot(player) and not hasBrainrotInHandOrInventory(player) then
 		setCurrentStep(player, profile, 3)
 		return 3
 	end
@@ -457,11 +495,17 @@ function TutorialService:SyncPlayer(player: Player)
 	local profile = getProfile(player)
 	if not profile or not profile.Data then
 		local step = getCurrentStep(player)
+		local storedStage = tonumber(player:GetAttribute("PostTutorialStage"))
 		syncStepAttribute(player, step)
 		markStepActivated(player)
 		invalidateScheduledStepOneEvaluation(player)
 		invalidateScheduledStepTwelveAutoAdvance(player)
-		syncPostTutorialStageAttribute(player, PostTutorialConfiguration.Stages.Completed)
+		syncPostTutorialStageAttribute(
+			player,
+			PostTutorialConfiguration.ClampStage(
+				storedStage or PostTutorialConfiguration.Stages.WaitingForCharacterMoney
+			)
+		)
 		AnalyticsFunnelsService:SyncTutorial(player, step)
 		return step
 	end
@@ -473,7 +517,7 @@ function TutorialService:SyncPlayer(player: Player)
 	markStepActivated(player)
 	invalidateScheduledStepOneEvaluation(player)
 	invalidateScheduledStepTwelveAutoAdvance(player)
-	syncPostTutorialStageAttribute(player, PostTutorialConfiguration.Stages.Completed)
+	setCurrentPostTutorialStage(player, profile, resolvePostTutorialStage(player, profile))
 	AnalyticsFunnelsService:SyncTutorial(player, step)
 
 	if step == 12 then
@@ -507,7 +551,7 @@ function TutorialService:EvaluatePostTutorial(player: Player)
 		return
 	end
 
-	setCurrentPostTutorialStage(player, profile, PostTutorialConfiguration.Stages.Completed)
+	setCurrentPostTutorialStage(player, profile, resolvePostTutorialStage(player, profile))
 end
 
 function TutorialService:EvaluateCurrentStep(player: Player)
@@ -650,14 +694,25 @@ function TutorialService:HandlePostTutorialCharacterUpgradePurchased(player: Pla
 	end
 
 	ensureTutorialFlags(profile)
+	local isTutorialCharacterUpgrade = type(_upgradeId) == "string"
+		and _upgradeId == TutorialConfiguration.TutorialCharacterUpgradeId
+	local storedPostTutorialStage = getStoredPostTutorialStage(profile)
+	local shouldFirePostTutorialCompletion = isTutorialCharacterUpgrade
+		and isMainTutorialCompleted(profile)
+		and storedPostTutorialStage >= PostTutorialConfiguration.Stages.WaitingForCharacterMoney
+		and storedPostTutorialStage <= PostTutorialConfiguration.Stages.PromptCharacterUpgrade
 
-	if type(_upgradeId) == "string" and _upgradeId == TutorialConfiguration.TutorialCharacterUpgradeId then
+	if isTutorialCharacterUpgrade then
 		consumeTutorialCharacterUpgrade(profile)
 	end
 
-	if getCurrentStep(player) == 10 and type(_upgradeId) == "string" and _upgradeId == TutorialConfiguration.TutorialCharacterUpgradeId then
+	if getCurrentStep(player) == 10 and isTutorialCharacterUpgrade then
 		self:AdvanceToStep(player, 11)
 		return
+	end
+
+	if shouldFirePostTutorialCompletion then
+		firePostTutorialCompletion(player, PostTutorialConfiguration.CompletionTexts.CharacterUpgrade)
 	end
 
 	self:EvaluatePostTutorial(player)
@@ -671,12 +726,20 @@ function TutorialService:HandlePostTutorialBaseUpgradePurchased(player: Player)
 	end
 
 	ensureTutorialFlags(profile)
+	local storedPostTutorialStage = getStoredPostTutorialStage(profile)
+	local shouldFirePostTutorialCompletion = isMainTutorialCompleted(profile)
+		and storedPostTutorialStage >= PostTutorialConfiguration.Stages.WaitingForBaseMoney
+		and storedPostTutorialStage <= PostTutorialConfiguration.Stages.PromptBaseUpgrade
 	consumeTutorialBaseUpgrade(profile)
 
 	if getCurrentStep(player) == 11 then
 		firePostTutorialCompletion(player, PostTutorialConfiguration.CompletionTexts.BaseUpgrade)
 		self:AdvanceToStep(player, 13)
 		return
+	end
+
+	if shouldFirePostTutorialCompletion then
+		firePostTutorialCompletion(player, PostTutorialConfiguration.CompletionTexts.BaseUpgrade)
 	end
 
 	self:EvaluatePostTutorial(player)

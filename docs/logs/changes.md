@@ -64,3 +64,11 @@
 - Moved candy event countdown rendering to `Workspace.TimerWorkspace.SurfaceGui.TitleLabel`
 - Added `START EVENT` and `END EVENT` timer-surface buttons gated by existing manual test access
 - Removed the Robux icon glyph from the bomb-shop Robux purchase button so it shows only the numeric price
+- Restored post-tutorial stage computation so FTUE-complete players now progress through the `Speed1` and first base-upgrade money thresholds instead of staying at `Completed`
+- Fixed the FTUE surface-pickup step `5` path so Satchel/backpack reappears when the tutorial brainrot only exists in `Backpack`
+- Added FTUE recovery for step `5` so players without a carried, equipped, or backpack brainrot are rewound to step `3` instead of getting stuck on slot placement
+- Added a shared frame-open cooldown and queued-open guard so overlapping UI opens cannot spam transitions during FTUE
+- Debounced tutorial step `10` `Upgrades` auto-open and the `UpgradesUIController` visible refresh path to stop repeated update and analytics requests
+- Blocked duplicate in-flight Robux price lookups in the upgrades UI while the frame is reopening
+- Removed the hard dependency on `ReplicatedStorage.Templates.UpgradeTemplate` by adding a safe fallback upgrade-card template and stripping cloned GUI scripts
+- Disabled manual brainrot dropping from both carried mine stacks and equipped/backpack brainrot tools

@@ -19,6 +19,7 @@ local dropButton = hud:WaitForChild("Drop") :: GuiButton
 local characterConnections: {RBXScriptConnection} = {}
 local isInMineZone = false
 local isCarrying = false
+local ALLOW_MANUAL_CARRY_DROP = false
 
 local function disconnectConnections(connections: {RBXScriptConnection})
 	for _, connection in ipairs(connections) do
@@ -28,7 +29,10 @@ local function disconnectConnections(connections: {RBXScriptConnection})
 end
 
 local function updateDropButton()
-	dropButton.Visible = isInMineZone and isCarrying
+	local shouldShow = ALLOW_MANUAL_CARRY_DROP and isInMineZone and isCarrying
+	dropButton.Visible = shouldShow
+	dropButton.Active = shouldShow
+	dropButton.AutoButtonColor = shouldShow
 end
 
 local function refreshCarryingState(character: Model?)

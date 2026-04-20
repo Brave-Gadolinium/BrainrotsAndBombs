@@ -533,6 +533,7 @@ function ItemManager.GiveItemToPlayer(
 
 	local newTool = Instance.new("Tool")
 	newTool.Name = itemName
+	newTool.CanBeDropped = false
 	if itemConf then newTool.TextureId = itemConf.ImageId end
 
 	newTool:SetAttribute("IsTemporary", false)

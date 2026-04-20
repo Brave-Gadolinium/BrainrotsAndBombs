@@ -48,7 +48,7 @@ type ActivePostTutorialCompletion = {
 }
 
 local currentStep = 0
-local currentPostTutorialStage = PostTutorialConfiguration.Stages.Completed
+local currentPostTutorialStage = PostTutorialConfiguration.Stages.WaitingForCharacterMoney
 local activeBeam: Beam? = nil
 local activeAttachment0: Attachment? = nil
 local activeAttachment1: Attachment? = nil
@@ -81,6 +81,9 @@ local maskActive = false
 local maskDirty = false
 local hasAppliedTutorialCompletionCleanup = false
 local DEFAULT_CAMERA_FOV = 70
+local TUTORIAL_FRAME_OPEN_COOLDOWN = 0.75
+local tutorialFrameOpenDebounce: {[string]: number} = {}
+local tutorialFrameOpenPending: {[string]: boolean} = {}
 
 local function debugTutorialLog(message: string)
 	if DEBUG_TUTORIAL then
@@ -428,6 +431,28 @@ local function getCurrentStepPresentation()
 	return TutorialConfiguration.GetStepPresentation(currentStep)
 end
 
+local function requestTutorialFrameOpen(frameName: string, shouldOpen: () -> boolean)
+	if tutorialFrameOpenPending[frameName] then
+		return
+	end
+
+	local lastOpenedAt = tutorialFrameOpenDebounce[frameName] or 0
+	if tick() - lastOpenedAt < TUTORIAL_FRAME_OPEN_COOLDOWN then
+		return
+	end
+
+	tutorialFrameOpenPending[frameName] = true
+	task.defer(function()
+		tutorialFrameOpenPending[frameName] = nil
+		if not shouldOpen() then
+			return
+		end
+
+		tutorialFrameOpenDebounce[frameName] = tick()
+		FrameManager.open(frameName)
+	end)
+end
+
 local function getBackButton(): GuiButton?
 	local backButton = hud:FindFirstChild("Back")
 	if backButton and backButton:IsA("GuiButton") then
@@ -482,6 +507,41 @@ local function findBackpackGui(): ScreenGui?
 	end
 
 	return nil
+end
+
+local function hasTutorialBrainrotTool(container: Instance?): boolean
+	if not container then
+		return false
+	end
+
+	for _, child in ipairs(container:GetChildren()) do
+		if child:IsA("Tool") and child:GetAttribute("Mutation") ~= nil then
+			return true
+		end
+	end
+
+	return false
+end
+
+local function hasEquippedBrainrot(): boolean
+	local character = player.Character
+	if not character then
+		return false
+	end
+
+	if hasTutorialBrainrotTool(character) then
+		return true
+	end
+
+	return character:FindFirstChild("StackItem") ~= nil or character:FindFirstChild("HeadStackItem") ~= nil
+end
+
+local function hasBackpackBrainrot(): boolean
+	return hasTutorialBrainrotTool(player:FindFirstChild("Backpack"))
+end
+
+local function shouldForceStepFiveInventory(): boolean
+	return currentStep == 5 and not hasEquippedBrainrot() and hasBackpackBrainrot()
 end
 
 local function isMaskableEnabledInstance(instance: Instance): boolean
@@ -568,15 +628,16 @@ local function restoreMaskedGuiEnabled(instance: Instance)
 end
 
 local function syncTutorialInventoryState(shouldShowInventory: boolean)
+	local shouldEnableInventory = shouldShowInventory or shouldForceStepFiveInventory()
 	local backpackGui = findBackpackGui()
 	if backpackGui then
 		backpackGui.Enabled = true
 	end
 
 	if Satchel.SetBackpackEnabled then
-		if lastTutorialInventoryVisible ~= shouldShowInventory then
-			lastTutorialInventoryVisible = shouldShowInventory
-			if shouldShowInventory then
+		if lastTutorialInventoryVisible ~= shouldEnableInventory then
+			lastTutorialInventoryVisible = shouldEnableInventory
+			if shouldEnableInventory then
 				Satchel:SetBackpackEnabled(true)
 			else
 				Satchel:SetBackpackEnabled(false)
@@ -893,6 +954,9 @@ end
 local function findCharacterUpgradeButton(): GuiButton?
 	local scrollingFrame = upgradesFrame:FindFirstChild("Scrolling")
 	if not scrollingFrame then
+		scrollingFrame = upgradesFrame:FindFirstChildWhichIsA("ScrollingFrame", true)
+	end
+	if not scrollingFrame then
 		return nil
 	end
 
@@ -1073,11 +1137,9 @@ local function syncTutorialFrames(presentation)
 	end
 
 	if presentation.ShowUpgradesFrame and not upgradesFrame.Visible then
-		task.defer(function()
+		requestTutorialFrameOpen("Upgrades", function()
 			local currentPresentation = getCurrentStepPresentation()
-			if currentStep == 10 and currentPresentation.ShowUpgradesFrame and not upgradesFrame.Visible then
-				FrameManager.open("Upgrades")
-			end
+			return currentStep == 10 and currentPresentation.ShowUpgradesFrame and not upgradesFrame.Visible
 		end)
 	end
 end
@@ -1102,6 +1164,7 @@ local function applyTutorialUiMask(presentation)
 		tostring(presentation.ShowMobileBombButton),
 		tostring(presentation.ShowJumpButton),
 		tostring(presentation.ShowBackButton),
+		tostring(shouldForceStepFiveInventory()),
 		tostring(presentation.BackProxyScale),
 		tostring(presentation.UseBlackout),
 	}, "|")
@@ -1301,21 +1364,6 @@ local function refreshTutorialGuiOverlay()
 	end
 
 	syncTutorialGuiLayout(targetButton)
-end
-
-local function hasEquippedBrainrot(): boolean
-	local character = player.Character
-	if not character then
-		return false
-	end
-
-	for _, child in ipairs(character:GetChildren()) do
-		if child:IsA("Tool") and child:GetAttribute("Mutation") ~= nil then
-			return true
-		end
-	end
-
-	return character:FindFirstChild("StackItem") ~= nil or character:FindFirstChild("HeadStackItem") ~= nil
 end
 
 local function findTutorialMiningZonePart(): BasePart?
@@ -1853,7 +1901,7 @@ local function refreshCurrentStep()
 	if type(savedPostTutorialStage) == "number" then
 		currentPostTutorialStage = PostTutorialConfiguration.ClampStage(savedPostTutorialStage)
 	else
-		currentPostTutorialStage = PostTutorialConfiguration.Stages.Completed
+		currentPostTutorialStage = PostTutorialConfiguration.Stages.WaitingForCharacterMoney
 	end
 
 	applyStepPresentation()

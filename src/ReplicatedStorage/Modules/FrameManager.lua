@@ -18,6 +18,7 @@ local BLUR_TWEEN_INFO: TweenInfo = TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enu
 local BLUR_EFFECT_NAME = "FrameManagerBlur"
 local BLUR_VISIBLE_SIZE = 18
 local NON_BLOCKING_ATTRIBUTE = "IgnoreFrameManagerBlocking"
+local FRAME_OPEN_COOLDOWN = 0.5
 
 local currentlyOpenFrame: GuiObject? = nil
 local framePositions: {[GuiObject]: UDim2} = {}
@@ -25,6 +26,10 @@ local trackedFrames: {[GuiObject]: {RBXScriptConnection}} = {}
 local stateChangedEvent = Instance.new("BindableEvent")
 local lastAnyFrameOpen = false
 local lastFrameName: string? = nil
+local lastFrameOpenAt = 0
+local frameTransitionInProgress = false
+local queuedFrameOpenName: string? = nil
+local queuedFrameOpenToken = 0
 
 FrameManager.Changed = stateChangedEvent.Event
 
@@ -91,6 +96,31 @@ local function syncFrameState()
 	end
 end
 
+local function clearQueuedFrameOpen()
+	queuedFrameOpenName = nil
+	queuedFrameOpenToken += 1
+end
+
+local function queueFrameOpen(frameName: string)
+	queuedFrameOpenName = frameName
+	queuedFrameOpenToken += 1
+	local token = queuedFrameOpenToken
+	local cooldownRemaining = math.max(0, FRAME_OPEN_COOLDOWN - (tick() - lastFrameOpenAt))
+	local delayDuration = math.max(cooldownRemaining, if frameTransitionInProgress then TWEEN_INFO.Time else 0.05)
+
+	task.delay(delayDuration, function()
+		if queuedFrameOpenToken ~= token then
+			return
+		end
+
+		local queuedFrameName = queuedFrameOpenName
+		queuedFrameOpenName = nil
+		if queuedFrameName then
+			FrameManager.open(queuedFrameName)
+		end
+	end)
+end
+
 local function trackFrame(frame: Instance)
 	if not isBlockingFrame(frame) then
 		return
@@ -146,12 +176,14 @@ end)
 
 function FrameManager.closeCurrent()
 	syncFrameState()
+	clearQueuedFrameOpen()
 	if currentlyOpenFrame then
 		FrameManager.close(currentlyOpenFrame.Name)
 	end
 end
 
 function FrameManager.closeAll(immediate: boolean?)
+	clearQueuedFrameOpen()
 	local visibleFrames = {}
 
 	for _, child in ipairs(framesContainer:GetChildren()) do
@@ -186,6 +218,7 @@ end
 
 function FrameManager.close(frameName: string)
 	syncFrameState()
+	clearQueuedFrameOpen()
 	local targetFrame = framesContainer:FindFirstChild(frameName)
 	if not targetFrame or not targetFrame.Visible then return end
 	if not targetFrame:IsA("GuiObject") then return end
@@ -209,10 +242,27 @@ end
 function FrameManager.open(frameName: string)
 	syncFrameState()
 	local targetFrame = framesContainer:FindFirstChild(frameName)
-	if not targetFrame or currentlyOpenFrame == targetFrame then return end
+	if not targetFrame then return end
 	if not targetFrame:IsA("GuiObject") then return end
+	if currentlyOpenFrame == targetFrame and targetFrame.Visible then
+		if queuedFrameOpenName == frameName then
+			clearQueuedFrameOpen()
+		end
+		return
+	end
+
+	if frameTransitionInProgress then
+		queueFrameOpen(frameName)
+		return
+	end
+
+	if tick() - lastFrameOpenAt < FRAME_OPEN_COOLDOWN then
+		queueFrameOpen(frameName)
+		return
+	end
 
 	initializeFrame(targetFrame)
+	frameTransitionInProgress = true
 
 	if currentlyOpenFrame then
 		FrameManager.close(currentlyOpenFrame.Name)
@@ -224,6 +274,8 @@ function FrameManager.open(frameName: string)
 	slideInTween:Play()
 
 	currentlyOpenFrame = targetFrame
+	lastFrameOpenAt = tick()
+	frameTransitionInProgress = false
 	syncFrameState()
 end
 

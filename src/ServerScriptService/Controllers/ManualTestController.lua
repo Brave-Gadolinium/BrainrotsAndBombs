@@ -2024,7 +2024,6 @@ registerAction({
 	handler = function(_executor, target, params)
 		local step = normalizeInteger(params.step, TutorialConfiguration.FinalStep, 1, TutorialConfiguration.FinalStep)
 		if setOnboardingStepDirect(target, step) then
-			setPostTutorialStageDirect(target, PostTutorialConfiguration.Stages.Completed)
 			refreshTargetState(target)
 			return true, `Set onboarding step to {step}.`
 		end
@@ -2043,7 +2042,6 @@ registerAction({
 	inputs = {},
 	handler = function(_executor, target)
 		if setOnboardingStepDirect(target, TutorialConfiguration.FinalStep)
-			and setPostTutorialStageDirect(target, PostTutorialConfiguration.Stages.Completed)
 			and setTutorialFtueState(target, true, true) then
 			refreshTargetState(target)
 			return true, "FTUE marked as completed."
@@ -2065,7 +2063,7 @@ registerAction({
 	inputs = {},
 	handler = function(_executor, target)
 		local success = setOnboardingStepDirect(target, 1)
-			and setPostTutorialStageDirect(target, PostTutorialConfiguration.Stages.Completed)
+			and setPostTutorialStageDirect(target, PostTutorialConfiguration.Stages.WaitingForCharacterMoney)
 			and setTutorialFtueState(target, false, false)
 		if success then
 			refreshTargetState(target)
