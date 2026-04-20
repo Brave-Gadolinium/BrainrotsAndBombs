@@ -54,6 +54,19 @@ Features:
 - Renders reward slots from `CandyEventConfiguration` and keeps the main button text synced with `CandyCount` and `CandyPaidSpinCount`
 - Prompts `CandySpinsX3` / `CandySpinsX9` purchases and uses `ReplicatedStorage.Remotes.CandyEvent.Spin` for server-authoritative results
 
+Controller: Interactions
+
+Location:
+- `src/StarterPlayer/StarterPlayerScripts/Interactions.client.lua`
+
+Responsibility:
+- Animate tagged world objects on the client without adding per-feature duplicate render loops
+
+Features:
+- Applies bobbing and continuous Y-axis rotation to models tagged with `Rotate`
+- Captures each tagged model's initial pivot as the animation baseline so spawned candy keeps its configured `90` degree starting yaw
+- Culls distant models to avoid spending render work on far-away world props
+
 Controller: PopUpController
 
 Location:

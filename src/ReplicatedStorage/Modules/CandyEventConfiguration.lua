@@ -64,6 +64,7 @@ CandyEventConfiguration.TemplateSearchRoots = {
 	"ReplicatedStorage",
 	"Workspace",
 }
+CandyEventConfiguration.WorldVisualYawDegrees = 90
 
 CandyEventConfiguration.ZoneCandyCounts = {
 	Zone1 = 18,

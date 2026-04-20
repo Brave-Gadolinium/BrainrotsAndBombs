@@ -1,6 +1,7 @@
 --!strict
 
 local Players = game:GetService("Players")
+local CollectionService = game:GetService("CollectionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 local Workspace = game:GetService("Workspace")
@@ -21,6 +22,7 @@ local CandyEventService = {}
 
 local MinesFolder = Workspace:WaitForChild("Mines")
 local RandomObject = Random.new()
+local ROTATE_TAG = "Rotate"
 
 local PlayerController
 local ItemManager
@@ -455,8 +457,12 @@ local function spawnCandiesForRound()
 					local candyModel = buildCandyModel()
 					if candyModel then
 						local visualBottomOffset = tonumber(candyModel:GetAttribute("VisualBottomOffset")) or 0
-						candyModel:PivotTo(spawnCFrame + Vector3.new(0, visualBottomOffset, 0))
+						local yawDegrees = tonumber(CandyEventConfiguration.WorldVisualYawDegrees) or 90
+						local spawnPivot = (spawnCFrame + Vector3.new(0, visualBottomOffset, 0))
+							* CFrame.Angles(0, math.rad(yawDegrees), 0)
+						candyModel:PivotTo(spawnPivot)
 						candyModel.Parent = mineZonePart
+						CollectionService:AddTag(candyModel, ROTATE_TAG)
 						table.insert(spawnedCandies, candyModel)
 						attachCandyTouch(candyModel)
 					end

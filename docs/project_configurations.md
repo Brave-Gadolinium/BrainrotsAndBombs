@@ -118,6 +118,7 @@ Parameters:
 - `ActiveDurationSeconds = 600`
 - `SpinCost = 20`
 - `SpinAnimationSeconds = 6`
+- `WorldVisualYawDegrees = 90`
 - `ZoneCandyCounts.Zone1..Zone5`
 - `Rewards[1..6]` with weighted odds for `matteo`, random mythic, random legendary, `+1 Player Speed`, `$50,000`, and `$100,000`
 - `ProductKeys.SpinsX3 = CandySpinsX3`
