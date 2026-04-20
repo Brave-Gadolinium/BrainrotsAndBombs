@@ -659,8 +659,18 @@ function TutorialService:HandleBrainrotPickedUp(player: Player, pickedUpInMine: 
 end
 
 function TutorialService:HandleMineZoneExited(player: Player)
-	if getCurrentStep(player) == 4 then
-		self:AdvanceToStep(player, 5)
+	local currentStep = getCurrentStep(player)
+	local hasBrainrot = hasBrainrotInHandOrInventory(player)
+	debugTutorialLog(player, ("HandleMineZoneExited step=%d hasBrainrot=%s"):format(currentStep, tostring(hasBrainrot)))
+
+	if currentStep == 4 then
+		if hasBrainrot then
+			self:AdvanceToStep(player, 5)
+		else
+			-- If the carry-to-tool conversion failed or the item vanished, immediately
+			-- reconcile the FTUE back to pickup instead of leaving the player on step 5.
+			self:EvaluateCurrentStep(player)
+		end
 	end
 end
 

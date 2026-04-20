@@ -10,10 +10,12 @@ Core flow:
 - Step `4`: leave the mine.
 - Step `5`: place the brainrot on a free slot.
 - If the player reaches step `5` from a surface pickup, the FTUE mask temporarily re-enables Satchel/backpack until that backpack brainrot is equipped or placed.
+- Leaving the mine now advances from step `4` to step `5` only after the carried brainrot has been converted into a real equipped/backpack tool, so walking out manually and using `Back` stay consistent.
 - While `OnboardingStep` is still below `5`, character spawn uses `Workspace.Zones.NewPlayerPart` (with `NewPlayerPart` tag fallback) instead of the plot spawn; reaching step `5` restores the normal base spawn.
 - After the pickup, step `4` keeps the guided `Back` button and also shows a world beam toward the player's base so the return path stays visible.
 - If the player picks up a brainrot before throwing a bomb, FTUE now treats the bomb step as completed; pickups in the mine continue at step `4`, while pickups on the surface skip straight to step `5`.
 - If the player rejoins or respawns on step `5` without a placed brainrot and without any carried or backpack brainrot item, the server rewinds FTUE back to step `3`.
+- Step `5` re-checks `Character` and `Backpack` as soon as the tutorial brainrot changes state, so the placement flow recovers immediately after a manual walk-out conversion.
 - Step `6+`: keep the money HUD visible for the rest of the masked tutorial flow.
 - Step `8`: retry masking until the bomb purchase button is visible.
 - Step `10`: retry masking until the character upgrade button is visible.

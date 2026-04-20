@@ -137,7 +137,7 @@ local function updateSpinButtonText()
 	local paidSpinCount = math.max(0, tonumber(player:GetAttribute("CandyPaidSpinCount")) or 0)
 
 	if candyCount >= CandyEventConfiguration.SpinCost then
-		spinButtonText.Text = CandyEventConfiguration.Text.SpinButton
+		spinButtonText.Text = CandyEventConfiguration.GetSpinButtonText()
 	elseif paidSpinCount > 0 then
 		spinButtonText.Text = CandyEventConfiguration.Text.PaidSpinButton
 	else

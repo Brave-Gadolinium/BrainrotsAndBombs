@@ -1908,6 +1908,33 @@ local function refreshCurrentStep()
 	isRefreshingStep = false
 end
 
+local function isTutorialBrainrotStateInstance(instance: Instance): boolean
+	if instance.Name == "StackItem" or instance.Name == "HeadStackItem" then
+		return true
+	end
+
+	return instance:IsA("Tool") and instance:GetAttribute("Mutation") ~= nil
+end
+
+local function handleTutorialBrainrotStateChanged(instance: Instance)
+	if not isTutorialBrainrotStateInstance(instance) then
+		return
+	end
+
+	if currentStep < 4 or currentStep > 5 then
+		return
+	end
+
+	debugTutorialLog(("BrainrotStateChanged %s (step=%d)"):format(instance.Name, currentStep))
+	invalidateTutorialMask()
+	task.defer(refreshCurrentStep)
+end
+
+local function bindTutorialBrainrotTracking(character: Model)
+	character.ChildAdded:Connect(handleTutorialBrainrotStateChanged)
+	character.ChildRemoved:Connect(handleTutorialBrainrotStateChanged)
+end
+
 local function connectUiReporting()
 	local backButton = hud:FindFirstChild("Back")
 	if backButton and backButton:IsA("GuiButton") and not backButton:GetAttribute("TutorialConnected") then
@@ -1945,6 +1972,14 @@ local function connectUiReporting()
 	end
 end
 
+local playerBackpack = player:WaitForChild("Backpack")
+playerBackpack.ChildAdded:Connect(handleTutorialBrainrotStateChanged)
+playerBackpack.ChildRemoved:Connect(handleTutorialBrainrotStateChanged)
+
+if player.Character then
+	bindTutorialBrainrotTracking(player.Character)
+end
+
 task.spawn(function()
 	while player:GetAttribute("OnboardingStep") == nil do
 		task.wait(0.25)
@@ -1975,7 +2010,8 @@ ShowPostTutorialCompletion.OnClientEvent:Connect(function(message: string, durat
 	task.defer(refreshCurrentStep)
 end)
 
-player.CharacterAdded:Connect(function()
+player.CharacterAdded:Connect(function(character)
+	bindTutorialBrainrotTracking(character)
 	task.wait(0.5)
 	hasAppliedTutorialCompletionCleanup = false
 	restoreTutorialUiMask()

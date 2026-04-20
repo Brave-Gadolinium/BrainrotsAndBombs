@@ -27,6 +27,19 @@ Features:
 - Formats the live money balance with a leading `$`
 - Keeps invite prompt on the existing HUD button
 
+Controller: LoadingScreenController
+
+Location:
+- `src/StarterPlayer/StarterPlayerScripts/LoadingScreenController.client.lua`
+
+Responsibility:
+- Show the startup loading screen and only remove it after the client and server reach the expected ready state
+
+Features:
+- Clones the replicated `LoadingScreen` ScreenGui into `PlayerGui` with a high display order
+- Waits for `ServerSystemsReady`, a live `SessionRoundId`, no terrain reset, and a ready character before closing
+- Keeps the loading screen visible for at least `5` seconds before the fade-out begins
+
 Controller: CandyEventController
 
 Location:
@@ -154,6 +167,7 @@ Features:
 - Points players to world targets with beams/highlights and opens guided upgrade flows
 - Keeps the step `4` back-button pointer while also aiming a world beam at the player's base after the first brainrot pickup
 - Forces Satchel/backpack visibility on step `5` when the player only has the tutorial brainrot in `Backpack`, so the surface-pickup shortcut can still place the item
+- Re-evaluates step `4`/`5` immediately when tutorial brainrot state changes in `Character` or `Backpack`, so walking out of the mine updates the slot-placement flow without waiting for a slow UI refresh
 - Debounces tutorial-driven `Upgrades` auto-open requests so step `10` cannot enqueue repeated frame-open attempts while the FTUE mask is retrying
 - Uses prebuilt `TutorialCursor` descendants inside the active target button or proxy, toggles them visible only for the active FTUE step, and restores their original hidden state afterwards
 - Resets tutorial completion state by closing all non-notification frames and forcing the camera back to the default FOV on the final tutorial step
@@ -237,7 +251,8 @@ Responsibility:
 Features:
 - Uses `ReplicatedStorage.Modules.PlaytimeRewardConfiguration` as the canonical reward-card source instead of depending on the first status payload
 - Wraps `GetStatus` / `ClaimReward` remote calls in defensive retries and refreshes status again whenever the frame opens
-- Resolves reward-card descendants defensively and falls back to a local layout/canvas sync when the runtime `Template` hierarchy is incomplete or mismatched
+- Resolves reward-card descendants defensively and falls back to a code-built reward card plus local layout/canvas sync when the runtime `Template` hierarchy is incomplete or missing
+- Defers reward-grid canvas writes and skips duplicate `CanvasSize` assignments so `AbsoluteContentSize` updates cannot recurse into a client UI lockup
 - Preserves reward availability when server-side reward grant fails by waiting for the authoritative status update instead of mutating the local card list
 
 Controller: JoinLikeStandController

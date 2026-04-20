@@ -52,7 +52,7 @@ local function getUpgradeImage(upgradeId: string): string?
 end
 
 CandyEventConfiguration.ActiveDurationSeconds = 10 * 60
-CandyEventConfiguration.SpinCost = 20
+CandyEventConfiguration.SpinCost = 3
 CandyEventConfiguration.SpinAnimationSeconds = 6
 CandyEventConfiguration.SchedulePeriodSeconds = 60 * 60
 CandyEventConfiguration.TemplateSearchNames = {
@@ -87,7 +87,7 @@ CandyEventConfiguration.Text = {
 	CountdownSubtext = "HAPPENS EVERY HOUR",
 	EventStarted = "CANDY EVENT STARTED!",
 	EventHint = "COLLECT CANDIES IN THE MINE",
-	SpinButton = "SPIN (20 CANDIES)",
+	SpinButtonFormat = "SPIN (%d CANDIES)",
 	PaidSpinButton = "SPIN",
 	SpinInProgress = "SPIN IN PROGRESS",
 	NotEnoughCandies = "NOT ENOUGH CANDIES",
@@ -156,6 +156,10 @@ end
 
 function CandyEventConfiguration.GetRewardByIndex(index: number): CandyReward?
 	return CandyEventConfiguration.Rewards[index]
+end
+
+function CandyEventConfiguration.GetSpinButtonText(): string
+	return string.format(CandyEventConfiguration.Text.SpinButtonFormat, CandyEventConfiguration.SpinCost)
 end
 
 function CandyEventConfiguration.GetCurrentState(serverNow: number): CandyEventState

@@ -18,6 +18,7 @@ Client systems:
 - `CandyEventController` owns the world candy-event countdown and start notifications attached to `Workspace.CandyWheel`
 - `CandySpinController` owns the separate `GUI.Frames.CandyWheel` flow, world-entry bounds around `Workspace.CandyWheel`, and wheel animation
 - `HUDController` owns HUD money, offline-per-hour, invite prompt, and boost labels
+- `LoadingScreenController` owns the startup loading screen and waits for shared client/server readiness before fading it out
 - `OnboardingController` owns tutorial step presentation, UI masking, world guidance beams, and post-tutorial prompts
 - `QuestChainUIController` owns the HUD quest-chain widget and reward-claim rendering
 - `FeedbackTopbarController` owns the Roblox in-experience feedback topbar button next to inventory

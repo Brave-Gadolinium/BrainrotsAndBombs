@@ -115,5 +115,5 @@
 
 | Key | Type | Current ID | What it gives | Where ID is stored | Where it is used |
 | --- | --- | --- | --- | --- | --- |
-| `CandySpinsX3` | Developer Product | `3577073654` | Adds `+3` paid candy spins used as fallback when `CandyCount < 20`. | `src/ReplicatedStorage/Modules/ProductConfigurations.lua` | `src/StarterPlayer/StarterPlayerScripts/CandySpinController.client.lua`; `src/ServerScriptService/Controllers/MonetizationController.lua` |
-| `CandySpinsX9` | Developer Product | `3577073717` | Adds `+9` paid candy spins used as fallback when `CandyCount < 20`. | `src/ReplicatedStorage/Modules/ProductConfigurations.lua` | `src/StarterPlayer/StarterPlayerScripts/CandySpinController.client.lua`; `src/ServerScriptService/Controllers/MonetizationController.lua` |
+| `CandySpinsX3` | Developer Product | `3577073654` | Adds `+3` paid candy spins used as fallback when `CandyCount < 3`. | `src/ReplicatedStorage/Modules/ProductConfigurations.lua` | `src/StarterPlayer/StarterPlayerScripts/CandySpinController.client.lua`; `src/ServerScriptService/Controllers/MonetizationController.lua` |
+| `CandySpinsX9` | Developer Product | `3577073717` | Adds `+9` paid candy spins used as fallback when `CandyCount < 3`. | `src/ReplicatedStorage/Modules/ProductConfigurations.lua` | `src/StarterPlayer/StarterPlayerScripts/CandySpinController.client.lua`; `src/ServerScriptService/Controllers/MonetizationController.lua` |

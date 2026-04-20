@@ -74,3 +74,8 @@
 - Disabled manual brainrot dropping from both carried mine stacks and equipped/backpack brainrot tools
 - Added candy pickup `+1` popup feedback with a candy icon and local pickup sound through the shared `PopUpController`
 - Rotated spawned candy visuals by `90` degrees on `Y` and hooked them into the existing `Rotate` hover/spin client animation flow
+- Reduced candy wheel spin cost from `20` candies to `3`
+- Deferred playtime reward grid canvas sync and skipped duplicate canvas writes to stop `AbsoluteContentSize` re-entrancy in `PlaytimeRewardUIController`
+- Added a code-built `PlaytimeRewards` fallback card template so the reward list still renders when `RewardsGrid.Template` is missing or invalid at runtime
+- Delayed FTUE mine-exit step advancement until the carried brainrot is converted into a real tool and refreshed tutorial step `5` immediately on brainrot inventory/carry changes
+- Increased the startup loading screen minimum visible time from `0.35` seconds to `5` seconds

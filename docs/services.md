@@ -145,6 +145,7 @@ Responsibility:
 
 Main Features:
 - Repairs invalid FTUE rejoin states, including returning step `4`/`5` players to brainrot pickup when the carried or inventory item is gone
+- Advances mine-exit step `4 -> 5` only after the carried brainrot is actually present in `Character` or `Backpack`, and immediately re-evaluates back to pickup if that conversion fails
 - Computes `PostTutorialStage` from live player state after FTUE completion using the `Speed1` purchase and first base-slot upgrade thresholds
 - Fires the post-tutorial character/base completion prompts only from the matching purchase events, not from passive recomputation
 
@@ -167,4 +168,5 @@ Responsibility:
 Main Features:
 - Tracks carried brainrot visuals and capacity while players are inside mine zones
 - Converts carried brainrots into tool inventory on zone exit and now treats manual player drop requests as disabled
+- Finishes carry-stack cleanup before FTUE mine-exit evaluation so walking out of the mine and using `Back` produce the same tutorial brainrot state
 - Keeps internal forced-drop methods for gameplay systems such as bomb failures, event recovery, and other authoritative server flows

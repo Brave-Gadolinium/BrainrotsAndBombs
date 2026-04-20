@@ -331,11 +331,6 @@ local function processZoneExit(player: Player)
 
 	AnalyticsEconomyService:FlushBombIncome(player)
 
-	if isAlive then
-		TutorialService:HandleMineZoneExited(player)
-		AnalyticsFunnelsService:HandleMineZoneExited(player, hadItems)
-	end
-
 	if hadItems then
 		if isAlive then
 			local lastGivenTool = nil
@@ -417,6 +412,13 @@ local function processZoneExit(player: Player)
 		end
 
 		CarrySystem.ClearAllItems(player)
+	end
+
+	if isAlive then
+		-- Advance FTUE only after the carry stack has been converted/cleared so step 5
+		-- observes the real equipped/backpack state instead of the transient mine stack.
+		TutorialService:HandleMineZoneExited(player)
+		AnalyticsFunnelsService:HandleMineZoneExited(player, hadItems)
 	end
 end
 

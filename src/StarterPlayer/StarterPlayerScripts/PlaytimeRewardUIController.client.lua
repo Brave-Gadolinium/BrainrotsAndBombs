@@ -24,7 +24,6 @@ local timerLabel = openButton:WaitForChild("Timer") :: TextLabel
 local playtimeRewardsFrame = frames:WaitForChild("PlaytimeRewards") :: Frame
 local mainFrame = playtimeRewardsFrame:WaitForChild("MainFrame") :: Frame
 local rewardsGrid = mainFrame:WaitForChild("RewardsGrid") :: ScrollingFrame
-local template = rewardsGrid:WaitForChild("Template") :: ImageButton
 local openAllButton = mainFrame:WaitForChild("OpenAll") :: ImageButton
 local speedX2Button = mainFrame:WaitForChild("Speedx2") :: ImageButton
 local speedX5Button = mainFrame:WaitForChild("Speedx5") :: ImageButton
@@ -42,8 +41,12 @@ local currentStatus = nil
 local hasAuthoritativeStatus = false
 local isClaiming = false
 local statusRequestGeneration = 0
+local rewardTemplate: ImageButton? = nil
 local rewardsGridLayout: UIGridLayout | UIListLayout? = nil
 local loggedMissingRewardCardView = false
+local isRewardsGridCanvasUpdateQueued = false
+local lastRewardsGridCanvasSize: UDim2? = nil
+local hasWarnedAboutMissingRewardTemplate = false
 
 local INITIAL_STATUS_RETRY_DELAYS = {0, 0.5, 1, 2}
 local REOPEN_STATUS_RETRY_DELAYS = {0, 0.25, 0.75}
@@ -125,6 +128,120 @@ local STATE_COLORS = {
 	},
 }
 
+local function createFallbackRewardTemplate(): ImageButton
+	local button = Instance.new("ImageButton")
+	button.Name = "Template"
+	button.AutoButtonColor = false
+	button.BackgroundTransparency = 1
+	button.BorderSizePixel = 0
+	button.Size = UDim2.fromOffset(150, 172)
+
+	local frame = Instance.new("Frame")
+	frame.Name = "Frame"
+	frame.AnchorPoint = Vector2.new(0.5, 0.5)
+	frame.Position = UDim2.fromScale(0.5, 0.5)
+	frame.Size = UDim2.fromScale(1, 1)
+	frame.BackgroundColor3 = STATE_COLORS.Locked.Background
+	frame.BorderSizePixel = 0
+	frame.Parent = button
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 16)
+	corner.Parent = frame
+
+	local stroke = Instance.new("UIStroke")
+	stroke.Thickness = 3
+	stroke.Color = STATE_COLORS.Locked.Stroke
+	stroke.Parent = frame
+
+	local rewardTime = Instance.new("TextLabel")
+	rewardTime.Name = "RewardTime"
+	rewardTime.BackgroundTransparency = 1
+	rewardTime.Position = UDim2.new(0, 10, 0, 8)
+	rewardTime.Size = UDim2.new(1, -20, 0, 22)
+	rewardTime.Font = Enum.Font.GothamBold
+	rewardTime.Text = "00:00"
+	rewardTime.TextColor3 = STATE_COLORS.Locked.Text
+	rewardTime.TextScaled = true
+	rewardTime.Parent = frame
+
+	local rewardImage = Instance.new("ImageLabel")
+	rewardImage.Name = "ImageLabel"
+	rewardImage.BackgroundTransparency = 1
+	rewardImage.Position = UDim2.new(0.5, -36, 0, 34)
+	rewardImage.Size = UDim2.fromOffset(72, 72)
+	rewardImage.ScaleType = Enum.ScaleType.Fit
+	rewardImage.Parent = frame
+
+	local questionMark = Instance.new("TextLabel")
+	questionMark.Name = "QuestionMark"
+	questionMark.BackgroundTransparency = 1
+	questionMark.Size = UDim2.fromScale(1, 1)
+	questionMark.Font = Enum.Font.GothamBlack
+	questionMark.Text = "?"
+	questionMark.TextColor3 = Color3.fromRGB(80, 80, 80)
+	questionMark.TextScaled = true
+	questionMark.Visible = false
+	questionMark.Parent = rewardImage
+
+	local checkmark = Instance.new("TextLabel")
+	checkmark.Name = "Checkmark"
+	checkmark.BackgroundTransparency = 1
+	checkmark.AnchorPoint = Vector2.new(0.5, 0.5)
+	checkmark.Position = UDim2.fromScale(0.5, 0.5)
+	checkmark.Size = UDim2.fromScale(0.8, 0.5)
+	checkmark.Font = Enum.Font.GothamBlack
+	checkmark.Text = "CLAIMED"
+	checkmark.TextColor3 = Color3.fromRGB(42, 140, 42)
+	checkmark.TextScaled = true
+	checkmark.Visible = false
+	checkmark.Parent = frame
+
+	local rewardAmount = Instance.new("TextLabel")
+	rewardAmount.Name = "RewardAmount"
+	rewardAmount.BackgroundTransparency = 1
+	rewardAmount.Position = UDim2.new(0, 10, 1, -52)
+	rewardAmount.Size = UDim2.new(1, -20, 0, 44)
+	rewardAmount.Font = Enum.Font.GothamBold
+	rewardAmount.Text = "Reward"
+	rewardAmount.TextColor3 = STATE_COLORS.Locked.Text
+	rewardAmount.TextScaled = true
+	rewardAmount.TextWrapped = true
+	rewardAmount.Parent = frame
+
+	return button
+end
+
+local function isUsableRewardTemplate(instance: Instance?): boolean
+	if not instance or not instance:IsA("ImageButton") then
+		return false
+	end
+
+	local frame = instance:FindFirstChild("Frame")
+	return frame ~= nil and frame:IsA("GuiObject")
+end
+
+local function getRewardTemplate(): ImageButton
+	if rewardTemplate and (rewardTemplate.Parent == nil or rewardTemplate.Parent == rewardsGrid) then
+		return rewardTemplate
+	end
+
+	local runtimeTemplate = rewardsGrid:FindFirstChild("Template")
+	if isUsableRewardTemplate(runtimeTemplate) then
+		rewardTemplate = runtimeTemplate :: ImageButton
+		rewardTemplate.Visible = false
+		return rewardTemplate
+	end
+
+	if not hasWarnedAboutMissingRewardTemplate then
+		hasWarnedAboutMissingRewardTemplate = true
+		warn("[PlaytimeRewardUIController] RewardsGrid.Template is missing or invalid. Falling back to a code-built reward card template.")
+	end
+
+	rewardTemplate = createFallbackRewardTemplate()
+	return rewardTemplate
+end
+
 local function formatTime(totalSeconds: number): string
 	totalSeconds = math.max(0, math.floor(totalSeconds))
 	local minutes = math.floor(totalSeconds / 60)
@@ -159,23 +276,48 @@ local function ensureRewardsGridLayout(): UIGridLayout | UIListLayout
 		return existingList
 	end
 
-	local fallbackLayout = Instance.new("UIListLayout")
+	local fallbackLayout = Instance.new("UIGridLayout")
 	fallbackLayout.SortOrder = Enum.SortOrder.LayoutOrder
-	fallbackLayout.FillDirection = Enum.FillDirection.Horizontal
-	fallbackLayout.Padding = UDim.new(0, 12)
+	fallbackLayout.CellSize = UDim2.fromOffset(150, 172)
+	fallbackLayout.CellPadding = UDim2.fromOffset(12, 12)
+	fallbackLayout.FillDirectionMaxCells = 4
 	fallbackLayout.Parent = rewardsGrid
 	rewardsGridLayout = fallbackLayout
 	return fallbackLayout
 end
 
-local function updateRewardsGridCanvas()
+local function applyRewardsGridCanvas()
 	local layout = ensureRewardsGridLayout()
 	local contentSize = layout.AbsoluteContentSize
-	rewardsGrid.AutomaticCanvasSize = Enum.AutomaticSize.None
-	rewardsGrid.CanvasSize = UDim2.fromOffset(
+	local targetCanvasSize = UDim2.fromOffset(
 		math.max(contentSize.X + 12, rewardsGrid.AbsoluteSize.X),
 		math.max(contentSize.Y + 12, rewardsGrid.AbsoluteSize.Y)
 	)
+
+	if rewardsGrid.AutomaticCanvasSize == Enum.AutomaticSize.None
+		and lastRewardsGridCanvasSize == targetCanvasSize
+		and rewardsGrid.CanvasSize == targetCanvasSize
+	then
+		return
+	end
+
+	lastRewardsGridCanvasSize = targetCanvasSize
+	rewardsGrid.AutomaticCanvasSize = Enum.AutomaticSize.None
+	rewardsGrid.CanvasSize = targetCanvasSize
+end
+
+local function updateRewardsGridCanvas()
+	if isRewardsGridCanvasUpdateQueued then
+		return
+	end
+
+	isRewardsGridCanvasUpdateQueued = true
+
+	-- Defer canvas writes so layout-driven size changes cannot re-enter the same callback chain.
+	task.defer(function()
+		isRewardsGridCanvasUpdateQueued = false
+		applyRewardsGridCanvas()
+	end)
 end
 
 local function bindRewardsGridCanvas()
@@ -458,7 +600,7 @@ renderRewards = function(status, isAuthoritative: boolean?)
 	for _, reward in ipairs(rewardDefinitions) do
 		local button = rewardButtons[reward.Id]
 		if not button then
-			button = template:Clone()
+			button = getRewardTemplate():Clone()
 			button.Name = tostring(reward.Id)
 			button.Visible = true
 			button.LayoutOrder = reward.Id
@@ -508,7 +650,10 @@ renderRewards = function(status, isAuthoritative: boolean?)
 	updateRewardsGridCanvas()
 end
 
-template.Visible = false
+local initialRewardTemplate = rewardsGrid:FindFirstChild("Template")
+if initialRewardTemplate and initialRewardTemplate:IsA("ImageButton") then
+	initialRewardTemplate.Visible = false
+end
 bindRewardsGridCanvas()
 updateSpeedButtons()
 renderRewards(nil, false)

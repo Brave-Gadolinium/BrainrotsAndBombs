@@ -10,7 +10,7 @@ local playerGui = player:WaitForChild("PlayerGui")
 
 local FADE_IN_INFO = TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 local FADE_OUT_INFO = TweenInfo.new(0.22, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
-local MIN_VISIBLE_TIME = 0.35
+local MIN_VISIBLE_TIME = 5
 local HARD_TIMEOUT = 8
 local READINESS_POLL_INTERVAL = 0.05
 

@@ -54,7 +54,7 @@ Purpose:
 Notes:
 - Clients bootstrap countdown state through `GetState` and then keep the countdown local using server time
 - `StateUpdated` only pushes `{ isActive, nextStartAt, endsAt, serverNow }`
-- `Spin` immediately reserves either `20` candies or one paid candy spin and returns the winning wheel index for the 6-second client animation
+- `Spin` immediately reserves either `3` candies or one paid candy spin and returns the winning wheel index for the 6-second client animation
 
 Namespace: Events
 

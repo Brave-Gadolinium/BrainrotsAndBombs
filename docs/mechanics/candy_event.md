@@ -15,7 +15,7 @@ Core flow:
 - Each collected candy immediately increments `PlayerController` saved `CandyCount`, fires `ReplicatedStorage.Events.ShowCandyPopUp`, shows a `+1` popup with a candy icon, and plays the local pickup sound
 - At round end or event end, all live candies are cleared without refill or compensation
 - `GUI.Frames.CandyWheel` opens only from the `Workspace.CandyWheel` world entry and spins through `ReplicatedStorage.Remotes.CandyEvent.Spin`
-- A spin consumes `20` candies first, otherwise falls back to one `CandyPaidSpinCount` if available
+- A spin consumes `3` candies first, otherwise falls back to one `CandyPaidSpinCount` if available
 - The server reserves the cost immediately, returns the winning reward index, and grants the reward after the `6` second client wheel animation
 
 Rewards:

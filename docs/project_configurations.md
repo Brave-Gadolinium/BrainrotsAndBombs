@@ -116,7 +116,7 @@ Purpose:
 
 Parameters:
 - `ActiveDurationSeconds = 600`
-- `SpinCost = 20`
+- `SpinCost = 3`
 - `SpinAnimationSeconds = 6`
 - `WorldVisualYawDegrees = 90`
 - `ZoneCandyCounts.Zone1..Zone5`

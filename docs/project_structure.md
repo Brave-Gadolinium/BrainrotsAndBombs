@@ -19,6 +19,7 @@ Important shared folders:
 Important client folders:
 - `src/StarterPlayer/StarterPlayerScripts` HUD, shop, rewards, tutorial, and other client controllers
 - `src/StarterPlayer/StarterPlayerScripts/CandyEventController.client.lua` and `CandySpinController.client.lua` own the world timer and candy wheel UI entry flow
+- `src/StarterPlayer/StarterPlayerScripts/LoadingScreenController.client.lua` owns the startup loading-screen gating and fade-out timing
 
 Documentation:
 - `docs/` is the project memory source for architecture, configs, networking, mechanics, and change facts
