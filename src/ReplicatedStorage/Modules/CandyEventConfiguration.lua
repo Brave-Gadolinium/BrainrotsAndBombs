@@ -60,10 +60,12 @@ CandyEventConfiguration.TemplateSearchNames = {
 	"CandyModel",
 	"CandyCollectible",
 }
+
 CandyEventConfiguration.TemplateSearchRoots = {
 	"ReplicatedStorage",
 	"Workspace",
 }
+
 CandyEventConfiguration.WorldVisualYawDegrees = 90
 
 CandyEventConfiguration.ZoneCandyCounts = {

@@ -321,7 +321,7 @@ local function updateRewardsGridCanvas()
 		while isRewardsGridCanvasDirty do
 			RunService.Heartbeat:Wait()
 			isRewardsGridCanvasDirty = false
-			applyRewardsGridCanvas()
+			--applyRewardsGridCanvas()
 		end
 
 		isRewardsGridCanvasUpdateQueued = false

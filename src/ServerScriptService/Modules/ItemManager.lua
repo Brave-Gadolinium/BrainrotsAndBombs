@@ -98,6 +98,7 @@ local ITEM_SPAWN_BATCH_SIZE = math.max(1, tonumber(Constants.ITEM_SPAWN_BATCH_SI
 local ITEM_SPAWN_BATCH_YIELD = math.max(0, tonumber(Constants.ITEM_SPAWN_BATCH_YIELD) or 0.03)
 local FinishTime = ensureTimerFinishEvent()
 local RoundStarted = ensureRoundStartedEvent()
+local MINE_BRAINROT_SPAWNS_ENABLED = true -- Temporary test switch.
 
 local SPAWNER_TIERS = Constants.SPAWNER_TIERS
 
@@ -1122,6 +1123,10 @@ local function countMineItems(mineZonePart: BasePart): (number, {Vector3})
 end
 
 function ItemManager.SpawnInMine(mineZonePart: BasePart, options: {[string]: any}?)
+	if not MINE_BRAINROT_SPAWNS_ENABLED then
+		return 0
+	end
+
 	if not mineZonePart or not mineZonePart.Parent then
 		return 0
 	end
@@ -1320,6 +1325,10 @@ local function insertSpawnJobSorted(spawnJob: MineSpawnJob)
 end
 
 local function queueSpawnJob(spawnJob: MineSpawnJob): boolean
+	if not MINE_BRAINROT_SPAWNS_ENABLED then
+		return false
+	end
+
 	if not spawnJob.Zone or not spawnJob.Zone.Parent then
 		return false
 	end
@@ -1559,6 +1568,10 @@ local function flushPendingRoundRefill()
 end
 
 function ItemManager.RespawnItem(mineZonePart: BasePart)
+	if not MINE_BRAINROT_SPAWNS_ENABLED then
+		return
+	end
+
 	task.delay(RESPAWN_TIME, function()
 		if not RunService:IsRunning() then
 			return
@@ -1573,6 +1586,10 @@ function ItemManager.RespawnItem(mineZonePart: BasePart)
 end
 
 function ItemManager.SpawnAllItems()
+	if not MINE_BRAINROT_SPAWNS_ENABLED then
+		return
+	end
+
 	queueAllMineSpawns()
 end
 
@@ -1626,6 +1643,11 @@ function ItemManager:Start()
 	FinishTime.Event:Connect(function()
 		clearSessionWorldItems()
 	end)
+
+	if not MINE_BRAINROT_SPAWNS_ENABLED then
+		startupFinalized = true
+		return
+	end
 
 	RoundStarted.Event:Connect(function()
 		if not RunService:IsRunning() then

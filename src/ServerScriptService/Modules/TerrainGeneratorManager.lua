@@ -46,6 +46,10 @@ local TERRAIN_WRITE_BUDGET_SECONDS = 0.004
 local SNAPSHOT_READ_BATCH_SIZE = 6
 local STARTUP_BLOCKER_THICKNESS = 6
 local STARTUP_PLAYABLE_TERRAIN_PROGRESS = 0.85
+local MINE_ZONE_GENERATION_ENABLED = true -- Temporary test switch.
+local ENABLED_MINE_ZONES = {
+	Zone1 = true,
+}
 local STARTUP_ZONE_ORDER = if type(Constants.MINE_STARTUP_ZONE_ORDER) == "table"
 	then Constants.MINE_STARTUP_ZONE_ORDER
 	else { "Zone1", "Zone2", "Zone3", "Zone4", "Zone5" }
@@ -262,6 +266,10 @@ local function buildMineLayoutPlan(): ({ ZonePlan }, { TerrainChunk }, { [string
 			continue
 		end
 
+		if not ENABLED_MINE_ZONES[child.Name] then
+			continue
+		end
+
 		local config = ZoneMaterialConfigs[child.Name] or DEFAULT_ZONE_CONFIG
 		local zoneChunks: { TerrainChunk } = {}
 		local size = child.Size
@@ -424,6 +432,17 @@ local function applyZonePlanRegistry(plans: { ZonePlan }, markReady: boolean)
 	end
 
 	syncStartupBlockers()
+end
+
+local function disableMineZoneGenerationForTests()
+	fullResetRequired = false
+	cachedChunks = {}
+	cachedChunksById = {}
+	dirtyChunkIds = {}
+	applyZonePlanRegistry({}, false)
+	Workspace:SetAttribute("TerrainResetInProgress", false)
+	setStartupProgress(1)
+	Workspace:SetAttribute("MineStartupPlayable", true)
 end
 
 local function hasPendingDirtyChunks(): boolean
@@ -741,6 +760,10 @@ function TerrainGeneratorManager.MarkSphereDirty(center: Vector3, radius: number
 end
 
 function TerrainGeneratorManager.RequestRegeneration()
+	if not MINE_ZONE_GENERATION_ENABLED then
+		return
+	end
+
 	runRegeneration()
 end
 
@@ -769,6 +792,11 @@ function TerrainGeneratorManager:Start()
 	started = true
 	Workspace:SetAttribute("MineStartupProgress", 0)
 	Workspace:SetAttribute("MineStartupPlayable", false)
+
+	if not MINE_ZONE_GENERATION_ENABLED then
+		disableMineZoneGenerationForTests()
+		return
+	end
 
 	configureMaterialOverrides()
 	syncGroundPartWatchers()
