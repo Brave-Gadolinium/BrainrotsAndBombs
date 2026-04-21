@@ -143,6 +143,24 @@ Dependencies:
 - `BombManager`
 - `ItemManager`
 
+Service: RoundBrainrotEventManager
+
+Location:
+- `src/ServerScriptService/Modules/RoundBrainrotEventManager.lua`
+
+Responsibility:
+- Spawn and track the special round brainrot event item tied to the active session round
+
+Main Features:
+- Starts at round runtime, syncs active event state into `Workspace`, and defers zone spawns until the target mine zone is terrain-ready
+- Can be temporarily disabled for local/server tests by the module-level `ROUND_BRAINROT_EVENTS_ENABLED` flag, in which case it clears workspace state and skips all round hooks
+
+Dependencies:
+- `TimerManager`
+- `TerrainGeneratorManager`
+- `ItemManager`
+- `BrainrotEventConfiguration`
+
 Service: TutorialService
 
 Location:
@@ -177,4 +195,5 @@ Main Features:
 - Tracks carried brainrot visuals and capacity while players are inside mine zones
 - Converts carried brainrots into tool inventory on zone exit and now treats manual player drop requests as disabled
 - Finishes carry-stack cleanup before FTUE mine-exit evaluation so walking out of the mine and using `Back` produce the same tutorial brainrot state
+- Skips mine re-entry auto-unequip/auto-bomb during FTUE step `5` while the placement brainrot tool still exists, preventing zone-edge flicker from hiding the tutorial item
 - Keeps internal forced-drop methods for gameplay systems such as bomb failures, event recovery, and other authoritative server flows

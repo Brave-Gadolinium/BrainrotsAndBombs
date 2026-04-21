@@ -84,3 +84,6 @@
 - Switched mine brainrot startup spawning to seed upper layers first, then backfill depth bands and reconcile to full caps after startup
 - Delayed the first round and loading-screen exit until `MineStartupPlayable`, and deferred candy/event spawns plus bomb actions away from unready mine zones
 - Replaced `PlaytimeRewardUIController` reward-grid `task.defer` canvas scheduling with a heartbeat-coalesced flush to stop maximum re-entrancy depth errors
+- Temporarily disabled `RoundBrainrotEventManager` startup and manual event starts behind a module-level test flag
+- Re-enabled `RoundBrainrotEventManager` after the temporary test disable
+- Prevented FTUE step `5` mine-edge re-entry from auto-unequipping the tutorial brainrot and kept the backpack visible while that placement tool exists

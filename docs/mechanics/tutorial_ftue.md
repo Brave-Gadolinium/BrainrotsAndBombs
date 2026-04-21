@@ -17,6 +17,7 @@ Core flow:
 - If the player picks up a brainrot before throwing a bomb, FTUE now treats the bomb step as completed; pickups in the mine continue at step `4`, while pickups on the surface skip straight to step `5`.
 - If the player rejoins or respawns on step `5` without a placed brainrot and without any carried or backpack brainrot item, the server rewinds FTUE back to step `3`.
 - Step `5` re-checks `Character` and `Backpack` as soon as the tutorial brainrot changes state, so the placement flow recovers immediately after a manual walk-out conversion.
+- During step `5`, brief mine zone re-entry on the surface edge no longer auto-unequips the tutorial brainrot, and the backpack stays visible while that placement tool still exists.
 - Step `6+`: keep the money HUD visible for the rest of the masked tutorial flow.
 - Step `8`: retry masking until the bomb purchase button is visible.
 - Step `10`: retry masking until the character upgrade button is visible.

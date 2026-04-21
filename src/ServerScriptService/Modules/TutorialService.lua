@@ -27,12 +27,52 @@ local STEP_TWELVE_AUTO_ADVANCE_DELAY = 0
 local stepActivatedAt: {[Player]: number} = {}
 local stepOneEvaluationTokens: {[Player]: number} = {}
 local stepTwelveAutoAdvanceTokens: {[Player]: number} = {}
-local DEBUG_TUTORIAL = true
+local DEBUG_TUTORIAL = false
+local DEBUG_BRAINROT_TRACE = false
 
 local function debugTutorialLog(player: Player, message: string)
 	if DEBUG_TUTORIAL then
 		print(("[Tutorial][Server][%s] %s"):format(player.Name, message))
 	end
+end
+
+local function summarizeToolContainer(container: Instance?): string
+	if not container then
+		return "[]"
+	end
+
+	local entries = {}
+	for _, child in ipairs(container:GetChildren()) do
+		if child:IsA("Tool") and (child:GetAttribute("Mutation") ~= nil or child:GetAttribute("IsLuckyBlock") == true) then
+			table.insert(entries, ("Tool{name=%s,orig=%s,mut=%s,rar=%s,lvl=%s,parent=%s}"):format(
+				tostring(child.Name),
+				tostring(child:GetAttribute("OriginalName")),
+				tostring(child:GetAttribute("Mutation")),
+				tostring(child:GetAttribute("Rarity")),
+				tostring(child:GetAttribute("Level")),
+				tostring(child.Parent and child.Parent.Name or "nil")
+			))
+		end
+	end
+
+	table.sort(entries)
+	return "[" .. table.concat(entries, ", ") .. "]"
+end
+
+local function logBrainrotTrace(player: Player, message: string)
+	if not DEBUG_BRAINROT_TRACE then
+		return
+	end
+
+	local backpack = player:FindFirstChild("Backpack")
+	print(("[BrainrotTrace][TutorialService][%s][step=%s][server=%.3f] %s | char=%s | backpack=%s"):format(
+		player.Name,
+		tostring(player:GetAttribute("OnboardingStep")),
+		Workspace:GetServerTimeNow(),
+		message,
+		summarizeToolContainer(player.Character),
+		summarizeToolContainer(backpack)
+	))
 end
 
 local function getUpgradeConfig(upgradeId: string)
@@ -355,8 +395,13 @@ end
 
 local function setCurrentStep(player: Player, profile: any, step: number)
 	local clampedStep = math.clamp(step, 1, TutorialConfiguration.FinalStep)
+	local previousStep = tonumber(profile.Data.OnboardingStep) or 1
 	profile.Data.OnboardingStep = clampedStep
 	syncStepAttribute(player, clampedStep)
+	logBrainrotTrace(player, ("setCurrentStep %s -> %s"):format(
+		tostring(previousStep),
+		tostring(clampedStep)
+	))
 	markStepActivated(player)
 	invalidateScheduledStepOneEvaluation(player)
 	invalidateScheduledStepTwelveAutoAdvance(player)
@@ -436,15 +481,22 @@ end
 
 local function reconcileStepWithCurrentState(player: Player, profile: any): number
 	local currentStep = getCurrentStep(player)
+	logBrainrotTrace(player, ("reconcileStepWithCurrentState currentStep=%s hasBrainrot=%s hasPlaced=%s"):format(
+		tostring(currentStep),
+		tostring(hasBrainrotInHandOrInventory(player)),
+		tostring(hasPlacedBrainrot(player))
+	))
 
 	-- If the player left during step 4, the carried brainrot is gone on next join,
 	-- so we must return them to step 3 to pick one up again.
 	if currentStep == 4 and not hasBrainrotInHandOrInventory(player) then
+		logBrainrotTrace(player, "reconcileStepWithCurrentState rewinding step 4 -> 3 because no brainrot remains")
 		setCurrentStep(player, profile, 3)
 		return 3
 	end
 
 	if currentStep == 5 and not hasPlacedBrainrot(player) and not hasBrainrotInHandOrInventory(player) then
+		logBrainrotTrace(player, "reconcileStepWithCurrentState rewinding step 5 -> 3 because no brainrot is in hand/inventory")
 		setCurrentStep(player, profile, 3)
 		return 3
 	end
@@ -568,6 +620,13 @@ function TutorialService:EvaluateCurrentStep(player: Player)
 		advanced = false
 
 		local currentStep = getCurrentStep(player)
+		if currentStep >= 3 and currentStep <= 5 then
+			logBrainrotTrace(player, ("EvaluateCurrentStep currentStep=%s hasBrainrot=%s hasPlaced=%s"):format(
+				tostring(currentStep),
+				tostring(hasBrainrotInHandOrInventory(player)),
+				tostring(hasPlacedBrainrot(player))
+			))
+		end
 		debugTutorialLog(player, ("EvaluateStep %d"):format(currentStep))
 		if currentStep >= TutorialConfiguration.FinalStep then
 			self:EvaluatePostTutorial(player)
@@ -619,6 +678,7 @@ function TutorialService:EvaluateCurrentStep(player: Player)
 end
 
 function TutorialService:HandleMineZoneEntered(player: Player)
+	logBrainrotTrace(player, ("HandleMineZoneEntered currentStep=%s"):format(tostring(getCurrentStep(player))))
 	if getCurrentStep(player) == 1 then
 		local remainingDisplayTime = getRemainingInitialStepOneDisplayTime(player, 1)
 		if remainingDisplayTime > 0 then
@@ -650,6 +710,10 @@ end
 function TutorialService:HandleBrainrotPickedUp(player: Player, pickedUpInMine: boolean?)
 	local isPickupInMine = pickedUpInMine ~= false
 	local currentStep = getCurrentStep(player)
+	logBrainrotTrace(player, ("HandleBrainrotPickedUp inMine=%s currentStep=%s"):format(
+		tostring(isPickupInMine),
+		tostring(currentStep)
+	))
 	debugTutorialLog(player, ("HandleBrainrotPickedUp inMine=%s step=%d"):format(tostring(isPickupInMine), currentStep))
 	if currentStep == 2 or currentStep == 3 then
 		self:AdvanceToStep(player, getStepAfterBrainrotPickup(isPickupInMine))
@@ -661,6 +725,10 @@ end
 function TutorialService:HandleMineZoneExited(player: Player)
 	local currentStep = getCurrentStep(player)
 	local hasBrainrot = hasBrainrotInHandOrInventory(player)
+	logBrainrotTrace(player, ("HandleMineZoneExited currentStep=%s hasBrainrot=%s"):format(
+		tostring(currentStep),
+		tostring(hasBrainrot)
+	))
 	debugTutorialLog(player, ("HandleMineZoneExited step=%d hasBrainrot=%s"):format(currentStep, tostring(hasBrainrot)))
 
 	if currentStep == 4 then
@@ -675,6 +743,7 @@ function TutorialService:HandleMineZoneExited(player: Player)
 end
 
 function TutorialService:HandleBrainrotPlaced(player: Player)
+	logBrainrotTrace(player, ("HandleBrainrotPlaced currentStep=%s"):format(tostring(getCurrentStep(player))))
 	debugTutorialLog(player, "HandleBrainrotPlaced")
 	if getCurrentStep(player) == 5 then
 		self:AdvanceToStep(player, 6)

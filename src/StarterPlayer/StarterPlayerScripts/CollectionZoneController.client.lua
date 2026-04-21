@@ -27,12 +27,34 @@ local function isTutorialInventoryForced(): boolean
 	return presentation.MaskUi and presentation.ShowInventory
 end
 
+local function hasTutorialBrainrotTool(container: Instance?): boolean
+	if not container then
+		return false
+	end
+
+	for _, child in ipairs(container:GetChildren()) do
+		if child:IsA("Tool") and child:GetAttribute("Mutation") ~= nil then
+			return true
+		end
+	end
+
+	return false
+end
+
+local function shouldKeepFtueStepFiveInventoryVisible(): boolean
+	if tonumber(player:GetAttribute("OnboardingStep")) ~= 5 then
+		return false
+	end
+
+	return hasTutorialBrainrotTool(player.Character) or hasTutorialBrainrotTool(player:FindFirstChild("Backpack"))
+end
+
 local function shouldEnableBackpack(nextInMineZone: boolean): boolean
 	if FrameManager.isAnyFrameOpen() then
 		return false
 	end
 
-	if isTutorialInventoryForced() then
+	if isTutorialInventoryForced() or shouldKeepFtueStepFiveInventoryVisible() then
 		return true
 	end
 

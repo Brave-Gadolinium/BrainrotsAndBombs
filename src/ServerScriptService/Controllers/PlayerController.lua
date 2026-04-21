@@ -8,6 +8,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local MarketplaceService = game:GetService("MarketplaceService")
 local CollectionService = game:GetService("CollectionService")
 local Debris = game:GetService("Debris") 
+local Workspace = game:GetService("Workspace")
 
 -- Modules
 local ProfileStoreModule = require(ServerScriptService.Modules.ProfileStore)
@@ -139,8 +140,149 @@ local profiles: {[Player]: any} = {}
 local vipCache: {[Player]: boolean} = {}
 local deadPlayers: {[Player]: boolean} = {} 
 local loadingInventory: {[Player]: boolean} = {}
+local DEBUG_BRAINROT_TRACE = false
 
 PlayerController.isShuttingDown = false
+
+local function isTrackedTool(tool: Tool): boolean
+	local originalName = tool:GetAttribute("OriginalName")
+	return tool:GetAttribute("OriginalName") ~= nil
+		or tool:GetAttribute("IsLuckyBlock") == true
+		or BombsConfigurations.Bombs[tool.Name] ~= nil
+		or (type(originalName) == "string" and BombsConfigurations.Bombs[originalName] ~= nil)
+end
+
+local function isCriticalTraceTool(tool: Tool): boolean
+	return tool:GetAttribute("Mutation") ~= nil or tool:GetAttribute("IsLuckyBlock") == true
+end
+
+local function summarizeTool(tool: Tool): string
+	local originalName = tool:GetAttribute("OriginalName")
+	local mutation = tool:GetAttribute("Mutation")
+	local rarity = tool:GetAttribute("Rarity")
+	local level = tool:GetAttribute("Level")
+	local isLuckyBlock = tool:GetAttribute("IsLuckyBlock") == true
+	local isBomb = BombsConfigurations.Bombs[tool.Name] ~= nil
+		or (type(originalName) == "string" and BombsConfigurations.Bombs[originalName] ~= nil)
+	local toolKind = if isLuckyBlock then "LuckyBlock" elseif isBomb then "Bomb" elseif mutation ~= nil then "Brainrot" else "Tool"
+	return ("%s{name=%s,orig=%s,mut=%s,rar=%s,lvl=%s,parent=%s}"):format(
+		toolKind,
+		tostring(tool.Name),
+		tostring(originalName),
+		tostring(mutation),
+		tostring(rarity),
+		tostring(level),
+		tostring(tool.Parent and tool.Parent.Name or "nil")
+	)
+end
+
+local function summarizeToolContainer(container: Instance?): string
+	if not container then
+		return "[]"
+	end
+
+	local entries = {}
+	for _, child in ipairs(container:GetChildren()) do
+		if child:IsA("Tool") and isTrackedTool(child) then
+			table.insert(entries, summarizeTool(child))
+		end
+	end
+
+	table.sort(entries)
+	return "[" .. table.concat(entries, ", ") .. "]"
+end
+
+local function summarizeInventoryEntries(entries): string
+	if type(entries) ~= "table" or #entries == 0 then
+		return "[]"
+	end
+
+	local summary = {}
+	for index, itemData in ipairs(entries) do
+		table.insert(summary, ("#%d{name=%s,mut=%s,rar=%s,lvl=%s}"):format(
+			index,
+			tostring(itemData.Name),
+			tostring(itemData.Mutation),
+			tostring(itemData.Rarity),
+			tostring(itemData.Level)
+		))
+	end
+
+	return "[" .. table.concat(summary, ", ") .. "]"
+end
+
+local function logBrainrotTrace(player: Player?, message: string, profileInventoryOverride)
+	if not DEBUG_BRAINROT_TRACE then
+		return
+	end
+
+	local playerName = player and player.Name or "nil"
+	local profile = if player then profiles[player] else nil
+	local profileInventory = profileInventoryOverride
+	if profileInventory == nil and profile and profile.Data then
+		profileInventory = profile.Data.Inventory
+	end
+
+	local backpack = if player then player:FindFirstChild("Backpack") else nil
+	local starterGear = if player then player:FindFirstChild("StarterGear") else nil
+	print(("[BrainrotTrace][PlayerController][%s][step=%s][loading=%s][ready=%s][server=%.3f] %s | char=%s | backpack=%s | starter=%s | profileInv=%s"):format(
+		playerName,
+		tostring(player and player:GetAttribute("OnboardingStep") or nil),
+		tostring(player and loadingInventory[player] == true or false),
+		tostring(player and ProfileReadyUtils.IsReady(player) or false),
+		Workspace:GetServerTimeNow(),
+		message,
+		summarizeToolContainer(player and player.Character or nil),
+		summarizeToolContainer(backpack),
+		summarizeToolContainer(starterGear),
+		summarizeInventoryEntries(profileInventory)
+	))
+end
+
+local function shouldTraceCriticalTutorialWindow(player: Player?): boolean
+	if not player then
+		return false
+	end
+
+	local onboardingStep = tonumber(player:GetAttribute("OnboardingStep")) or 0
+	return onboardingStep == 4 or onboardingStep == 5
+end
+
+local function logCriticalInventoryTrace(player: Player?, message: string)
+	if not DEBUG_BRAINROT_TRACE or not shouldTraceCriticalTutorialWindow(player) then
+		return
+	end
+
+	print(("[BrainrotTrace][PlayerController][%s][step=%s][server=%.3f] %s"):format(
+		tostring(player and player.Name or "nil"),
+		tostring(player and player:GetAttribute("OnboardingStep") or nil),
+		Workspace:GetServerTimeNow(),
+		message
+	))
+end
+
+local function logHardToolRemovalTrace(player: Player, scope: string, tool: Tool)
+	if not DEBUG_BRAINROT_TRACE or not isCriticalTraceTool(tool) then
+		return
+	end
+
+	print(("[%s][%s] %s parent=%s"):format(
+		scope,
+		player.Name,
+		summarizeTool(tool),
+		tostring(tool.Parent and tool.Parent:GetFullName() or "nil")
+	))
+	warn(debug.traceback())
+end
+
+local function logHumanoidDeathTrace(player: Player)
+	if not DEBUG_BRAINROT_TRACE then
+		return
+	end
+
+	warn(("[HUMANOID DIED - TOOL CLEANUP TRIGGER][%s]"):format(player.Name))
+	warn(debug.traceback())
+end
 
 local function deepCopy(value)
 	if type(value) ~= "table" then
@@ -785,6 +927,9 @@ local function preserveLiveFtueBrainrotsBeforeHydrate(player: Player, profile: a
 	end
 
 	local liveEntries = collectLiveFtueBrainrotInventory(player)
+	logBrainrotTrace(player, ("preserveLiveFtueBrainrotsBeforeHydrate liveEntries=%s"):format(
+		summarizeInventoryEntries(liveEntries)
+	), profile.Data.Inventory)
 	if #liveEntries == 0 then
 		return
 	end
@@ -803,9 +948,11 @@ local function preserveLiveFtueBrainrotsBeforeHydrate(player: Player, profile: a
 
 		profile.Data.DiscoveredItems[itemData.Mutation .. "_" .. itemData.Name] = true
 	end
+
+	logBrainrotTrace(player, "preserveLiveFtueBrainrotsBeforeHydrate merged", profile.Data.Inventory)
 end
 
-local function syncInventoryData(player: Player)
+local function syncInventoryData(player: Player, reason: string?)
 	local profile = profiles[player]
 	if not profile then return end
 	if deadPlayers[player] then return end
@@ -813,6 +960,7 @@ local function syncInventoryData(player: Player)
 	local isSyncingFromSave = loadingInventory[player]
 	local inventoryData = {}
 	local newDiscovery = false
+	local previousInventoryCount = if type(profile.Data.Inventory) == "table" then #profile.Data.Inventory else 0
 
 	local function scanContainer(container: Instance)
 		for _, item in ipairs(container:GetChildren()) do
@@ -835,7 +983,20 @@ local function syncInventoryData(player: Player)
 	if backpack then scanContainer(backpack) end
 	if player.Character then scanContainer(player.Character) end
 
+	if not isSyncingFromSave and #inventoryData < previousInventoryCount then
+		logCriticalInventoryTrace(player, ("syncInventoryData shrank reason=%s inventory=%d->%d"):format(
+			tostring(reason or "unspecified"),
+			previousInventoryCount,
+			#inventoryData
+		))
+	end
+
 	if not isSyncingFromSave then profile.Data.Inventory = inventoryData end
+	logBrainrotTrace(player, ("syncInventoryData reason=%s isSyncingFromSave=%s discoveredChanged=%s"):format(
+		tostring(reason or "unspecified"),
+		tostring(isSyncingFromSave),
+		tostring(newDiscovery)
+	), if not isSyncingFromSave then inventoryData else profile.Data.Inventory)
 
 	if newDiscovery then
 		local Events = ReplicatedStorage:FindFirstChild("Events")
@@ -850,31 +1011,51 @@ local function loadInventory(player: Player, profile: any)
 	loadingInventory[player] = true
 	deadPlayers[player] = false
 	local preservedCharacterItemCounts: {[string]: number}? = nil
+	local preservedCharacterEntries = {}
 	if shouldPreserveFtueBrainrotsBeforeHydrate(player, profile) then
-		preservedCharacterItemCounts = buildInventoryItemCounts(
-			collectFtueBrainrotInventoryFromContainer(player.Character)
-		)
+		preservedCharacterEntries = collectFtueBrainrotInventoryFromContainer(player.Character)
+		preservedCharacterItemCounts = buildInventoryItemCounts(preservedCharacterEntries)
 	end
+	logBrainrotTrace(player, ("loadInventory begin preserveCharacter=%s"):format(
+		summarizeInventoryEntries(preservedCharacterEntries)
+	), profile.Data.Inventory)
 	preserveLiveFtueBrainrotsBeforeHydrate(player, profile)
 
 	local backpack = player:FindFirstChild("Backpack")
-	if backpack then backpack:ClearAllChildren() end
+	if backpack then
+		logBrainrotTrace(player, "loadInventory clearing Backpack", profile.Data.Inventory)
+		backpack:ClearAllChildren()
+		logBrainrotTrace(player, "loadInventory Backpack cleared", profile.Data.Inventory)
+	end
 
 	local starterGear = player:FindFirstChild("StarterGear")
-	if starterGear then starterGear:ClearAllChildren() end
+	if starterGear then
+		logBrainrotTrace(player, "loadInventory clearing StarterGear", profile.Data.Inventory)
+		starterGear:ClearAllChildren()
+		logBrainrotTrace(player, "loadInventory StarterGear cleared", profile.Data.Inventory)
+	end
 
 	local savedInv = profile.Data.Inventory or {}
 	for _, itemData in ipairs(savedInv) do
 		local key = itemData.Mutation .. "_" .. itemData.Name
-		if not consumeInventoryItemCount(preservedCharacterItemCounts, itemData) then
+		local preservedOnCharacter = consumeInventoryItemCount(preservedCharacterItemCounts, itemData)
+		if not preservedOnCharacter then
 			ItemManager.GiveItemToPlayer(player, itemData.Name, itemData.Mutation, itemData.Rarity, itemData.Level)
 		end
+		logBrainrotTrace(player, ("loadInventory item name=%s mut=%s rar=%s lvl=%s preservedOnCharacter=%s"):format(
+			tostring(itemData.Name),
+			tostring(itemData.Mutation),
+			tostring(itemData.Rarity),
+			tostring(itemData.Level),
+			tostring(preservedOnCharacter)
+		), profile.Data.Inventory)
 		if not profile.Data.DiscoveredItems[key] then profile.Data.DiscoveredItems[key] = true end
 	end
 
 	task.wait() 
 	loadingInventory[player] = false
-	syncInventoryData(player)
+	syncInventoryData(player, "loadInventory:end")
+	logBrainrotTrace(player, "loadInventory end", profile.Data.Inventory)
 	if player.Parent and not ProfileReadyUtils.IsReady(player) then
 		player:SetAttribute(ProfileReadyUtils.AttributeName, true)
 	end
@@ -1076,8 +1257,25 @@ local function onPlayerAdded(player: Player)
 		end
 
 		local function setupBackpackTracking(backpack: Backpack)
-			backpack.ChildAdded:Connect(function() syncInventoryData(player) end)
-			backpack.ChildRemoved:Connect(function() syncInventoryData(player) end)
+			logBrainrotTrace(player, ("setupBackpackTracking backpack=%s"):format(backpack:GetFullName()))
+			backpack.ChildAdded:Connect(function(child)
+				if child:IsA("Tool") and isTrackedTool(child) then
+					logBrainrotTrace(player, ("Backpack.ChildAdded %s"):format(summarizeTool(child)))
+				end
+				syncInventoryData(player, ("Backpack.ChildAdded:%s"):format(child.Name))
+			end)
+			backpack.ChildRemoved:Connect(function(child)
+				if child:IsA("Tool") then
+					logHardToolRemovalTrace(player, "BACKPACK REMOVE", child)
+					if isCriticalTraceTool(child) and child.Parent == nil then
+						logCriticalInventoryTrace(player, ("Backpack.ChildRemoved destroyedTool=%s"):format(summarizeTool(child)))
+					end
+				end
+				if child:IsA("Tool") and isTrackedTool(child) then
+					logBrainrotTrace(player, ("Backpack.ChildRemoved %s"):format(summarizeTool(child)))
+				end
+				syncInventoryData(player, ("Backpack.ChildRemoved:%s"):format(child.Name))
+			end)
 		end
 		local bp = player:WaitForChild("Backpack")
 		setupBackpackTracking(bp)
@@ -1087,25 +1285,74 @@ local function onPlayerAdded(player: Player)
 
 		player.CharacterAdded:Connect(function(char)
 			deadPlayers[player] = false
+			logBrainrotTrace(player, ("CharacterAdded %s"):format(char:GetFullName()))
 			task.wait(0.2)
+			logBrainrotTrace(player, "CharacterAdded invoking loadInventory")
 			loadInventory(player, profile)
 
 			local hum = char:WaitForChild("Humanoid", 10)
-			if hum then hum.Died:Connect(function() deadPlayers[player] = true end) end
+			if hum then
+				hum.Died:Connect(function()
+					logHumanoidDeathTrace(player)
+					deadPlayers[player] = true
+				end)
+			end
 
-			char.ChildAdded:Connect(function(child) if child:IsA("Tool") then syncInventoryData(player) end end)
-			char.ChildRemoved:Connect(function(child) if child:IsA("Tool") then syncInventoryData(player) end end)
+			char.ChildAdded:Connect(function(child)
+				if child:IsA("Tool") then
+					if isTrackedTool(child) then
+						logBrainrotTrace(player, ("Character.ChildAdded %s"):format(summarizeTool(child)))
+					end
+					syncInventoryData(player, ("Character.ChildAdded:%s"):format(child.Name))
+				end
+			end)
+			char.ChildRemoved:Connect(function(child)
+				if child:IsA("Tool") then
+					logHardToolRemovalTrace(player, "CHAR REMOVE HARD", child)
+					if isCriticalTraceTool(child) and child.Parent == nil then
+						logCriticalInventoryTrace(player, ("Character.ChildRemoved destroyedTool=%s"):format(summarizeTool(child)))
+					end
+					if isTrackedTool(child) then
+						logBrainrotTrace(player, ("Character.ChildRemoved %s"):format(summarizeTool(child)))
+					end
+					syncInventoryData(player, ("Character.ChildRemoved:%s"):format(child.Name))
+				end
+			end)
 		end)
 
 		if player.Character then
 			deadPlayers[player] = false
+			logBrainrotTrace(player, ("ExistingCharacter loadInventory %s"):format(player.Character:GetFullName()))
 			loadInventory(player, profile)
 
 			local hum = player.Character:FindFirstChild("Humanoid")
-			if hum then hum.Died:Connect(function() deadPlayers[player] = true end) end
+			if hum then
+				hum.Died:Connect(function()
+					logHumanoidDeathTrace(player)
+					deadPlayers[player] = true
+				end)
+			end
 
-			player.Character.ChildAdded:Connect(function(child) if child:IsA("Tool") then syncInventoryData(player) end end)
-			player.Character.ChildRemoved:Connect(function(child) if child:IsA("Tool") then syncInventoryData(player) end end)
+			player.Character.ChildAdded:Connect(function(child)
+				if child:IsA("Tool") then
+					if isTrackedTool(child) then
+						logBrainrotTrace(player, ("ExistingCharacter.ChildAdded %s"):format(summarizeTool(child)))
+					end
+					syncInventoryData(player, ("ExistingCharacter.ChildAdded:%s"):format(child.Name))
+				end
+			end)
+			player.Character.ChildRemoved:Connect(function(child)
+				if child:IsA("Tool") then
+					logHardToolRemovalTrace(player, "CHAR REMOVE HARD", child)
+					if isCriticalTraceTool(child) and child.Parent == nil then
+						logCriticalInventoryTrace(player, ("ExistingCharacter.ChildRemoved destroyedTool=%s"):format(summarizeTool(child)))
+					end
+					if isTrackedTool(child) then
+						logBrainrotTrace(player, ("ExistingCharacter.ChildRemoved %s"):format(summarizeTool(child)))
+					end
+					syncInventoryData(player, ("ExistingCharacter.ChildRemoved:%s"):format(child.Name))
+				end
+			end)
 		end
 
 		task.spawn(function()
@@ -1182,6 +1429,7 @@ function PlayerController:ReloadInventoryFromProfile(player: Player): boolean
 		return false
 	end
 
+	logBrainrotTrace(player, "ReloadInventoryFromProfile")
 	loadInventory(player, profile)
 	return true
 end
@@ -1209,7 +1457,8 @@ function PlayerController:ClearInventoryForTesting(player: Player): boolean
 	clearContainer(player:FindFirstChild("Backpack"))
 	clearContainer(player.Character)
 	clearContainer(player:FindFirstChild("StarterGear"))
-	syncInventoryData(player)
+	logBrainrotTrace(player, "ClearInventoryForTesting applied empty profile inventory")
+	syncInventoryData(player, "ClearInventoryForTesting")
 
 	local pickaxeController = getPickaxeController()
 	if pickaxeController and pickaxeController.EnsureBombFirstSlot then

@@ -20,12 +20,113 @@ local EconomyValueUtils = require(ServerScriptService.Modules.EconomyValueUtils)
 local PlayerController -- Lazy load
 local ItemManager -- Lazy load
 local LuckyBlockManager -- Lazy load
+local getSlotContentType
 local TRANSACTION_TYPES = AnalyticsEconomyService:GetTransactionTypes()
-local DEBUG_TUTORIAL = true
+local DEBUG_TUTORIAL = false
+local DEBUG_BRAINROT_TRACE = false
 
 local function debugTutorialLog(player: Player, message: string)
 	if DEBUG_TUTORIAL then
 		print(("[Tutorial][Server][%s] %s"):format(player.Name, message))
+	end
+end
+
+local function summarizeHeldTool(tool: Tool?): string
+	if not tool then
+		return "nil"
+	end
+
+	return ("Tool{name=%s,orig=%s,mut=%s,rar=%s,lvl=%s,parent=%s,lb=%s}"):format(
+		tostring(tool.Name),
+		tostring(tool:GetAttribute("OriginalName")),
+		tostring(tool:GetAttribute("Mutation")),
+		tostring(tool:GetAttribute("Rarity")),
+		tostring(tool:GetAttribute("Level")),
+		tostring(tool.Parent and tool.Parent.Name or "nil"),
+		tostring(tool:GetAttribute("LuckyBlockId"))
+	)
+end
+
+local function summarizeSlotData(slotData): string
+	if type(slotData) ~= "table" then
+		return "nil"
+	end
+
+	local contentType = getSlotContentType(slotData)
+	if contentType == "Item" and slotData.Item then
+		return ("Slot{type=Item,name=%s,mut=%s,rar=%s,lvl=%s,stored=%s}"):format(
+			tostring(slotData.Item.Name),
+			tostring(slotData.Item.Mutation),
+			tostring(slotData.Item.Rarity),
+			tostring(slotData.Level),
+			tostring(slotData.Stored)
+		)
+	end
+
+	if contentType == "LuckyBlock" and slotData.LuckyBlock then
+		return ("Slot{type=LuckyBlock,id=%s,opening=%s,lvl=%s,stored=%s}"):format(
+			tostring(slotData.LuckyBlock.Id),
+			tostring(slotData.IsOpening == true),
+			tostring(slotData.Level),
+			tostring(slotData.Stored)
+		)
+	end
+
+	return ("Slot{type=%s,lvl=%s,stored=%s}"):format(
+		tostring(contentType),
+		tostring(slotData.Level),
+		tostring(slotData.Stored)
+	)
+end
+
+local function logBrainrotTrace(player: Player, message: string)
+	if not DEBUG_BRAINROT_TRACE then
+		return
+	end
+
+	local character = player.Character
+	local heldTool = character and character:FindFirstChildWhichIsA("Tool")
+	print(("[BrainrotTrace][SlotManager][%s][step=%s][server=%.3f] %s | held=%s"):format(
+		player.Name,
+		tostring(player:GetAttribute("OnboardingStep")),
+		Workspace:GetServerTimeNow(),
+		message,
+		summarizeHeldTool(heldTool)
+	))
+end
+
+local function summarizeTraceInstance(instance: Instance?): string
+	if not instance then
+		return "nil"
+	end
+
+	if instance:IsA("Tool") then
+		return summarizeHeldTool(instance)
+	end
+
+	return ("%s{name=%s,parent=%s}"):format(
+		instance.ClassName,
+		tostring(instance.Name),
+		tostring(instance.Parent and instance.Parent.Name or "nil")
+	)
+end
+
+local function traceDestroyCall(label: string, instance: Instance?)
+	if not DEBUG_BRAINROT_TRACE or not instance then
+		return
+	end
+
+	print(("[DESTROY CALL][SlotManager][%s] %s"):format(label, summarizeTraceInstance(instance)))
+	warn(debug.traceback())
+end
+
+local function suppressFtueToolProtection(tool: Tool?)
+	if not tool then
+		return
+	end
+
+	if ItemManager and ItemManager.SuppressFtueToolProtection then
+		ItemManager.SuppressFtueToolProtection(tool)
 	end
 end
 
@@ -52,7 +153,7 @@ local function getUpgradeCost(baseIncome: number, level: number): number
 	return math.floor(baseIncome * 20 * (UPGRADE_COST_MULTIPLIER ^ (level - 1)))
 end
 
-local function getSlotContentType(slotData)
+function getSlotContentType(slotData)
 	if type(slotData) ~= "table" then
 		return nil
 	end
@@ -71,6 +172,7 @@ end
 local function clearVisualItem(spawnPart: BasePart)
 	local existingItem = spawnPart:FindFirstChild("VisualItem")
 	if existingItem then
+		traceDestroyCall("clearVisualItem.existingItem", existingItem)
 		existingItem:Destroy()
 	end
 end
@@ -235,6 +337,7 @@ local function startLuckyBlockOpening(player: Player, floorName: string, slotNam
 
 	LuckyBlockManager.PlayOpeningAnimation(visualModel)
 	if visualModel.Parent then
+		traceDestroyCall("startLuckyBlockOpening.visualModel", visualModel)
 		visualModel:Destroy()
 	end
 
@@ -359,6 +462,11 @@ function SlotManager.HandleInteraction(player: Player, floorName: string, slotNa
 	local heldTool = character and character:FindFirstChildWhichIsA("Tool")
 	local heldItemName = heldTool and heldTool:GetAttribute("OriginalName")
 	local heldLuckyBlockId = heldTool and heldTool:GetAttribute("LuckyBlockId")
+	logBrainrotTrace(player, ("HandleInteraction begin %s/%s current=%s"):format(
+		floorName,
+		slotName,
+		summarizeSlotData(currentSlotData)
+	))
 
 	debugTutorialLog(player, ("SlotInteract %s/%s occupied=%s heldItem=%s heldLB=%s step=%s"):format(
 		floorName,
@@ -402,6 +510,13 @@ function SlotManager.HandleInteraction(player: Player, floorName: string, slotNa
 				currentSlotData.Level = heldTool:GetAttribute("Level") or 1
 				currentSlotData.Stored = 0
 				currentSlotData.IsOpening = false
+				logBrainrotTrace(player, ("HandleInteraction swapIntoOccupiedSlot destroying held brainrot %s into %s/%s"):format(
+					summarizeHeldTool(heldTool),
+					floorName,
+					slotName
+				))
+				traceDestroyCall("HandleInteraction.swapIntoOccupiedSlot.brainrot", heldTool)
+				suppressFtueToolProtection(heldTool)
 				heldTool:Destroy()
 			elseif heldTool and heldLuckyBlockId then
 				currentSlotData.ContentType = "LuckyBlock"
@@ -412,6 +527,13 @@ function SlotManager.HandleInteraction(player: Player, floorName: string, slotNa
 				currentSlotData.Level = 1
 				currentSlotData.Stored = 0
 				currentSlotData.IsOpening = true
+				logBrainrotTrace(player, ("HandleInteraction swapIntoOccupiedSlot destroying held lucky block %s into %s/%s"):format(
+					summarizeHeldTool(heldTool),
+					floorName,
+					slotName
+				))
+				traceDestroyCall("HandleInteraction.swapIntoOccupiedSlot.luckyblock", heldTool)
+				suppressFtueToolProtection(heldTool)
 				heldTool:Destroy()
 			else
 				floorData[slotName] = { Item = nil, Level = 1, Stored = 0 }
@@ -430,6 +552,7 @@ function SlotManager.HandleInteraction(player: Player, floorName: string, slotNa
 				if notif then
 					notif:FireClient(player, "Pick up the lucky block first!", "Error")
 				end
+				logBrainrotTrace(player, ("HandleInteraction blocked: occupied lucky block %s/%s while tool held"):format(floorName, slotName))
 				return
 			end
 
@@ -451,6 +574,13 @@ function SlotManager.HandleInteraction(player: Player, floorName: string, slotNa
 					Stored = 0,
 					IsOpening = false,
 				}
+				logBrainrotTrace(player, ("HandleInteraction placing brainrot into empty slot %s/%s destroying held %s"):format(
+					floorName,
+					slotName,
+					summarizeHeldTool(heldTool)
+				))
+				traceDestroyCall("HandleInteraction.placeIntoEmptySlot.brainrot", heldTool)
+				suppressFtueToolProtection(heldTool)
 				heldTool:Destroy()
 				TutorialService:HandleBrainrotPlaced(player)
 				AnalyticsFunnelsService:HandlePlaceBrainrot(player)
@@ -465,6 +595,13 @@ function SlotManager.HandleInteraction(player: Player, floorName: string, slotNa
 					Stored = 0,
 					IsOpening = true,
 				}
+				logBrainrotTrace(player, ("HandleInteraction placing lucky block into empty slot %s/%s destroying held %s"):format(
+					floorName,
+					slotName,
+					summarizeHeldTool(heldTool)
+				))
+				traceDestroyCall("HandleInteraction.placeIntoEmptySlot.luckyblock", heldTool)
+				suppressFtueToolProtection(heldTool)
 				heldTool:Destroy()
 			else
 				warn("[SlotManager] Tool held has no slot-supported attributes! Cannot place.")
@@ -479,6 +616,7 @@ function SlotManager.HandleInteraction(player: Player, floorName: string, slotNa
 			if notif then
 				notif:FireClient(player, "Equip an item to place it!", "Error")
 			end
+			logBrainrotTrace(player, ("HandleInteraction blocked: no held tool for %s/%s"):format(floorName, slotName))
 			return
 		end
 	end
@@ -486,6 +624,11 @@ function SlotManager.HandleInteraction(player: Player, floorName: string, slotNa
 	local isVip = PlayerController:IsVIP(player)
 	local newData = floorData[slotName]
 	updateSlotVisuals(slotModel, newData, profile.Data.Rebirths or 0, isVip)
+	logBrainrotTrace(player, ("HandleInteraction end %s/%s newData=%s"):format(
+		floorName,
+		slotName,
+		summarizeSlotData(newData)
+	))
 
 	if newData and getSlotContentType(newData) == "LuckyBlock" and newData.IsOpening == true then
 		task.spawn(startLuckyBlockOpening, player, floorName, slotName, slotModel)

@@ -26,6 +26,7 @@ type ActiveEventState = {
 }
 
 local RoundBrainrotEventManager = {}
+local ROUND_BRAINROT_EVENTS_ENABLED = true
 
 local MinesFolder = Workspace:WaitForChild("Mines")
 local workspaceAttributes = BrainrotEventConfiguration.WorkspaceAttributes
@@ -437,6 +438,10 @@ function RoundBrainrotEventManager:HandleEventItemDelivered(itemInstance: Instan
 end
 
 function RoundBrainrotEventManager:ForceStartEvent(eventTypeId: string?): (boolean, string)
+	if not ROUND_BRAINROT_EVENTS_ENABLED then
+		return false, "Round brainrot events are temporarily disabled for tests."
+	end
+
 	local definition = chooseEventDefinition(eventTypeId)
 	if not definition then
 		return false, "Event definition not found."
@@ -476,6 +481,16 @@ function RoundBrainrotEventManager:Start()
 	end
 
 	started = true
+	clearActiveEventState(true)
+
+	if not ROUND_BRAINROT_EVENTS_ENABLED then
+		currentRoundId = nil
+		pendingEventDefinition = nil
+		pendingEventRoundId = nil
+		scheduleNonce += 1
+		return
+	end
+
 	finishEvent = ensureBindableEvent("FinishTime")
 	roundStartedEvent = ensureBindableEvent("RoundStarted")
 
@@ -484,8 +499,6 @@ function RoundBrainrotEventManager:Start()
 	TerrainGeneratorManager.ZoneReadyChanged:Connect(function()
 		trySpawnPendingEvent()
 	end)
-
-	clearWorkspaceActiveState()
 
 	local liveRoundId = tonumber(Workspace:GetAttribute("SessionRoundId"))
 	local sessionEnded = Workspace:GetAttribute("SessionEnded") == true

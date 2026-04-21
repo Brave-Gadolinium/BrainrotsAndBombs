@@ -27,6 +27,7 @@ local TerrainGeneratorManager = require(ServerScriptService.Modules.TerrainGener
 -- [ LAZY DEPENDENCIES ]
 local CarrySystem 
 local onItemPickedUp: (player: Player, itemModel: Model) -> ()
+local isInsideAnyZone: (Vector3) -> boolean
 
 -- [ ASSETS ]
 local LuckyBlocksFolder = ReplicatedStorage:WaitForChild("Luckyblocks")
@@ -114,6 +115,288 @@ local FALLBACK_ITEM_SIZE = Vector3.new(2.4, 2.4, 2.4)
 local WORLD_ITEM_PICKUP_DISTANCE = 16
 local LUCKY_BLOCK_TOOL_FORWARD_OFFSET = 2.25
 local EVENT_WORLD_ITEM_TAG = "EventBrainrotWorldItem"
+local DEBUG_BRAINROT_TRACE = false
+local FTUE_TOOL_PROTECTION_DURATION = 60
+local MAX_FTUE_TOOL_RESTORE_ATTEMPTS = 12
+type FtueProtectedToolState = {
+	Player: Player,
+	ExpiresAt: number,
+	ShouldReequip: boolean,
+	Destroying: boolean,
+	RestoreQueued: boolean,
+	RestoreAttempts: number,
+}
+local protectedFtueTools: {[Tool]: FtueProtectedToolState} = {}
+
+local function summarizeTool(tool: Tool): string
+	local originalName = tool:GetAttribute("OriginalName")
+	local mutation = tool:GetAttribute("Mutation")
+	local rarity = tool:GetAttribute("Rarity")
+	local level = tool:GetAttribute("Level")
+	local isLuckyBlock = tool:GetAttribute("IsLuckyBlock") == true
+	local toolKind = if isLuckyBlock then "LuckyBlock" elseif mutation ~= nil then "Brainrot" else "Tool"
+	return ("%s{name=%s,orig=%s,mut=%s,rar=%s,lvl=%s,parent=%s}"):format(
+		toolKind,
+		tostring(tool.Name),
+		tostring(originalName),
+		tostring(mutation),
+		tostring(rarity),
+		tostring(level),
+		tostring(tool.Parent and tool.Parent.Name or "nil")
+	)
+end
+
+local function summarizeToolContainer(container: Instance?): string
+	if not container then
+		return "[]"
+	end
+
+	local entries = {}
+	for _, child in ipairs(container:GetChildren()) do
+		if child:IsA("Tool") and (child:GetAttribute("OriginalName") ~= nil or child:GetAttribute("IsLuckyBlock") == true) then
+			table.insert(entries, summarizeTool(child))
+		end
+	end
+
+	table.sort(entries)
+	return "[" .. table.concat(entries, ", ") .. "]"
+end
+
+local function summarizeWorldItem(itemModel: Model?): string
+	if not itemModel then
+		return "nil"
+	end
+
+	return ("WorldItem{name=%s,orig=%s,mut=%s,rar=%s,lvl=%s,parent=%s}"):format(
+		tostring(itemModel.Name),
+		tostring(itemModel:GetAttribute("OriginalName")),
+		tostring(itemModel:GetAttribute("Mutation")),
+		tostring(itemModel:GetAttribute("Rarity")),
+		tostring(itemModel:GetAttribute("Level")),
+		tostring(itemModel.Parent and itemModel.Parent:GetFullName() or "nil")
+	)
+end
+
+local function logItemTrace(player: Player?, message: string)
+	if not DEBUG_BRAINROT_TRACE then
+		return
+	end
+
+	local backpack = if player then player:FindFirstChild("Backpack") else nil
+	local root = player and player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+	local inZone = root and root:IsA("BasePart") and isInsideAnyZone(root.Position) or false
+	print(("[BrainrotTrace][ItemManager][%s][step=%s][inZone=%s][server=%.3f] %s | char=%s | backpack=%s"):format(
+		tostring(player and player.Name or "nil"),
+		tostring(player and player:GetAttribute("OnboardingStep") or nil),
+		tostring(inZone),
+		Workspace:GetServerTimeNow(),
+		message,
+		summarizeToolContainer(player and player.Character or nil),
+		summarizeToolContainer(backpack)
+	))
+end
+
+local function shouldTraceCriticalTutorialWindow(player: Player?): boolean
+	if not player then
+		return false
+	end
+
+	local onboardingStep = tonumber(player:GetAttribute("OnboardingStep")) or 0
+	return onboardingStep == 4 or onboardingStep == 5
+end
+
+local function logCriticalItemTrace(player: Player?, message: string)
+	if not DEBUG_BRAINROT_TRACE or not shouldTraceCriticalTutorialWindow(player) then
+		return
+	end
+
+	print(("[BrainrotTrace][ItemManager][%s][step=%s][server=%.3f] %s"):format(
+		tostring(player and player.Name or "nil"),
+		tostring(player and player:GetAttribute("OnboardingStep") or nil),
+		Workspace:GetServerTimeNow(),
+		message
+	))
+end
+
+local function summarizeTraceInstance(instance: Instance?): string
+	if not instance then
+		return "nil"
+	end
+
+	if instance:IsA("Tool") then
+		return summarizeTool(instance)
+	end
+
+	if instance:IsA("Model") then
+		return summarizeWorldItem(instance)
+	end
+
+	return ("%s{name=%s,parent=%s}"):format(
+		instance.ClassName,
+		tostring(instance.Name),
+		tostring(instance.Parent and instance.Parent.Name or "nil")
+	)
+end
+
+local function traceDestroyCall(label: string, instance: Instance?)
+	if not DEBUG_BRAINROT_TRACE or not instance then
+		return
+	end
+
+	print(("[DESTROY CALL][ItemManager][%s] %s"):format(label, summarizeTraceInstance(instance)))
+	warn(debug.traceback())
+end
+
+local function isFtueProtectableTool(tool: Tool): boolean
+	if tool:GetAttribute("IsTemporary") == true then
+		return false
+	end
+
+	local mutation = tool:GetAttribute("Mutation")
+	local originalName = tool:GetAttribute("OriginalName")
+	return type(mutation) == "string"
+		and mutation ~= ""
+		and type(originalName) == "string"
+		and originalName ~= ""
+end
+
+local function discardFtueToolProtection(tool: Tool)
+	protectedFtueTools[tool] = nil
+end
+
+local function shouldMaintainFtueToolForPlayer(player: Player): boolean
+	local onboardingStep = tonumber(player:GetAttribute("OnboardingStep")) or 0
+	return onboardingStep == 4 or onboardingStep == 5
+end
+
+local function queueFtueToolRestore(tool: Tool)
+	local state = protectedFtueTools[tool]
+	if not state or state.RestoreQueued or state.Destroying then
+		return
+	end
+
+	state.RestoreQueued = true
+	task.defer(function()
+		local currentState = protectedFtueTools[tool]
+		if currentState ~= state then
+			return
+		end
+
+		state.RestoreQueued = false
+
+		local player = state.Player
+		if not player.Parent then
+			discardFtueToolProtection(tool)
+			return
+		end
+
+		if state.Destroying or tool.Parent ~= nil then
+			return
+		end
+
+		if Workspace:GetServerTimeNow() > state.ExpiresAt then
+			discardFtueToolProtection(tool)
+			return
+		end
+
+		if not shouldMaintainFtueToolForPlayer(player) then
+			discardFtueToolProtection(tool)
+			return
+		end
+
+		if state.RestoreAttempts >= MAX_FTUE_TOOL_RESTORE_ATTEMPTS then
+			discardFtueToolProtection(tool)
+			return
+		end
+
+		local backpack = player:FindFirstChild("Backpack")
+		if not backpack then
+			return
+		end
+
+		local restored = pcall(function()
+			tool.Parent = backpack
+		end)
+		if not restored or tool.Parent ~= backpack then
+			state.RestoreAttempts += 1
+			return
+		end
+
+		state.RestoreAttempts += 1
+
+		if state.ShouldReequip and (tonumber(player:GetAttribute("OnboardingStep")) or 0) == 5 then
+			local character = player.Character
+			local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+			if humanoid and humanoid.Health > 0 then
+				task.defer(function()
+					if protectedFtueTools[tool] ~= state then
+						return
+					end
+					if tool.Parent == backpack and humanoid.Parent then
+						humanoid:EquipTool(tool)
+					end
+				end)
+			end
+		end
+	end)
+end
+
+local function attachToolLifetimeTrace(player: Player, tool: Tool)
+	tool.Destroying:Connect(function()
+		local state = protectedFtueTools[tool]
+		if state then
+			state.Destroying = true
+		end
+		discardFtueToolProtection(tool)
+	end)
+
+	tool:GetPropertyChangedSignal("Parent"):Connect(function()
+		if tool.Parent == nil then
+			queueFtueToolRestore(tool)
+		end
+	end)
+
+	tool.AncestryChanged:Connect(function(_, parent)
+		if parent == nil then
+			queueFtueToolRestore(tool)
+		end
+	end)
+end
+
+function ItemManager.ProtectFtuePlacementTool(player: Player, tool: Tool, shouldReequip: boolean?)
+	if not player or not tool or not isFtueProtectableTool(tool) then
+		return
+	end
+
+	local state: FtueProtectedToolState = {
+		Player = player,
+		ExpiresAt = Workspace:GetServerTimeNow() + FTUE_TOOL_PROTECTION_DURATION,
+		ShouldReequip = shouldReequip ~= false,
+		Destroying = false,
+		RestoreQueued = false,
+		RestoreAttempts = 0,
+	}
+	protectedFtueTools[tool] = state
+
+	task.delay(FTUE_TOOL_PROTECTION_DURATION + 1, function()
+		local currentState = protectedFtueTools[tool]
+		if currentState == state and Workspace:GetServerTimeNow() >= state.ExpiresAt then
+			discardFtueToolProtection(tool)
+		end
+	end)
+end
+
+function ItemManager.SuppressFtueToolProtection(tool: Tool?)
+	if not tool then
+		return
+	end
+
+	local state = protectedFtueTools[tool]
+	if state then
+		state.Destroying = true
+	end
+	discardFtueToolProtection(tool)
+end
 
 type MineSpawnJob = {
 	Key: string,
@@ -381,7 +664,7 @@ local function createWorldItemModel(itemName: string, mutation: string, rarity: 
 end
 
 -- [ HELPERS ]
-local function isInsideAnyZone(position: Vector3): boolean
+function isInsideAnyZone(position: Vector3): boolean
 	for _, zonePart in ipairs(CollectionZones:GetChildren()) do
 		if zonePart:IsA("BasePart") and zonePart.Name == "ZonePart" then
 			local relativePos = zonePart.CFrame:PointToObjectSpace(position)
@@ -552,13 +835,28 @@ function ItemManager.GiveItemToPlayer(
 	isTemporary: boolean?,
 	extraAttributes: {[string]: any}?
 )
-	if not itemName then return nil end
+	if not itemName then
+		logItemTrace(player, "GiveItemToPlayer aborted missingItemName")
+		return nil
+	end
 
 	local itemConf = ItemConfigurations.GetItemData(itemName)
-	if isTemporary then return nil end
+	if isTemporary then
+		logItemTrace(player, ("GiveItemToPlayer skipped temporary name=%s"):format(tostring(itemName)))
+		return nil
+	end
+
+	logItemTrace(player, ("GiveItemToPlayer begin name=%s mut=%s rar=%s lvl=%s extra=%s"):format(
+		tostring(itemName),
+		tostring(mutation),
+		tostring(rarity),
+		tostring(level or 1),
+		tostring(type(extraAttributes) == "table")
+	))
 
 	local model = createItemModel(itemName, mutation, rarity)
 	if not model then
+		logItemTrace(player, ("GiveItemToPlayer failed createItemModel name=%s"):format(tostring(itemName)))
 		return nil
 	end
 
@@ -594,19 +892,32 @@ function ItemManager.GiveItemToPlayer(
 	model.Parent = newTool
 	model:PivotTo(handle.CFrame)
 
-	for _, p in ipairs(model:GetDescendants()) do
-		if p:IsA("BasePart") then
-			p.Anchored = false
-			p.CanCollide = false
-			p.Massless = true
-			local w = Instance.new("WeldConstraint")
-			w.Part0 = handle
-			w.Part1 = p
-			w.Parent = p
+	local strippedScripts = 0
+	for _, descendant in ipairs(model:GetDescendants()) do
+		if descendant:IsA("Script") or descendant:IsA("LocalScript") then
+			strippedScripts += 1
+			descendant:Destroy()
+		elseif descendant:IsA("BasePart") then
+			descendant.Anchored = false
+			descendant.CanCollide = false
+			descendant.Massless = true
+			local weld = Instance.new("WeldConstraint")
+			weld.Part0 = handle
+			weld.Part1 = descendant
+			weld.Parent = descendant
 		end
 	end
 
 	newTool.Parent = player:WaitForChild("Backpack")
+	attachToolLifetimeTrace(player, newTool)
+	logCriticalItemTrace(player, ("GiveItemToPlayer success tool=%s strippedScripts=%d"):format(
+		summarizeTool(newTool),
+		strippedScripts
+	))
+	logItemTrace(player, ("GiveItemToPlayer success strippedScripts=%d tool=%s"):format(
+		strippedScripts,
+		summarizeTool(newTool)
+	))
 	return newTool
 end
 function ItemManager.GiveLuckyBlockToPlayer(player: Player, blockId: string)
@@ -657,6 +968,7 @@ function ItemManager.GiveLuckyBlockToPlayer(player: Player, blockId: string)
 	local rootPart = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart")
 	if not rootPart then
 		warn("[ItemManager] Lucky block model has no root part:", blockConfig.ModelName)
+		traceDestroyCall("GiveLuckyBlockToPlayer.invalidRoot.newTool", newTool)
 		newTool:Destroy()
 		return nil
 	end
@@ -677,13 +989,17 @@ function ItemManager.GiveLuckyBlockToPlayer(player: Player, blockId: string)
 
 	model:PivotTo(handle.CFrame * CFrame.new(0, 0, -LUCKY_BLOCK_TOOL_FORWARD_OFFSET))
 	newTool.Parent = player:WaitForChild("Backpack")
+	attachToolLifetimeTrace(player, newTool)
 	return newTool
 end
 
 -- [ PICKUP LOGIC ]
 function onItemPickedUp(player: Player, itemModel: Model)
 	if not CarrySystem then CarrySystem = require(ServerScriptService.Modules.CarrySystem) end
-	if not itemModel or not itemModel.Parent then return end
+	if not itemModel or not itemModel.Parent then
+		logItemTrace(player, "onItemPickedUp ignored missingItemModel")
+		return
+	end
 
 	local spawnerPart = itemModel.Parent 
 
@@ -695,6 +1011,7 @@ function onItemPickedUp(player: Player, itemModel: Model)
 
 	local char = player.Character
 	local rootPart = char and char:FindFirstChild("HumanoidRootPart")
+	logItemTrace(player, ("onItemPickedUp begin item=%s"):format(summarizeWorldItem(itemModel)))
 
 	if name and mutation and rarity and rootPart then
 		local inZone = isInsideAnyZone(rootPart.Position)
@@ -708,6 +1025,12 @@ function onItemPickedUp(player: Player, itemModel: Model)
 					Level = level,
 					EventAttributes = eventAttributes,
 				})
+				logItemTrace(player, ("onItemPickedUp carryResult success=%s item=%s/%s/%s"):format(
+					tostring(success),
+					tostring(name),
+					tostring(mutation),
+					tostring(rarity)
+				))
 				if success then pickedUp = true end
 			else
 				local Events = ReplicatedStorage:FindFirstChild("Events")
@@ -716,22 +1039,41 @@ function onItemPickedUp(player: Player, itemModel: Model)
 				AnalyticsFunnelsService:LogFailure(player, "carry_limit_reached", {
 					zone = "mine",
 				})
+				logItemTrace(player, ("onItemPickedUp blocked by carry limit item=%s/%s/%s"):format(
+					tostring(name),
+					tostring(mutation),
+					tostring(rarity)
+				))
 			end
 		else
-			ItemManager.GiveItemToPlayer(player, name, mutation, rarity, level, false, eventAttributes)
+			local newTool = ItemManager.GiveItemToPlayer(player, name, mutation, rarity, level, false, eventAttributes)
+			logItemTrace(player, ("onItemPickedUp surfaceGive success=%s tool=%s"):format(
+				tostring(newTool ~= nil),
+				tostring(newTool and summarizeTool(newTool) or "nil")
+			))
 			pickedUp = true
 		end
 
 		if pickedUp then 
 			TutorialService:HandleBrainrotPickedUp(player, inZone)
 			AnalyticsFunnelsService:HandleMineBrainrotPickedUp(player)
+			logItemTrace(player, ("onItemPickedUp destroying world item=%s"):format(summarizeWorldItem(itemModel)))
+			traceDestroyCall("onItemPickedUp.worldItem", itemModel)
 			itemModel:Destroy() 
 
 			-- ## FIXED: Queue a replacement immediately when an item is picked up! ##
 			if spawnerPart and spawnerPart:IsA("BasePart") and not eventAttributes then
 				ItemManager.RespawnItem(spawnerPart)
 			end
+			logItemTrace(player, "onItemPickedUp complete")
 		end
+	else
+		logItemTrace(player, ("onItemPickedUp aborted invalidData name=%s mut=%s rar=%s hasRoot=%s"):format(
+			tostring(name),
+			tostring(mutation),
+			tostring(rarity),
+			tostring(rootPart ~= nil)
+		))
 	end
 end
 

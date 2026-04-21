@@ -7,6 +7,8 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 local CollectionService = game:GetService("CollectionService")
 
+local TutorialConfiguration = require(ReplicatedStorage.Modules.TutorialConfiguration)
+
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
@@ -34,6 +36,24 @@ local SellGUI: BillboardGui? = nil -- Variable to hold the current GUI
 local activeSellPart: BasePart? = nil
 local lastInteraction = 0
 local OWN_BASE_INTERACTION_RADIUS = 100
+local DEBUG_SELL_TRACE = false
+
+local function debugSellTrace(message: string)
+	if DEBUG_SELL_TRACE then
+		print(("[BrainrotTrace][SellController][%s][step=%s] %s"):format(
+			player.Name,
+			tostring(player:GetAttribute("OnboardingStep")),
+			message
+		))
+	end
+end
+
+local function shouldBlockTutorialSell(): boolean
+	local onboardingStep = tonumber(player:GetAttribute("OnboardingStep")) or 0
+	return onboardingStep > 0
+		and onboardingStep < TutorialConfiguration.FinalStep
+		and (onboardingStep == 4 or onboardingStep == 5)
+end
 
 local function getPlayerPlot(): Model?
 	local plot = Workspace:FindFirstChild("Plot_" .. player.Name)
@@ -99,14 +119,20 @@ local function closeSellMenu()
 	if SellGUI then
 		SellGUI.Enabled = false
 	end
+	debugSellTrace("closeSellMenu")
 	isMenuOpen = false
 	activeSellPart = nil
 end
 
 local function openSellMenu(sellPart: BasePart)
+	if shouldBlockTutorialSell() then
+		debugSellTrace(("openSellMenu blocked by tutorial sellPart=%s"):format(sellPart:GetFullName()))
+		return
+	end
 	if isMenuOpen or not SellGUI then return end
 	isMenuOpen = true
 	activeSellPart = sellPart
+	debugSellTrace(("openSellMenu sellPart=%s"):format(sellPart:GetFullName()))
 
 	SellGUI.Enabled = true
 	SellGUI.Adornee = sellPart
@@ -170,12 +196,24 @@ local function setupUI()
 		setupButtonAnimation(closeBtn)
 
 		sellEquippedBtn.MouseButton1Click:Connect(function()
+			if shouldBlockTutorialSell() then
+				debugSellTrace("SellEquipped click blocked by tutorial")
+				closeSellMenu()
+				return
+			end
+			debugSellTrace("SellEquipped click fired")
 			SellEvent:FireServer("Equipped")
 			closeSellMenu() 
 		end)
 		setupButtonAnimation(sellEquippedBtn)
 
 		sellInventoryBtn.MouseButton1Click:Connect(function()
+			if shouldBlockTutorialSell() then
+				debugSellTrace("SellInventory click blocked by tutorial")
+				closeSellMenu()
+				return
+			end
+			debugSellTrace("SellInventory click fired")
 			SellEvent:FireServer("Inventory")
 			closeSellMenu() 
 		end)
@@ -219,6 +257,11 @@ local function connectSellPart(instance: Instance)
 			return
 		end
 
+		if shouldBlockTutorialSell() then
+			debugSellTrace(("SellPart touched but blocked by tutorial part=%s"):format(instance:GetFullName()))
+			return
+		end
+
 		lastInteraction = now
 		openSellMenu(instance)
 	end)
@@ -243,5 +286,3 @@ player.CharacterAdded:Connect(function()
 end)
 
 sourceGui.Enabled = false 
-
-print("[SellController] Loaded - Death Fix Applied")

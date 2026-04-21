@@ -13,7 +13,7 @@ local FrameManager = require(ReplicatedStorage.Modules.FrameManager)
 local TutorialConfiguration = require(ReplicatedStorage.Modules.TutorialConfiguration)
 
 local UIInitializer = {}
-local DEBUG_TUTORIAL = true
+local DEBUG_TUTORIAL = false
 
 local function debugTutorialLog(message: string)
 	if DEBUG_TUTORIAL then
@@ -410,7 +410,6 @@ end
 
 -- [ INIT ]
 function UIInitializer:Init()
-	print("[UIInitializer] Starting...")
 	pcall(function() StarterGui:SetCore("ResetButtonCallback", false) end)
 
 	-- 2. Initialize Frames (Use IsA("GuiObject") to catch ScrollingFrames too!)
@@ -435,7 +434,6 @@ function UIInitializer:Init()
 	setupTaggedTouchTrigger("ShopPart", "Pickaxes")
 	setupTaggedTouchTrigger("RobuxShop", "Shop")
 
-	print("[UIInitializer] Ready.")
 end
 
 UIInitializer:Init()
