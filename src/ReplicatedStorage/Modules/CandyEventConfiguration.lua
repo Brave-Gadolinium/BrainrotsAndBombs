@@ -67,11 +67,11 @@ CandyEventConfiguration.TemplateSearchRoots = {
 CandyEventConfiguration.WorldVisualYawDegrees = 90
 
 CandyEventConfiguration.ZoneCandyCounts = {
-	Zone1 = 18,
-	Zone2 = 15,
-	Zone3 = 12,
-	Zone4 = 10,
-	Zone5 = 8,
+	Zone1 = 50,
+	Zone2 = 50,
+	Zone3 = 50,
+	Zone4 = 50,
+	Zone5 = 50,
 }
 
 CandyEventConfiguration.ProductKeys = {
