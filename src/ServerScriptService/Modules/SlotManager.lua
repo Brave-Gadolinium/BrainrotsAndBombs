@@ -136,6 +136,7 @@ local LuckyBlocksFolder = ReplicatedStorage:WaitForChild("Luckyblocks")
 local UpgradeGUI_Template = Templates:WaitForChild("UpgradeGUI")
 local CollectGUI_Template = Templates:WaitForChild("CollectGUI")
 local MoneyTemplate = Templates:WaitForChild("Money")
+local ConfettiTemplate = Templates:WaitForChild("Confetti")
 local Events = ReplicatedStorage:WaitForChild("Events")
 
 -- [ CONSTANTS ]
@@ -147,6 +148,23 @@ local LUCKY_BLOCK_VISUAL_VERTICAL_OFFSET = 0
 
 -- [ STATE ]
 local lastUpgradeTime = {}
+
+local function playBrainrotPlacedEffects(player: Player)
+	local character = player.Character
+	local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+	if not rootPart or not rootPart:IsA("BasePart") then
+		return
+	end
+
+	local confetti = ConfettiTemplate:Clone()
+	confetti.Parent = rootPart
+	for _, child in ipairs(confetti:GetChildren()) do
+		if child:IsA("ParticleEmitter") then
+			child:Emit(child:GetAttribute("EmitCount") or 20)
+		end
+	end
+	Debris:AddItem(confetti, 3)
+end
 
 -- [ HELPERS ]
 local function getUpgradeCost(baseIncome: number, level: number): number
@@ -518,6 +536,7 @@ function SlotManager.HandleInteraction(player: Player, floorName: string, slotNa
 				traceDestroyCall("HandleInteraction.swapIntoOccupiedSlot.brainrot", heldTool)
 				suppressFtueToolProtection(heldTool)
 				heldTool:Destroy()
+				playBrainrotPlacedEffects(player)
 			elseif heldTool and heldLuckyBlockId then
 				currentSlotData.ContentType = "LuckyBlock"
 				currentSlotData.Item = nil
@@ -582,6 +601,7 @@ function SlotManager.HandleInteraction(player: Player, floorName: string, slotNa
 				traceDestroyCall("HandleInteraction.placeIntoEmptySlot.brainrot", heldTool)
 				suppressFtueToolProtection(heldTool)
 				heldTool:Destroy()
+				playBrainrotPlacedEffects(player)
 				TutorialService:HandleBrainrotPlaced(player)
 				AnalyticsFunnelsService:HandlePlaceBrainrot(player)
 			elseif heldLuckyBlockId then
