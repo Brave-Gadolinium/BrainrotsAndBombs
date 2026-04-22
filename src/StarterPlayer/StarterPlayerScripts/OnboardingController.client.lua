@@ -1264,9 +1264,9 @@ local function syncTutorialFrames(presentation)
 
 	local currentFrameName = FrameManager.getCurrentFrameName()
 	local transitionalFrameName: string? = nil
-	if currentStep == 7 then
+	if currentStep == 6 then
 		transitionalFrameName = "Pickaxes"
-	elseif currentStep == 9 then
+	elseif currentStep == 8 then
 		transitionalFrameName = "Upgrades"
 	end
 
@@ -1279,7 +1279,7 @@ local function syncTutorialFrames(presentation)
 	if presentation.ShowUpgradesFrame and not upgradesFrame.Visible then
 		requestTutorialFrameOpen("Upgrades", function()
 			local currentPresentation = getCurrentStepPresentation()
-			return currentStep == 10 and currentPresentation.ShowUpgradesFrame and not upgradesFrame.Visible
+			return currentStep == 9 and currentPresentation.ShowUpgradesFrame and not upgradesFrame.Visible
 		end)
 	end
 end
@@ -1403,7 +1403,7 @@ local function applyTutorialUiMask(presentation)
 	local baseButton = findBaseUpgradeGuiButton()
 	for _, surfaceGui in ipairs(getPlayerPlotSurfaceGuis()) do
 		local shouldShowSurface = presentation.ShowBaseUpgradeSurfaceButton and surfaceGui == baseSurfaceGui
-		if currentStep == 11 or currentStep == 12 then
+		if currentStep == 10 or currentStep == 11 then
 			setMaskedGuiEnabled(surfaceGui, shouldShowSurface)
 		else
 			restoreMaskedGuiEnabled(surfaceGui)
@@ -1447,11 +1447,11 @@ end
 getTutorialGuiTarget = function(step: number): GuiButton?
 	if step == 4 then
 		return getBackButton()
-	elseif step == 8 then
+	elseif step == 7 then
 		return findBombBuyButton()
-	elseif step == 10 then
+	elseif step == 9 then
 		return findCharacterUpgradeButton()
-	elseif step == 11 then
+	elseif step == 10 then
 		return findBaseUpgradeGuiButton()
 	end
 
@@ -1860,24 +1860,17 @@ local function resolveWorldTargetForStep(step: number): Instance?
 		return findTutorialBaseTarget()
 	elseif step == 5 then
 		return findClosestFreeSlot()
-	elseif step == 6 then
-		return findClosestCollectTouch()
-	elseif step == 7 or step == 8 then
+	elseif step == 6 or step == 7 then
 		if not pickaxesFrame.Visible then
 			return findClosestTaggedPart("ShopPart")
 		end
 		return nil
-	elseif step == 9 then
+	elseif step == 8 or step == 9 then
 		if not upgradesFrame.Visible then
 			return findClosestTaggedPart("UpgradePart")
 		end
 		return nil
 	elseif step == 10 then
-		if not upgradesFrame.Visible then
-			return findClosestTaggedPart("UpgradePart")
-		end
-		return nil
-	elseif step == 11 then
 		return findUpgradeSlotsButtonTarget()
 	end
 

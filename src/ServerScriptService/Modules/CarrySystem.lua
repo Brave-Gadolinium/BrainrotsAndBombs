@@ -17,6 +17,7 @@ local BadgeManager = require(ServerScriptService.Modules.BadgeManager)
 local TutorialService = require(ServerScriptService.Modules.TutorialService)
 local AnalyticsFunnelsService = require(ServerScriptService.Modules.AnalyticsFunnelsService)
 local AnalyticsEconomyService = require(ServerScriptService.Modules.AnalyticsEconomyService)
+local TeleportManager = require(ServerScriptService.Modules.TeleportManager)
 local ItemManager -- Lazy Loaded
 local PickaxeController -- ## ADDED ##
 local RoundBrainrotEventManager -- Lazy Loaded
@@ -35,6 +36,7 @@ local playersInZone: {[Player]: boolean} = {}
 local pendingInitialZoneEnter: {[Player]: boolean} = {}
 local lastLimitNotif: {[Player]: number} = {}
 local lastBombRepairAttempt: {[Player]: number} = {}
+local mineIdleState: {[Player]: {LastPosition: Vector3, LastMovedAt: number}} = {}
 local ALLOW_MANUAL_CARRY_DROP = false
 local DEBUG_BRAINROT_TRACE = false
 
@@ -43,6 +45,8 @@ local CHECK_INTERVAL = 0.2
 local PROFILE_READY_EXIT_TIMEOUT_SECONDS = 3
 local STACK_GAP = 0.5 
 local STACK_HEAD_CLEARANCE = 0.05
+local MINE_IDLE_MOVE_THRESHOLD = 2
+local MINE_IDLE_TELEPORT_SECONDS = 10
 
 local function summarizeTool(tool: Tool): string
 	local originalName = tool:GetAttribute("OriginalName")
@@ -798,6 +802,30 @@ local function repairMissingBombInZone(player: Player)
 	PickaxeController.EnsureBombEquipped(player)
 end
 
+local function clearMineIdleState(player: Player)
+	mineIdleState[player] = nil
+end
+
+local function shouldTeleportIdlePlayerToBase(player: Player, position: Vector3): boolean
+	local now = os.clock()
+	local idleState = mineIdleState[player]
+	if not idleState then
+		mineIdleState[player] = {
+			LastPosition = position,
+			LastMovedAt = now,
+		}
+		return false
+	end
+
+	if (position - idleState.LastPosition).Magnitude >= MINE_IDLE_MOVE_THRESHOLD then
+		idleState.LastPosition = position
+		idleState.LastMovedAt = now
+		return false
+	end
+
+	return (now - idleState.LastMovedAt) >= MINE_IDLE_TELEPORT_SECONDS
+end
+
 function CarrySystem:Init()
 	local Modules = ServerScriptService:WaitForChild("Modules")
 	ItemManager = require(Modules:WaitForChild("ItemManager"))
@@ -846,6 +874,7 @@ function CarrySystem:Start()
 		if humanoid then
 			humanoid.Died:Connect(function()
 				logCarryTrace(player, "Humanoid.Died detected")
+				clearMineIdleState(player)
 				restoreActiveEventItemsFromCarry(player)
 				CarrySystem.ClearAllItems(player)
 			end)
@@ -857,11 +886,13 @@ function CarrySystem:Start()
 			logCarryTrace(player, ("CharacterAdded resettingCarry character=%s"):format(character:GetFullName()))
 			carryingData[player] = {}
 			pendingInitialZoneEnter[player] = true
+			clearMineIdleState(player)
 			bindCharacter(player, character)
 		end)
 
 		if player.Character then
 			pendingInitialZoneEnter[player] = true
+			clearMineIdleState(player)
 			bindCharacter(player, player.Character)
 		end
 	end
@@ -879,6 +910,21 @@ function CarrySystem:Start()
 				if character then
 					local rootPart = character:FindFirstChild("HumanoidRootPart") :: BasePart
 					if rootPart and isInsideAnyZone(rootPart.Position) then
+						if shouldTeleportIdlePlayerToBase(player, rootPart.Position) then
+							local teleported = TeleportManager.TeleportPlayerToBase(player, 4)
+							if teleported then
+								logCarryTrace(player, "Auto-teleported idle player from mine to base")
+								clearMineIdleState(player)
+								pendingInitialZoneEnter[player] = nil
+							else
+								local idleState = mineIdleState[player]
+								if idleState then
+									idleState.LastMovedAt = os.clock()
+								end
+							end
+							continue
+						end
+
 						local isInitialZoneEnter = pendingInitialZoneEnter[player] == true and playersInZone[player] ~= true
 						foundPlayers[player] = true
 						initialZoneEnterByPlayer[player] = isInitialZoneEnter
@@ -890,7 +936,12 @@ function CarrySystem:Start()
 						end
 					elseif pendingInitialZoneEnter[player] then
 						pendingInitialZoneEnter[player] = nil
+						clearMineIdleState(player)
+					else
+						clearMineIdleState(player)
 					end
+				else
+					clearMineIdleState(player)
 				end
 			end
 			for player, _ in pairs(playersInZone) do
@@ -919,6 +970,7 @@ function CarrySystem:Start()
 		pendingInitialZoneEnter[player] = nil
 		lastLimitNotif[player] = nil
 		lastBombRepairAttempt[player] = nil
+		mineIdleState[player] = nil
 	end)
 end
 

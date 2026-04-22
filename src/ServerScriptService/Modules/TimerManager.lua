@@ -7,7 +7,7 @@ local Workspace = game:GetService("Workspace")
 
 local Constants = require(ReplicatedStorage.Modules.Constants)
 local DepthLevelUtils = require(ServerScriptService.Modules.DepthLevelUtils)
-local SpawnUtils = require(ServerScriptService.Modules.SpawnUtils)
+local TeleportManager = require(ServerScriptService.Modules.TeleportManager)
 
 local function ensureTimerFolder(): Folder
 	local remotesFolder = ReplicatedStorage:FindFirstChild("Remotes")
@@ -74,15 +74,7 @@ local function teleportPlayerToBase(player: Player)
 		return
 	end
 
-	local plot = Workspace:FindFirstChild("Plot_" .. player.Name)
-	if not plot then
-		return
-	end
-
-	local spawnCFrame = SpawnUtils.GetPlotSpawnCFrame(plot, 3)
-	if spawnCFrame then
-		root.CFrame = spawnCFrame
-	end
+	TeleportManager.TeleportPlayerToBase(player, 3)
 end
 
 local function waitForMineStartupPlayable()

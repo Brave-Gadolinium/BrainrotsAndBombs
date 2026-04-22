@@ -33,16 +33,18 @@ local purchaseAttributions: {[Player]: {[string]: PurchaseAttribution}} = {}
 local autoBombToggleSurfaces: {[Player]: {Surface: string, ExpiresAt: number}} = {}
 local initialized = false
 
-local TUTORIAL_VERSION = "ftue_v3"
-local TUTORIAL_FUNNEL_NAME = "Tutor_17/04"
+local TUTORIAL_VERSION = "tutor_22_04"
+local TUTORIAL_FUNNEL_KEY = "Tutor_22_04"
+local TUTORIAL_FUNNEL_NAME = "Tutor_22/04"
+local LEGACY_TUTORIAL_FUNNEL_KEYS = {"TutorialFTUE"}
 local SECONDS_PER_DAY = 86400
 local FREE_SPIN_COOLDOWN_SECONDS = math.max(0, tonumber(DailySpinConfiguration.FreeSpinCooldownSeconds) or (15 * 60))
 local PURCHASE_ATTRIBUTION_TTL = 120
 local OneTimeFunnels = {
-	TutorialFTUE = {
+	[TUTORIAL_FUNNEL_KEY] = {
 		Kind = "Standard",
 		FunnelName = TUTORIAL_FUNNEL_NAME,
-		LegacyKey = "OnboardingFunnelStep",
+		LegacyOneTimeKeys = LEGACY_TUTORIAL_FUNNEL_KEYS,
 		Steps = {
 			[1] = "JoinGame",
 			[2] = "WalkToZone",
@@ -50,14 +52,12 @@ local OneTimeFunnels = {
 			[4] = "PickupBrainrot",
 			[5] = "BackToSurface",
 			[6] = "PlaceBrainrot",
-			[7] = "Collect50Cash",
-			[8] = "OpenBombShop",
-			[9] = "BuyBomb2",
-			[10] = "OpenCharacterUpgrader",
-			[11] = "CharacterUpgradeComplete",
-			[12] = "ApproachBaseUpgrade",
-			[13] = "BaseUpgradeComplete",
-			[14] = "TutorialComplete",
+			[7] = "OpenBombShop",
+			[8] = "BuyBomb2",
+			[9] = "OpenCharacterUpgrader",
+			[10] = "CharacterUpgradeComplete",
+			[11] = "BaseUpgradeComplete",
+			[12] = "TutorialComplete",
 		},
 	},
 	EarlyProgressionToFirstRebirth = {
@@ -438,6 +438,12 @@ local function getOneTimeStep(profile: any, funnelKey: string): number
 	local funnelConfig = OneTimeFunnels[funnelKey]
 	local storedStep = tonumber(analyticsData.OneTime[funnelKey]) or 0
 
+	if funnelConfig and type(funnelConfig.LegacyOneTimeKeys) == "table" then
+		for _, legacyKey in ipairs(funnelConfig.LegacyOneTimeKeys) do
+			storedStep = math.max(storedStep, tonumber(analyticsData.OneTime[legacyKey]) or 0)
+		end
+	end
+
 	if funnelConfig and funnelConfig.LegacyKey then
 		storedStep = math.max(storedStep, tonumber(profile.Data[funnelConfig.LegacyKey]) or 0)
 	end
@@ -451,6 +457,12 @@ local function setOneTimeStep(profile: any, funnelKey: string, step: number)
 	analyticsData.OneTime[funnelKey] = step
 
 	local funnelConfig = OneTimeFunnels[funnelKey]
+	if funnelConfig and type(funnelConfig.LegacyOneTimeKeys) == "table" then
+		for _, legacyKey in ipairs(funnelConfig.LegacyOneTimeKeys) do
+			analyticsData.OneTime[legacyKey] = nil
+		end
+	end
+
 	if funnelConfig and funnelConfig.LegacyKey then
 		profile.Data[funnelConfig.LegacyKey] = step
 	end
@@ -764,8 +776,10 @@ function AnalyticsFunnelsService:LogFailure(player: Player, reason: string, cust
 end
 
 function AnalyticsFunnelsService:SyncTutorial(player: Player, tutorialStep: number)
-	local funnelStep = if tutorialStep >= TutorialConfiguration.FinalStep then 14 else math.clamp(tutorialStep, 1, 13)
-	if advanceOneTimeFunnel(player, "TutorialFTUE", funnelStep, {
+	local tutorialFunnelConfig = OneTimeFunnels[TUTORIAL_FUNNEL_KEY]
+	local funnelFinalStep = tutorialFunnelConfig and #tutorialFunnelConfig.Steps or TutorialConfiguration.FinalStep
+	local funnelStep = math.clamp(tutorialStep, 1, funnelFinalStep)
+	if advanceOneTimeFunnel(player, TUTORIAL_FUNNEL_KEY, funnelStep, {
 		zone = "tutorial",
 	}) and tutorialStep >= TutorialConfiguration.FinalStep then
 		advanceOneTimeFunnel(player, "EarlyProgressionToFirstRebirth", 1, {

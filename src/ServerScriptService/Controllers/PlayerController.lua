@@ -38,6 +38,24 @@ local COLLECT_ALL_GAMEPASS = ProductConfigurations.GamePasses.CollectAll or 1783
 local LIMITED_TIME_COLLECT_ALL_DURATION = math.max(0, math.floor(tonumber(LimitedTimeOfferConfiguration.OfferDurationSeconds) or 0))
 
 local GROUP_ID = 0 
+local CURRENT_TUTORIAL_VERSION = 3
+local CURRENT_TUTORIAL_FUNNEL_KEY = "Tutor_22_04"
+local LEGACY_TUTORIAL_FUNNEL_KEY = "TutorialFTUE"
+local CURRENT_TUTORIAL_FUNNEL_MAX_STEP = TutorialConfiguration.FinalStep
+
+local function remapLegacyTutorialFunnelStep(step: any): number
+	local legacyStep = math.max(0, math.floor(tonumber(step) or 0))
+
+	if legacyStep <= 6 then
+		return math.clamp(legacyStep, 0, CURRENT_TUTORIAL_FUNNEL_MAX_STEP)
+	end
+
+	if legacyStep <= 11 then
+		return math.clamp(legacyStep - 1, 0, CURRENT_TUTORIAL_FUNNEL_MAX_STEP)
+	end
+
+	return math.clamp(legacyStep - 2, 0, CURRENT_TUTORIAL_FUNNEL_MAX_STEP)
+end
 
 -- Data Types
 type ItemData = { Name: string, Mutation: string, Rarity: string, Level: number }
@@ -93,7 +111,7 @@ local Template: PlayerData = {
 	unlocked_slots = SlotUnlockConfigurations.StartSlots,
 	OnboardingStep = 1,
 	PostTutorialStage = 0,
-	TutorialVersion = 2,
+	TutorialVersion = CURRENT_TUTORIAL_VERSION,
 	TutorialFreeCharacterUpgradeConsumed = false,
 	TutorialFreeBaseUpgradeConsumed = false,
 	TutorialSpecialBrainrotGranted = false,
@@ -1319,11 +1337,23 @@ local function onPlayerAdded(player: Player)
 		profile.Data.TutorialSpecialBrainrotGranted = false
 	end
 
-	profile.Data.OnboardingFunnelStep = math.clamp(tonumber(profile.Data.OnboardingFunnelStep) or 0, 0, 14)
-	profile.Data.AnalyticsFunnels.OneTime.TutorialFTUE = math.max(
-		tonumber(profile.Data.AnalyticsFunnels.OneTime.TutorialFTUE) or 0,
-		profile.Data.OnboardingFunnelStep
+	local tutorialVersion = tonumber(profile.Data.TutorialVersion) or 1
+	local currentTutorialFunnelStep = math.clamp(
+		tonumber(profile.Data.AnalyticsFunnels.OneTime[CURRENT_TUTORIAL_FUNNEL_KEY]) or 0,
+		0,
+		CURRENT_TUTORIAL_FUNNEL_MAX_STEP
 	)
+	local legacyTutorialFunnelStep = if tutorialVersion < CURRENT_TUTORIAL_VERSION
+		then math.max(
+			remapLegacyTutorialFunnelStep(profile.Data.OnboardingFunnelStep),
+			remapLegacyTutorialFunnelStep(profile.Data.AnalyticsFunnels.OneTime[LEGACY_TUTORIAL_FUNNEL_KEY])
+		)
+		else math.clamp(tonumber(profile.Data.OnboardingFunnelStep) or 0, 0, CURRENT_TUTORIAL_FUNNEL_MAX_STEP)
+	local normalizedTutorialFunnelStep = math.max(currentTutorialFunnelStep, legacyTutorialFunnelStep)
+
+	profile.Data.OnboardingFunnelStep = normalizedTutorialFunnelStep
+	profile.Data.AnalyticsFunnels.OneTime[CURRENT_TUTORIAL_FUNNEL_KEY] = normalizedTutorialFunnelStep
+	profile.Data.AnalyticsFunnels.OneTime[LEGACY_TUTORIAL_FUNNEL_KEY] = nil
 	if profile.Data.DiscoveredItems == nil then profile.Data.DiscoveredItems = {} end
 	if profile.Data.ClaimedPacks == nil then profile.Data.ClaimedPacks = {} end
 	if type(profile.Data.RedeemedCodes) ~= "table" then profile.Data.RedeemedCodes = {} end

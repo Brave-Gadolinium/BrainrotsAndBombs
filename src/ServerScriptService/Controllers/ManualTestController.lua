@@ -1179,7 +1179,7 @@ local function setTutorialFtueState(target: Player, characterUpgradeConsumed: bo
 		return false
 	end
 
-	profile.Data.TutorialVersion = 2
+	profile.Data.TutorialVersion = 3
 	profile.Data.TutorialFreeCharacterUpgradeConsumed = characterUpgradeConsumed
 	profile.Data.TutorialFreeBaseUpgradeConsumed = baseUpgradeConsumed
 	return true
