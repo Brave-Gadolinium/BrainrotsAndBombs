@@ -17,6 +17,7 @@ local PlotRuntimeBridge = require(ServerScriptService.Modules.PlotRuntimeBridge)
 local TutorialService = require(ServerScriptService.Modules.TutorialService)
 local NumberFormatter = require(ReplicatedStorage.Modules.NumberFormatter)
 local SlotUnlockConfigurations = require(ReplicatedStorage.Modules.SlotUnlockConfigurations)
+local TutorialConfiguration = require(ReplicatedStorage.Modules.TutorialConfiguration)
 local ProductConfigurations = require(ReplicatedStorage.Modules.ProductConfigurations)
 local BoosterService = require(ServerScriptService.Modules.BoosterService)
 
@@ -35,6 +36,7 @@ local UPGRADE_BASE_EFFECT_NAME = "_UpgradeBaseEffect"
 local UPGRADE_BASE_EFFECT_DURATION = 2
 local UPGRADE_BASE_EFFECT_LIFT = 0.05
 local TRANSACTION_TYPES = AnalyticsEconomyService:GetTransactionTypes()
+local TUTORIAL_PLACE_BRAINROT_STEP = math.max(1, math.floor(tonumber(TutorialConfiguration.PlotSpawnUnlockStep) or 5))
 
 -- State
 local occupiedPlots = {}
@@ -80,6 +82,56 @@ local function getFreePlotIndex(): number?
 		end
 	end
 	return nil
+end
+
+local function hasBrainrotTool(container: Instance?): boolean
+	if not container then
+		return false
+	end
+
+	for _, child in ipairs(container:GetChildren()) do
+		if child:IsA("Tool") and child:GetAttribute("Mutation") ~= nil then
+			return true
+		end
+	end
+
+	return false
+end
+
+local function hasBrainrotInSavedInventory(player: Player): boolean
+	local profile = PlayerController:GetProfile(player)
+	local inventory = profile and profile.Data and profile.Data.Inventory
+	if type(inventory) ~= "table" then
+		return false
+	end
+
+	for _, itemData in pairs(inventory) do
+		if type(itemData) == "table" and itemData.Mutation ~= nil then
+			return true
+		end
+	end
+
+	return false
+end
+
+local function hasTutorialBrainrot(player: Player): boolean
+	local character = player.Character
+	if character then
+		if character:FindFirstChild("StackItem") or character:FindFirstChild("HeadStackItem") then
+			return true
+		end
+
+		if hasBrainrotTool(character) then
+			return true
+		end
+	end
+
+	return hasBrainrotTool(player:FindFirstChild("Backpack")) or hasBrainrotInSavedInventory(player)
+end
+
+local function shouldUseMineSpawnForEarlyTutorial(player: Player): boolean
+	local onboardingStep = getOnboardingStepForSpawn(player)
+	return onboardingStep <= TUTORIAL_PLACE_BRAINROT_STEP and not hasTutorialBrainrot(player)
 end
 
 local function getRotationOnly(cf: CFrame): CFrame
@@ -668,7 +720,9 @@ end
 
 local function handleCharacterSpawn(player: Player, character: Model)
 	local plotModel = activePlotModels[player]
-	local spawnCFrame = SpawnUtils.GetCharacterSpawnCFrame(plotModel, getOnboardingStepForSpawn(player), 3)
+	local spawnCFrame = if shouldUseMineSpawnForEarlyTutorial(player)
+		then SpawnUtils.GetNewPlayerSpawnCFrame(3)
+		else SpawnUtils.GetCharacterSpawnCFrame(plotModel, getOnboardingStepForSpawn(player), 3)
 
 	if spawnCFrame then
 		character:PivotTo(spawnCFrame)

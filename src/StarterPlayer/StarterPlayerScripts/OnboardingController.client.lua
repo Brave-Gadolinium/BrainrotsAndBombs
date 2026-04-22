@@ -64,7 +64,6 @@ local tutorialGuiStepLabel: TextLabel? = nil
 local tutorialGuiPulseScale: UIScale? = nil
 local tutorialGuiPulseTween: Tween? = nil
 local tutorialGuiTargetStep: number? = nil
-local tutorialBombCursor: GuiObject? = nil
 local tutorialBombPulseScale: UIScale? = nil
 local tutorialBombPulseTween: Tween? = nil
 local tutorialBombButton: GuiButton? = nil
@@ -94,8 +93,8 @@ local maskDirty = false
 local hasAppliedTutorialCompletionCleanup = false
 local DEFAULT_CAMERA_FOV = 70
 local TUTORIAL_FRAME_OPEN_COOLDOWN = 0.75
-local TUTORIAL_BOMB_PULSE_SCALE = 1.32
-local TUTORIAL_BOMB_PULSE_TWEEN_INFO = TweenInfo.new(0.42, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true)
+local TUTORIAL_BOMB_PULSE_SCALE = 1.4
+local TUTORIAL_BOMB_PULSE_TWEEN_INFO = TweenInfo.new(0.38, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true)
 local tutorialFrameOpenDebounce: {[string]: number} = {}
 local tutorialFrameOpenPending: {[string]: boolean} = {}
 
@@ -362,47 +361,6 @@ end
 
 local function hideTutorialBombGuidance()
 	stopTutorialBombPulse()
-
-	if tutorialBombCursor then
-		tutorialBombCursor.Visible = false
-	end
-end
-
-local function ensureTutorialBombCursor(button: GuiButton): GuiObject?
-	if tutorialBombCursor and tutorialBombCursor.Parent == button then
-		return tutorialBombCursor
-	end
-
-	if tutorialBombCursor then
-		tutorialBombCursor:Destroy()
-		tutorialBombCursor = nil
-	end
-
-	local cursorTemplate = Templates:FindFirstChild("Cursor")
-	local cursor: GuiObject
-	if cursorTemplate and cursorTemplate:IsA("GuiObject") then
-		cursor = cursorTemplate:Clone()
-	else
-		local fallbackCursor = Instance.new("TextLabel")
-		fallbackCursor.BackgroundTransparency = 1
-		fallbackCursor.Font = Enum.Font.GothamBlack
-		fallbackCursor.Text = "v"
-		fallbackCursor.TextColor3 = Color3.fromRGB(255, 235, 85)
-		fallbackCursor.TextScaled = true
-		cursor = fallbackCursor
-	end
-
-	cursor.Name = "TutorialCursor"
-	cursor.AnchorPoint = Vector2.new(0.5, 1)
-	cursor.Position = UDim2.fromScale(0.5, -0.08)
-	cursor.Size = UDim2.fromScale(0.8, 0.8)
-	cursor.BackgroundTransparency = 1
-	cursor.Visible = false
-	cursor.ZIndex = getHighestGuiZIndex(button, nil) + 2
-	cursor.Parent = button
-	tutorialBombCursor = cursor
-
-	return cursor
 end
 
 local function ensureTutorialBombPulse(button: GuiButton): UIScale
@@ -412,13 +370,20 @@ local function ensureTutorialBombPulse(button: GuiButton): UIScale
 
 	if tutorialBombPulseScale then
 		stopTutorialBombPulse()
-		tutorialBombPulseScale:Destroy()
+		if tutorialBombPulseScale.Name == "TutorialBombPulseScale" then
+			tutorialBombPulseScale:Destroy()
+		end
+		tutorialBombPulseScale = nil
 	end
 
-	local pulseScale = Instance.new("UIScale")
-	pulseScale.Name = "TutorialBombPulseScale"
-	pulseScale.Scale = 1
-	pulseScale.Parent = button
+	local pulseScale = button:FindFirstChildOfClass("UIScale") :: UIScale?
+	if not pulseScale then
+		pulseScale = Instance.new("UIScale")
+		pulseScale.Name = "TutorialBombPulseScale"
+		pulseScale.Scale = 1
+		pulseScale.Parent = button
+	end
+
 	tutorialBombPulseScale = pulseScale
 
 	return pulseScale
@@ -474,12 +439,6 @@ local function syncTutorialBombGuidance()
 	end
 
 	bindTutorialBombButton(button)
-
-	local cursor = ensureTutorialBombCursor(button)
-	if cursor then
-		cursor.Visible = true
-		cursor.ZIndex = getHighestGuiZIndex(button, cursor) + 2
-	end
 
 	startTutorialBombPulse(button)
 end

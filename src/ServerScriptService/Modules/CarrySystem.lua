@@ -46,7 +46,7 @@ local PROFILE_READY_EXIT_TIMEOUT_SECONDS = 3
 local STACK_GAP = 0.5 
 local STACK_HEAD_CLEARANCE = 0.05
 local MINE_IDLE_MOVE_THRESHOLD = 2
-local MINE_IDLE_TELEPORT_SECONDS = 10
+local MINE_IDLE_TELEPORT_SECONDS = 15
 
 local function summarizeTool(tool: Tool): string
 	local originalName = tool:GetAttribute("OriginalName")

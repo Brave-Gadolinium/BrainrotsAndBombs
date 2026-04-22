@@ -18,6 +18,7 @@ local ProductConfigurations = require(ReplicatedStorage:WaitForChild("Modules"):
 local NotificationManager = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("NotificationManager")) 
 local Constants = require(ReplicatedStorage.Modules.Constants)
 local FrameManager = require(ReplicatedStorage.Modules.FrameManager)
+local TutorialConfiguration = require(ReplicatedStorage.Modules.TutorialConfiguration)
 
 local player = Players.LocalPlayer
 local hudInitialized = false
@@ -156,8 +157,14 @@ local function setupHUD()
 		return string.format("%02d:%02d", minutes, seconds)
 	end
 
+	local function isTimerHiddenByTutorial(): boolean
+		local onboardingStep = tonumber(player:GetAttribute("OnboardingStep"))
+		local placeBrainrotStep = math.max(1, math.floor(tonumber(TutorialConfiguration.PlotSpawnUnlockStep) or 5))
+		return onboardingStep == nil or onboardingStep <= placeBrainrotStep
+	end
+
 	local function updateSessionTimer()
-		timeLabel.Visible = not FrameManager.isAnyFrameOpen()
+		timeLabel.Visible = not isTimerHiddenByTutorial() and not FrameManager.isAnyFrameOpen()
 
 		local isEnded = Workspace:GetAttribute("SessionEnded") == true
 		local message = Workspace:GetAttribute("SessionMessage")
@@ -186,6 +193,7 @@ local function setupHUD()
 	Workspace:GetAttributeChangedSignal("SessionEnded"):Connect(updateSessionTimer)
 	Workspace:GetAttributeChangedSignal("SessionMessage"):Connect(updateSessionTimer)
 	FrameManager.Changed:Connect(updateSessionTimer)
+	player:GetAttributeChangedSignal("OnboardingStep"):Connect(updateSessionTimer)
 	updateSessionTimer()
 
 	local trackedVisualItems: {[Model]: number} = {}
