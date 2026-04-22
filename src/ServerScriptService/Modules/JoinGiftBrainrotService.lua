@@ -47,6 +47,8 @@ local deferredEquipStates: {[Player]: DeferredEquipState} = {}
 local deferredEquipScheduleNonce: {[Player]: number} = {}
 local randomObject = Random.new()
 local started = false
+local PROFILE_LOAD_TIMEOUT_SECONDS = 30
+local TUTORIAL_SPECIAL_BRAINROT_GRANTED_KEY = "TutorialSpecialBrainrotGranted"
 
 local function getJoinGiftRemotes(): Folder
 	return ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("JoinGiftBrainrot") :: Folder
@@ -81,6 +83,52 @@ local function getAliveRootPart(player: Player): BasePart?
 	return nil
 end
 
+local function getPlayerProfile(player: Player)
+	if not PlayerController or not PlayerController.GetProfile then
+		return nil
+	end
+
+	return PlayerController:GetProfile(player)
+end
+
+local function hasGrantedSpecialBrainrot(player: Player, profileOverride): boolean
+	local profile = profileOverride or getPlayerProfile(player)
+	local data = profile and profile.Data
+	return type(data) == "table" and data[TUTORIAL_SPECIAL_BRAINROT_GRANTED_KEY] == true
+end
+
+local function markSpecialBrainrotGranted(player: Player, profileOverride)
+	local profile = profileOverride or getPlayerProfile(player)
+	local data = profile and profile.Data
+	if type(data) ~= "table" then
+		return false
+	end
+
+	data[TUTORIAL_SPECIAL_BRAINROT_GRANTED_KEY] = true
+	player:SetAttribute(TUTORIAL_SPECIAL_BRAINROT_GRANTED_KEY, true)
+	return true
+end
+
+local function waitForProfile(player: Player, timeoutSeconds: number?): any
+	local timeout = tonumber(timeoutSeconds)
+	local deadline = if type(timeout) == "number" and timeout > 0 then os.clock() + timeout else math.huge
+
+	while player.Parent do
+		local profile = getPlayerProfile(player)
+		if profile then
+			return profile
+		end
+
+		if os.clock() >= deadline then
+			return nil
+		end
+
+		task.wait(0.1)
+	end
+
+	return nil
+end
+
 local function chooseRandomGiftItem(): string?
 	local rarity = tostring(JoinGiftBrainrotConfiguration.Rarity or "Legendary")
 	local items = ItemConfigurations.GetItemsByRarity(rarity)
@@ -102,6 +150,11 @@ end
 
 local function getPublicStateForPlayer(player: Player)
 	if JoinGiftBrainrotConfiguration.Enabled ~= true then
+		return nil
+	end
+
+	if hasGrantedSpecialBrainrot(player) then
+		clearPendingState(player, false)
 		return nil
 	end
 
@@ -205,6 +258,12 @@ local function armGiftForPlayer(player: Player, shouldNotifyClient: boolean?): (
 		return false, "Join gift is disabled."
 	end
 
+	local profile = getPlayerProfile(player)
+	if profile and hasGrantedSpecialBrainrot(player, profile) then
+		clearPendingState(player, shouldNotifyClient, "cancelled")
+		return false, "Special tutorial brainrot was already granted."
+	end
+
 	local itemName = chooseRandomGiftItem()
 	if not itemName then
 		clearPendingState(player, shouldNotifyClient, "cancelled")
@@ -236,9 +295,12 @@ local function grantPendingGift(player: Player, state: PendingGiftState, source:
 		return {Success = false, Error = "DependenciesMissing"}
 	end
 
-	local profile = PlayerController:GetProfile(player)
+	local profile = getPlayerProfile(player)
 	if not profile then
 		return {Success = false, Error = "ProfileNotLoaded"}
+	end
+	if hasGrantedSpecialBrainrot(player, profile) then
+		return {Success = false, Error = "AlreadyGranted"}
 	end
 
 	local tool = ItemManager.GiveItemToPlayer(
@@ -251,6 +313,8 @@ local function grantPendingGift(player: Player, state: PendingGiftState, source:
 	if not tool then
 		return {Success = false, Error = "ItemGrantFailed"}
 	end
+
+	markSpecialBrainrotGranted(player, profile)
 
 	if PlayerController.EnsureInventoryContainsItems then
 		PlayerController:EnsureInventoryContainsItems(player, {
@@ -334,6 +398,11 @@ local function validateManualPickup(player: Player, state: PendingGiftState, tok
 end
 
 local function handlePreviewShown(player: Player, token: any, previewPosition: any)
+	if hasGrantedSpecialBrainrot(player) then
+		clearPendingState(player, true, "cancelled")
+		return
+	end
+
 	local state = pendingStates[player]
 	if not state or type(token) ~= "string" or state.Token ~= token then
 		return
@@ -379,6 +448,13 @@ function JoinGiftBrainrotService:HandlePickupRequest(player: Player, token: stri
 		return {
 			Success = false,
 			Error = "NoPendingState",
+		}
+	end
+	if hasGrantedSpecialBrainrot(player) then
+		clearPendingState(player, true, "cancelled")
+		return {
+			Success = false,
+			Error = "AlreadyGranted",
 		}
 	end
 
@@ -435,7 +511,17 @@ function JoinGiftBrainrotService:Init(controllers)
 	end)
 
 	Players.PlayerAdded:Connect(function(player)
-		armGiftForPlayer(player, false)
+		task.spawn(function()
+			local profile = waitForProfile(player, PROFILE_LOAD_TIMEOUT_SECONDS)
+			if not profile or not player.Parent then
+				return
+			end
+			if hasGrantedSpecialBrainrot(player, profile) then
+				clearPendingState(player, false, "cancelled")
+				return
+			end
+			armGiftForPlayer(player, false)
+		end)
 
 		player.CharacterAdded:Connect(function()
 			if deferredEquipStates[player] then
@@ -445,7 +531,17 @@ function JoinGiftBrainrotService:Init(controllers)
 	end)
 
 	for _, player in ipairs(Players:GetPlayers()) do
-		armGiftForPlayer(player, false)
+		task.spawn(function()
+			local profile = waitForProfile(player, PROFILE_LOAD_TIMEOUT_SECONDS)
+			if not profile or not player.Parent then
+				return
+			end
+			if hasGrantedSpecialBrainrot(player, profile) then
+				clearPendingState(player, false, "cancelled")
+				return
+			end
+			armGiftForPlayer(player, false)
+		end)
 		player.CharacterAdded:Connect(function()
 			if deferredEquipStates[player] then
 				scheduleDeferredEquip(player, 0.6)

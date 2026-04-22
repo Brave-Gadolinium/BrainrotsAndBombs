@@ -35,6 +35,10 @@ local activePromptConnection: RBXScriptConnection? = nil
 local refreshNonce = 0
 local pickupRequestInFlight = false
 
+local function hasAlreadyReceivedTutorialGift(): boolean
+	return player:GetAttribute("TutorialSpecialBrainrotGranted") == true
+end
+
 local function getAliveRootPart(): BasePart?
 	local character = player.Character
 	if not character then
@@ -389,6 +393,11 @@ local function requestAndMaybeShowPreview(applyJoinDelay: boolean)
 			return
 		end
 
+		if hasAlreadyReceivedTutorialGift() then
+			cleanupPreview()
+			return
+		end
+
 		if applyJoinDelay then
 			local deadline = os.clock() + math.max(0, tonumber(JoinGiftBrainrotConfiguration.PreviewDelaySeconds) or 0)
 			while refreshNonce == nonce and player.Parent and os.clock() < deadline do
@@ -400,6 +409,11 @@ local function requestAndMaybeShowPreview(applyJoinDelay: boolean)
 		end
 
 		if refreshNonce ~= nonce or not player.Parent then
+			return
+		end
+
+		if hasAlreadyReceivedTutorialGift() then
+			cleanupPreview()
 			return
 		end
 
@@ -452,6 +466,13 @@ end)
 player.CharacterAdded:Connect(function()
 	cleanupPreview()
 	requestAndMaybeShowPreview(true)
+end)
+
+player:GetAttributeChangedSignal("TutorialSpecialBrainrotGranted"):Connect(function()
+	if hasAlreadyReceivedTutorialGift() then
+		refreshNonce += 1
+		cleanupPreview()
+	end
 end)
 
 task.defer(function()

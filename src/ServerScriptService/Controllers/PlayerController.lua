@@ -56,6 +56,7 @@ type PlayerData = {
 	TutorialVersion: number,
 	TutorialFreeCharacterUpgradeConsumed: boolean,
 	TutorialFreeBaseUpgradeConsumed: boolean,
+	TutorialSpecialBrainrotGranted: boolean,
 	OnboardingFunnelStep: number,
 	AnalyticsFunnels: {[string]: any},
 	LastSaveTime: number,
@@ -95,6 +96,7 @@ local Template: PlayerData = {
 	TutorialVersion = 2,
 	TutorialFreeCharacterUpgradeConsumed = false,
 	TutorialFreeBaseUpgradeConsumed = false,
+	TutorialSpecialBrainrotGranted = false,
 	OnboardingFunnelStep = 0,
 	AnalyticsFunnels = {
 		OneTime = {},
@@ -1212,6 +1214,7 @@ local function createLeaderstats(player: Player, data: PlayerData)
 	player:SetAttribute("Rebirths", data.Rebirths or 0)
 	player:SetAttribute("OnboardingStep", data.OnboardingStep or 1)
 	player:SetAttribute("PostTutorialStage", data.PostTutorialStage or 0)
+	player:SetAttribute("TutorialSpecialBrainrotGranted", data.TutorialSpecialBrainrotGranted == true)
 	player:SetAttribute("SpinNumber", data.SpinNumber or 0)
 	player:SetAttribute("LastDailySpin", data.LastDailySpin or 0)
 	syncCandyAttributes(player, data)
@@ -1287,6 +1290,7 @@ local function onPlayerAdded(player: Player)
 
 	player:SetAttribute("OnboardingStep", profile.Data.OnboardingStep or 1)
 	player:SetAttribute("PostTutorialStage", profile.Data.PostTutorialStage or 0)
+	player:SetAttribute("TutorialSpecialBrainrotGranted", profile.Data.TutorialSpecialBrainrotGranted == true)
 	player:SetAttribute("SpinNumber", profile.Data.SpinNumber or 0)
 	player:SetAttribute("LastDailySpin", profile.Data.LastDailySpin or 0)
 	syncCandyAttributes(player, profile.Data)
@@ -1310,6 +1314,9 @@ local function onPlayerAdded(player: Player)
 	end
 	if type(profile.Data.TutorialFreeBaseUpgradeConsumed) ~= "boolean" then
 		profile.Data.TutorialFreeBaseUpgradeConsumed = false
+	end
+	if type(profile.Data.TutorialSpecialBrainrotGranted) ~= "boolean" then
+		profile.Data.TutorialSpecialBrainrotGranted = false
 	end
 
 	profile.Data.OnboardingFunnelStep = math.clamp(tonumber(profile.Data.OnboardingFunnelStep) or 0, 0, 14)
