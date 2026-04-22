@@ -27,16 +27,16 @@ local Constants = {
 		{ MinDepthRatio = 0.65, MaxDepthRatio = 1.00 },
 	},
 	ZONE_ITEM_CAPS = {
-		["Zone0"] = 25,
-		["Zone1"] = 100,
-		["Zone2"] = 83,
-		["Zone3"] = 66,
-		["Zone4"] = 58,
-		["Zone5"] = 50,
+		["Zone0"] = 5,
+		["Zone1"] = 30,
+		["Zone2"] = 30,
+		["Zone3"] = 30,
+		["Zone4"] = 30,
+		["Zone5"] = 25,
 	},
 
 	ITEM_SPAWN_BATCH_SIZE = 300,
-	ITEM_SPAWN_BATCH_YIELD = 0.03,
+	ITEM_SPAWN_BATCH_YIELD = 0.01,
 	
 	SPAWNER_TIERS = {
 		["Zone0"] = { Common = 70, Uncommon = 30 },
