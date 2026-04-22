@@ -22,6 +22,7 @@ local SpawnUtils = require(ServerScriptService.Modules.SpawnUtils)
 local TutorialService = require(ServerScriptService.Modules.TutorialService)
 local RoundBrainrotEventManager = require(ServerScriptService.Modules.RoundBrainrotEventManager)
 local CandyEventService = require(ServerScriptService.Modules.CandyEventService)
+local JoinGiftBrainrotService = require(ServerScriptService.Modules.JoinGiftBrainrotService)
 
 local BrainrotEventConfiguration = require(ReplicatedStorage.Modules.BrainrotEventConfiguration)
 local ProductConfigurations = require(ReplicatedStorage.Modules.ProductConfigurations)
@@ -2721,11 +2722,25 @@ registerAction({
 })
 
 registerAction({
+	id = "rearm_join_gift_brainrot",
+	label = "Rearm Join Gift",
+	description = "Re-arms the personal legendary join brainrot preview for the selected player.",
+	category = "World / QA",
+	order = 58,
+	minAccess = "tester",
+	allowOtherTarget = true,
+	inputs = {},
+	handler = function(_executor, target)
+		return JoinGiftBrainrotService:ForceRearmForTesting(target)
+	end,
+})
+
+registerAction({
 	id = "force_candy_event_active",
 	label = "Force Candy Event Active",
 	description = "Immediately forces the candy event on for a fresh 10-minute test window.",
 	category = "World / QA",
-	order = 58,
+	order = 59,
 	minAccess = "tester",
 	allowOtherTarget = false,
 	inputs = {},
@@ -2739,7 +2754,7 @@ registerAction({
 	label = "Force Candy Event Inactive",
 	description = "Stops the active candy event and prevents it from resuming until the next scheduled hour.",
 	category = "World / QA",
-	order = 59,
+	order = 60,
 	minAccess = "tester",
 	allowOtherTarget = false,
 	inputs = {},
@@ -2753,7 +2768,7 @@ registerAction({
 	label = "Full Refresh State",
 	description = "Pushes a full client/server refresh from current profile data.",
 	category = "World / QA",
-	order = 60,
+	order = 61,
 	minAccess = "tester",
 	allowOtherTarget = true,
 	inputs = {},
