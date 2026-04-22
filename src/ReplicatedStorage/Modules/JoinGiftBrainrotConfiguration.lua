@@ -16,7 +16,7 @@ local JoinGiftBrainrotConfiguration = {
 	Mutation = "Normal",
 	Level = 1,
 
-	PreviewRaycastHeight = 16,
+	PreviewRaycastHeight = 0,
 	PreviewRaycastDepth = 64,
 
 	HighlightFillColor = Color3.fromRGB(255, 214, 72),
