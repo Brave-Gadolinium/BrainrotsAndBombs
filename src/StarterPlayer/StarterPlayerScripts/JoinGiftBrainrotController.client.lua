@@ -25,7 +25,6 @@ local stateUpdatedRemote = remotesFolder:WaitForChild("StateUpdated") :: RemoteE
 
 local infoGuiTemplate = templates:WaitForChild("InfoGUI")
 local itemsFolder = ReplicatedStorage:FindFirstChild("Items")
-local minesFolder = Workspace:FindFirstChild("Mines")
 
 local activeToken: string? = nil
 local activeModel: Model? = nil
@@ -262,34 +261,14 @@ local function getBottomOffset(model: Model): number
 	return model:GetPivot().Position.Y - (boundingBoxCFrame.Position.Y - (extents.Y * 0.5))
 end
 
-local function clampPositionToZone(position: Vector3): Vector3
-	local zoneName = tostring(JoinGiftBrainrotConfiguration.ZoneName or "Zone0")
-	local zonePart = minesFolder and minesFolder:FindFirstChild(zoneName)
-	if not zonePart or not zonePart:IsA("BasePart") then
-		return position
-	end
-
-	local localPosition = zonePart.CFrame:PointToObjectSpace(position)
-	local halfSize = zonePart.Size * 0.5
-	local padding = math.max(0, tonumber(JoinGiftBrainrotConfiguration.ZoneClampPadding) or 0)
-	local clampedPosition = Vector3.new(
-		math.clamp(localPosition.X, -halfSize.X + padding, halfSize.X - padding),
-		localPosition.Y,
-		math.clamp(localPosition.Z, -halfSize.Z + padding, halfSize.Z - padding)
-	)
-
-	return zonePart.CFrame:PointToWorldSpace(clampedPosition)
-end
-
 local function resolvePreviewCFrame(model: Model): CFrame?
 	local rootPart = getAliveRootPart()
 	if not rootPart then
 		return nil
 	end
 
-	local forwardDistance = math.max(2, tonumber(JoinGiftBrainrotConfiguration.PreviewForwardDistance) or 8)
-	local basePosition = rootPart.Position + (rootPart.CFrame.LookVector * forwardDistance)
-	local targetPosition = clampPositionToZone(basePosition)
+	local forwardDistance = math.max(2, tonumber(JoinGiftBrainrotConfiguration.PreviewForwardDistance) or 5)
+	local targetPosition = rootPart.Position + (rootPart.CFrame.LookVector * forwardDistance)
 
 	local rayOrigin = targetPosition + Vector3.new(0, math.max(2, tonumber(JoinGiftBrainrotConfiguration.PreviewRaycastHeight) or 16), 0)
 	local rayDirection = Vector3.new(0, -math.max(4, tonumber(JoinGiftBrainrotConfiguration.PreviewRaycastDepth) or 64), 0)

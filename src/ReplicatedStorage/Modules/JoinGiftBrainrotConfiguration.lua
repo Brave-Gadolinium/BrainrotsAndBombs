@@ -6,7 +6,7 @@ local JoinGiftBrainrotConfiguration = {
 	PreviewDelaySeconds = 2,
 	AutoPickupDelaySeconds = 3,
 
-	PreviewForwardDistance = 8,
+	PreviewForwardDistance = 5,
 	PreviewMaxActivationDistance = 12,
 	PickupDistanceTolerance = 3,
 	ZoneClampPadding = 2,
