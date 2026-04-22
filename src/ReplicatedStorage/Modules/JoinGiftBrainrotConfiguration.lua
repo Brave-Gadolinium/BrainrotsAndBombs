@@ -1,7 +1,7 @@
 --!strict
 
 local JoinGiftBrainrotConfiguration = {
-	Enabled = true,
+	Enabled = false,
 
 	PreviewDelaySeconds = 5,
 	AutoPickupDelaySeconds = 5,
