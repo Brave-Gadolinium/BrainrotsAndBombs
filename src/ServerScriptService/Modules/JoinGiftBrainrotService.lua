@@ -23,18 +23,10 @@ type PendingGiftState = {
 	IsClaiming: boolean,
 }
 
-type DeferredEquipState = {
-	Token: string,
-	ItemName: string,
-	Mutation: string,
-	Rarity: string,
-	Level: number,
-}
-
 local JoinGiftBrainrotService = {}
 
 local PlayerController
-local ItemManager
+local CarrySystem
 
 local remotesFolder: Folder
 local getStateRemote: RemoteFunction
@@ -43,8 +35,6 @@ local requestPickupRemote: RemoteFunction
 local stateUpdatedRemote: RemoteEvent
 
 local pendingStates: {[Player]: PendingGiftState} = {}
-local deferredEquipStates: {[Player]: DeferredEquipState} = {}
-local deferredEquipScheduleNonce: {[Player]: number} = {}
 local randomObject = Random.new()
 local started = false
 local PROFILE_LOAD_TIMEOUT_SECONDS = 30
@@ -81,6 +71,28 @@ local function getAliveRootPart(player: Player): BasePart?
 	end
 
 	return nil
+end
+
+local function isInsideAnyMineZone(position: Vector3): boolean
+	local zonesFolder = Workspace:FindFirstChild("Zones")
+	if not zonesFolder then
+		return false
+	end
+
+	for _, zonePart in ipairs(zonesFolder:GetChildren()) do
+		if zonePart:IsA("BasePart") and zonePart.Name == "ZonePart" then
+			local relativePosition = zonePart.CFrame:PointToObjectSpace(position)
+			local size = zonePart.Size
+			local isInside = math.abs(relativePosition.X) <= size.X / 2
+				and math.abs(relativePosition.Y) <= size.Y / 2
+				and math.abs(relativePosition.Z) <= size.Z / 2
+			if isInside then
+				return true
+			end
+		end
+	end
+
+	return false
 end
 
 local function getPlayerProfile(player: Player)
@@ -182,76 +194,6 @@ local function clearPendingState(player: Player, shouldNotifyClient: boolean?, s
 	end
 end
 
-local function scheduleDeferredEquip(player: Player, initialDelaySeconds: number?)
-	local nextNonce = (deferredEquipScheduleNonce[player] or 0) + 1
-	deferredEquipScheduleNonce[player] = nextNonce
-	local nonce = nextNonce
-
-	task.spawn(function()
-		local initialDelay = math.max(0, tonumber(initialDelaySeconds) or 0)
-		if initialDelay > 0 then
-			task.wait(initialDelay)
-		end
-
-		for _ = 1, 20 do
-			if deferredEquipScheduleNonce[player] ~= nonce then
-				return
-			end
-
-			if not player.Parent then
-				return
-			end
-
-			local deferredState = deferredEquipStates[player]
-			if not deferredState then
-				return
-			end
-
-			local humanoid = getAliveHumanoid(player)
-			if humanoid then
-				local matchingTool: Tool? = nil
-				local character = player.Character
-				if character then
-					for _, child in ipairs(character:GetChildren()) do
-						if child:IsA("Tool")
-							and child:GetAttribute("OriginalName") == deferredState.ItemName
-							and child:GetAttribute("Mutation") == deferredState.Mutation
-							and child:GetAttribute("Rarity") == deferredState.Rarity
-							and child:GetAttribute("Level") == deferredState.Level then
-							matchingTool = child
-							break
-						end
-					end
-				end
-
-				if not matchingTool then
-					local backpack = player:FindFirstChild("Backpack")
-					if backpack then
-						for _, child in ipairs(backpack:GetChildren()) do
-							if child:IsA("Tool")
-								and child:GetAttribute("OriginalName") == deferredState.ItemName
-								and child:GetAttribute("Mutation") == deferredState.Mutation
-								and child:GetAttribute("Rarity") == deferredState.Rarity
-								and child:GetAttribute("Level") == deferredState.Level then
-								matchingTool = child
-								break
-							end
-						end
-					end
-				end
-
-				if matchingTool then
-					humanoid:EquipTool(matchingTool)
-					deferredEquipStates[player] = nil
-					return
-				end
-			end
-
-			task.wait(0.25)
-		end
-	end)
-end
-
 local function armGiftForPlayer(player: Player, shouldNotifyClient: boolean?): (boolean, string)
 	if JoinGiftBrainrotConfiguration.Enabled ~= true then
 		clearPendingState(player, shouldNotifyClient, "cancelled")
@@ -290,9 +232,12 @@ local function armGiftForPlayer(player: Player, shouldNotifyClient: boolean?): (
 	return true, `Armed join gift: {itemName}.`
 end
 
-local function grantPendingGift(player: Player, state: PendingGiftState, source: string): {Success: boolean, Error: string?, DeferredEquip: boolean?}
-	if not PlayerController or not ItemManager then
+local function grantPendingGift(player: Player, state: PendingGiftState, _source: string): {Success: boolean, Error: string?}
+	if not PlayerController then
 		return {Success = false, Error = "DependenciesMissing"}
+	end
+	if not CarrySystem then
+		CarrySystem = require(ServerScriptService.Modules.CarrySystem)
 	end
 
 	local profile = getPlayerProfile(player)
@@ -303,52 +248,49 @@ local function grantPendingGift(player: Player, state: PendingGiftState, source:
 		return {Success = false, Error = "AlreadyGranted"}
 	end
 
-	local tool = ItemManager.GiveItemToPlayer(
+	local rootPart = getAliveRootPart(player)
+	local character = player.Character
+	local head = character and character:FindFirstChild("Head")
+	if not rootPart or not head or not head:IsA("BasePart") then
+		return {Success = false, Error = "CharacterUnavailable"}
+	end
+
+	local isInMineZone = isInsideAnyMineZone(rootPart.Position)
+	if not isInMineZone and CarrySystem.DeliverCarriedItems then
+		CarrySystem.DeliverCarriedItems(player)
+	end
+
+	if not CarrySystem.CanCarryMore(player) then
+		return {Success = false, Error = "CarryLimitReached"}
+	end
+
+	local pickedUp = CarrySystem.AddItemToCarry(
 		player,
 		state.ItemName,
 		state.Mutation,
 		state.Rarity,
-		state.Level
+		nil,
+		{
+			Level = state.Level,
+		}
 	)
-	if not tool then
-		return {Success = false, Error = "ItemGrantFailed"}
+	if not pickedUp then
+		return {Success = false, Error = "CarryGrantFailed"}
 	end
 
 	markSpecialBrainrotGranted(player, profile)
 
-	if PlayerController.EnsureInventoryContainsItems then
-		PlayerController:EnsureInventoryContainsItems(player, {
-			{
-				Name = state.ItemName,
-				Mutation = state.Mutation,
-				Rarity = state.Rarity,
-				Level = state.Level,
-			},
-		}, `join_gift:{source}`)
-	end
-
-	TutorialService:HandleBrainrotPickedUp(player, false)
+	TutorialService:HandleBrainrotPickedUp(player, true)
 	AnalyticsFunnelsService:HandleMineBrainrotPickedUp(player)
 
-	local humanoid = getAliveHumanoid(player)
-	if humanoid then
-		humanoid:EquipTool(tool)
-		deferredEquipStates[player] = nil
-		return {Success = true, DeferredEquip = false}
+	if not isInMineZone and CarrySystem.DeliverCarriedItems then
+		CarrySystem.DeliverCarriedItems(player)
 	end
 
-	deferredEquipStates[player] = {
-		Token = state.Token,
-		ItemName = state.ItemName,
-		Mutation = state.Mutation,
-		Rarity = state.Rarity,
-		Level = state.Level,
-	}
-	scheduleDeferredEquip(player, 0.4)
-	return {Success = true, DeferredEquip = true}
+	return {Success = true}
 end
 
-local function tryClaimGift(player: Player, token: string, source: string): {Success: boolean, Error: string?, DeferredEquip: boolean?}
+local function tryClaimGift(player: Player, token: string, source: string): {Success: boolean, Error: string?}
 	local state = pendingStates[player]
 	if not state or state.Token ~= token then
 		return {Success = false, Error = "NoPendingState"}
@@ -470,7 +412,6 @@ function JoinGiftBrainrotService:HandlePickupRequest(player: Player, token: stri
 	return {
 		Success = result.Success,
 		Error = result.Error,
-		DeferredEquip = result.DeferredEquip == true,
 	}
 end
 
@@ -484,7 +425,6 @@ end
 
 function JoinGiftBrainrotService:Init(controllers)
 	PlayerController = controllers.PlayerController
-	ItemManager = require(ServerScriptService.Modules.ItemManager)
 
 	remotesFolder = getJoinGiftRemotes()
 	getStateRemote = remotesFolder:WaitForChild("GetState") :: RemoteFunction
@@ -506,8 +446,6 @@ function JoinGiftBrainrotService:Init(controllers)
 
 	Players.PlayerRemoving:Connect(function(player)
 		pendingStates[player] = nil
-		deferredEquipStates[player] = nil
-		deferredEquipScheduleNonce[player] = nil
 	end)
 
 	Players.PlayerAdded:Connect(function(player)
@@ -522,12 +460,6 @@ function JoinGiftBrainrotService:Init(controllers)
 			end
 			armGiftForPlayer(player, false)
 		end)
-
-		player.CharacterAdded:Connect(function()
-			if deferredEquipStates[player] then
-				scheduleDeferredEquip(player, 0.6)
-			end
-		end)
 	end)
 
 	for _, player in ipairs(Players:GetPlayers()) do
@@ -541,11 +473,6 @@ function JoinGiftBrainrotService:Init(controllers)
 				return
 			end
 			armGiftForPlayer(player, false)
-		end)
-		player.CharacterAdded:Connect(function()
-			if deferredEquipStates[player] then
-				scheduleDeferredEquip(player, 0.6)
-			end
 		end)
 	end
 end

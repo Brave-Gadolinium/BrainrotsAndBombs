@@ -732,6 +732,20 @@ local function processZoneExit(player: Player)
 	logCarryTrace(player, "processZoneExit end")
 end
 
+function CarrySystem.DeliverCarriedItems(player: Player): boolean
+	if not player or not player:IsA("Player") then
+		return false
+	end
+
+	local items = carryingData[player]
+	if not items or #items <= 0 then
+		return false
+	end
+
+	processZoneExit(player)
+	return true
+end
+
 local function processZoneEnter(player: Player, isInitialZoneEnter: boolean?)
 	if not carryingData[player] then carryingData[player] = {} end
 	logCarryTrace(player, "processZoneEnter begin")
