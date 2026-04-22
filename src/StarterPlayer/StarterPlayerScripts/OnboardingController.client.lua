@@ -94,6 +94,8 @@ local maskDirty = false
 local hasAppliedTutorialCompletionCleanup = false
 local DEFAULT_CAMERA_FOV = 70
 local TUTORIAL_FRAME_OPEN_COOLDOWN = 0.75
+local TUTORIAL_BOMB_PULSE_SCALE = 1.32
+local TUTORIAL_BOMB_PULSE_TWEEN_INFO = TweenInfo.new(0.42, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true)
 local tutorialFrameOpenDebounce: {[string]: number} = {}
 local tutorialFrameOpenPending: {[string]: boolean} = {}
 
@@ -409,6 +411,7 @@ local function ensureTutorialBombPulse(button: GuiButton): UIScale
 	end
 
 	if tutorialBombPulseScale then
+		stopTutorialBombPulse()
 		tutorialBombPulseScale:Destroy()
 	end
 
@@ -419,6 +422,22 @@ local function ensureTutorialBombPulse(button: GuiButton): UIScale
 	tutorialBombPulseScale = pulseScale
 
 	return pulseScale
+end
+
+local function startTutorialBombPulse(button: GuiButton)
+	local pulseScale = ensureTutorialBombPulse(button)
+	if tutorialBombPulseTween and tutorialBombPulseScale == pulseScale then
+		return
+	end
+
+	stopTutorialBombPulse()
+	pulseScale.Scale = 1
+	tutorialBombPulseTween = TweenService:Create(
+		pulseScale,
+		TUTORIAL_BOMB_PULSE_TWEEN_INFO,
+		{Scale = TUTORIAL_BOMB_PULSE_SCALE}
+	)
+	tutorialBombPulseTween:Play()
 end
 
 local function bindTutorialBombButton(button: GuiButton)
@@ -462,16 +481,7 @@ local function syncTutorialBombGuidance()
 		cursor.ZIndex = getHighestGuiZIndex(button, cursor) + 2
 	end
 
-	local pulseScale = ensureTutorialBombPulse(button)
-	if not tutorialBombPulseTween then
-		pulseScale.Scale = 1
-		tutorialBombPulseTween = TweenService:Create(
-			pulseScale,
-			TweenInfo.new(0.55, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
-			{Scale = 1.12}
-		)
-		tutorialBombPulseTween:Play()
-	end
+	startTutorialBombPulse(button)
 end
 
 local function destroyTutorialGuiLabel()

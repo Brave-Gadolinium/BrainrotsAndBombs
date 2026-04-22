@@ -33,10 +33,32 @@ local lastVisibleOpenHandledAt = 0
 local upgradeTemplateCache: Frame? = nil
 local hasWarnedAboutMissingUpgradeTemplate = false
 
+local function getUpgradeConfig(upgradeId: string): any?
+	for _, upgrade in ipairs(UpgradesConfig.Upgrades) do
+		if upgrade.Id == upgradeId then
+			return upgrade
+		end
+	end
+
+	return nil
+end
+
 local function isTutorialFreeUpgrade(upgradeId: string, upgradeData: any): boolean
-	return upgradeId == TutorialConfiguration.TutorialCharacterUpgradeId
-		and ((upgradeData and upgradeData.IsTutorialFree == true)
-			or (tonumber(player:GetAttribute("OnboardingStep")) or 0) == 10)
+	if upgradeId ~= TutorialConfiguration.TutorialCharacterUpgradeId then
+		return false
+	end
+
+	if upgradeData and upgradeData.IsTutorialFree == true then
+		return true
+	end
+
+	local upgradeConfig = getUpgradeConfig(upgradeId)
+	local defaultValue = tonumber(upgradeConfig and upgradeConfig.DefaultValue) or 0
+	local amount = tonumber(upgradeConfig and upgradeConfig.Amount) or 1
+	local currentValue = tonumber(upgradeData and upgradeData.Current) or 0
+
+	return (tonumber(player:GetAttribute("OnboardingStep")) or 0) == 9
+		and currentValue < defaultValue + amount
 end
 
 local function setupButtonAnimation(button: GuiButton)
