@@ -11,6 +11,7 @@ local playerGui = player:WaitForChild("PlayerGui")
 local FADE_IN_INFO = TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 local FADE_OUT_INFO = TweenInfo.new(0.22, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
 local MIN_VISIBLE_TIME = 2
+local MAX_VISIBLE_AFTER_READY = 5
 local READINESS_POLL_INTERVAL = 0.05
 
 local function playTween(target: Instance, tweenInfo: TweenInfo, goal: {[string]: any}): Tween
@@ -121,6 +122,7 @@ end
 
 local function playLoadingScreen()
 	local startedAt = os.clock()
+	local readyAt: number? = nil
 	local loadingScreen = getLoadingScreen()
 	local background = loadingScreen:WaitForChild("Background") :: GuiObject
 	local canvasGroup = loadingScreen:WaitForChild("Frame") :: CanvasGroup
@@ -144,9 +146,14 @@ local function playLoadingScreen()
 
 	while true do
 		local elapsed = os.clock() - startedAt
+		local clientReady = isClientReady()
 		setSliderProgress(sliderFill, getStartupProgress())
 
-		if isClientReady() and elapsed >= MIN_VISIBLE_TIME then
+		if clientReady and not readyAt then
+			readyAt = os.clock()
+		end
+
+		if readyAt and elapsed >= MIN_VISIBLE_TIME and os.clock() - readyAt >= MAX_VISIBLE_AFTER_READY then
 			break
 		end
 

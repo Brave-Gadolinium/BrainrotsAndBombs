@@ -11,6 +11,7 @@ local CarrySystem = {}
 
 -- [ MODULES ]
 local BombsConfigurations = require(ReplicatedStorage.Modules.BombsConfigurations)
+local ProfileReadyUtils = require(ReplicatedStorage.Modules.ProfileReadyUtils)
 local PlayerController = require(ServerScriptService.Controllers.PlayerController) 
 local BadgeManager = require(ServerScriptService.Modules.BadgeManager)
 local TutorialService = require(ServerScriptService.Modules.TutorialService)
@@ -31,6 +32,7 @@ local GlobalSounds = Workspace:WaitForChild("Sounds")
 -- [ DATA ]
 local carryingData: {[Player]: {any}} = {}
 local playersInZone: {[Player]: boolean} = {}
+local pendingInitialZoneEnter: {[Player]: boolean} = {}
 local lastLimitNotif: {[Player]: number} = {}
 local lastBombRepairAttempt: {[Player]: number} = {}
 local ALLOW_MANUAL_CARRY_DROP = false
@@ -38,6 +40,7 @@ local DEBUG_BRAINROT_TRACE = false
 
 -- [ CONFIG ]
 local CHECK_INTERVAL = 0.2 
+local PROFILE_READY_EXIT_TIMEOUT_SECONDS = 3
 local STACK_GAP = 0.5 
 local STACK_HEAD_CLEARANCE = 0.05
 
@@ -256,11 +259,16 @@ local function hasBrainrotTool(container: Instance?): boolean
 end
 
 local function shouldPreserveFtuePlacementToolOnZoneEnter(player: Player): boolean
-	if tonumber(player:GetAttribute("OnboardingStep")) ~= 5 then
+	local onboardingStep = tonumber(player:GetAttribute("OnboardingStep")) or 0
+	if onboardingStep ~= 4 and onboardingStep ~= 5 then
 		return false
 	end
 
 	return hasBrainrotTool(player.Character) or hasBrainrotTool(player:FindFirstChild("Backpack"))
+end
+
+local function shouldSkipMineToolMutation(player: Player, _isInitialZoneEnter: boolean?): boolean
+	return not ProfileReadyUtils.IsReady(player)
 end
 
 local function createStackItem(player: Player, itemName: string, mutation: string, rarity: string, eventAttributes: {[string]: any}?)
@@ -570,6 +578,11 @@ local function processZoneExit(player: Player)
 
 	if hadItems then
 		if isAlive then
+			local profileReady = ProfileReadyUtils.WaitForReady(player, PROFILE_READY_EXIT_TIMEOUT_SECONDS)
+			if not profileReady then
+				logCriticalCarryTrace(player, "processZoneExit profile not ready before carry conversion; continuing after timeout")
+			end
+
 			local lastGivenTool = nil
 			local deliveredItems = {}
 			local failedDeliveryCount = 0
@@ -715,7 +728,7 @@ local function processZoneExit(player: Player)
 	logCarryTrace(player, "processZoneExit end")
 end
 
-local function processZoneEnter(player: Player)
+local function processZoneEnter(player: Player, isInitialZoneEnter: boolean?)
 	if not carryingData[player] then carryingData[player] = {} end
 	logCarryTrace(player, "processZoneEnter begin")
 	TutorialService:HandleMineZoneEntered(player)
@@ -723,6 +736,14 @@ local function processZoneEnter(player: Player)
 
 	if shouldPreserveFtuePlacementToolOnZoneEnter(player) then
 		logCarryTrace(player, "processZoneEnter preserving FTUE placement tool")
+		return
+	end
+
+	if shouldSkipMineToolMutation(player, isInitialZoneEnter) then
+		logCarryTrace(player, ("processZoneEnter skipping tool mutation profileReady=%s initial=%s"):format(
+			tostring(ProfileReadyUtils.IsReady(player)),
+			tostring(isInitialZoneEnter == true)
+		))
 		return
 	end
 
@@ -760,6 +781,10 @@ end
 
 local function repairMissingBombInZone(player: Player)
 	if not PickaxeController or not PickaxeController.EnsureBombEquipped then
+		return
+	end
+
+	if shouldPreserveFtuePlacementToolOnZoneEnter(player) or shouldSkipMineToolMutation(player, nil) then
 		return
 	end
 
@@ -831,10 +856,12 @@ function CarrySystem:Start()
 		player.CharacterAdded:Connect(function(character)
 			logCarryTrace(player, ("CharacterAdded resettingCarry character=%s"):format(character:GetFullName()))
 			carryingData[player] = {}
+			pendingInitialZoneEnter[player] = true
 			bindCharacter(player, character)
 		end)
 
 		if player.Character then
+			pendingInitialZoneEnter[player] = true
 			bindCharacter(player, player.Character)
 		end
 	end
@@ -846,15 +873,23 @@ function CarrySystem:Start()
 		while true do
 			task.wait(CHECK_INTERVAL)
 			local foundPlayers = {}
+			local initialZoneEnterByPlayer = {}
 			for _, player in ipairs(Players:GetPlayers()) do
 				local character = player.Character
 				if character then
 					local rootPart = character:FindFirstChild("HumanoidRootPart") :: BasePart
 					if rootPart and isInsideAnyZone(rootPart.Position) then
+						local isInitialZoneEnter = pendingInitialZoneEnter[player] == true and playersInZone[player] ~= true
 						foundPlayers[player] = true
-						if not hasEquippedBomb(player) then
+						initialZoneEnterByPlayer[player] = isInitialZoneEnter
+						if not hasEquippedBomb(player)
+							and not shouldPreserveFtuePlacementToolOnZoneEnter(player)
+							and not shouldSkipMineToolMutation(player, isInitialZoneEnter)
+						then
 							repairMissingBombInZone(player)
 						end
+					elseif pendingInitialZoneEnter[player] then
+						pendingInitialZoneEnter[player] = nil
 					end
 				end
 			end
@@ -867,7 +902,9 @@ function CarrySystem:Start()
 			for player, _ in pairs(foundPlayers) do
 				if not playersInZone[player] then
 					playersInZone[player] = true
-					processZoneEnter(player)
+					local isInitialZoneEnter = initialZoneEnterByPlayer[player] == true
+					pendingInitialZoneEnter[player] = nil
+					processZoneEnter(player, isInitialZoneEnter)
 				end
 			end
 		end
@@ -879,6 +916,7 @@ function CarrySystem:Start()
 		CarrySystem.ClearAllItems(player)
 		carryingData[player] = nil
 		playersInZone[player] = nil
+		pendingInitialZoneEnter[player] = nil
 		lastLimitNotif[player] = nil
 		lastBombRepairAttempt[player] = nil
 	end)

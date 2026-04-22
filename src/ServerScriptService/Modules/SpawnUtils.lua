@@ -54,6 +54,7 @@ end
 
 function SpawnUtils.ShouldUseNewPlayerSpawn(onboardingStep: number?): boolean
 	local currentStep = math.max(1, math.floor(tonumber(onboardingStep) or 1))
+
 	return currentStep < PLOT_SPAWN_UNLOCK_STEP
 end
 
