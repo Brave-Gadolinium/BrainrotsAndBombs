@@ -9,12 +9,14 @@ local Constants = {
 	SESSION_WARNING_THRESHOLD = 10,
 	MIN_ITEM_SPACING = 4.5,
 	MINE_STARTUP_ZONE_ORDER = {
+		"Zone0",
 		"Zone1",
 		"Zone2",
 		"Zone3",
 		"Zone4",
 		"Zone5",
 	},
+	MINE_STARTUP_ZONE_DELAY_SECONDS = 3,
 	TERRAIN_STARTUP_SLICE_HEIGHT = 24,
 	MINE_STARTUP_INITIAL_SEED_RATIO = 0.15,
 	MINE_STARTUP_INITIAL_SEED_MINIMUM = 12,
@@ -25,16 +27,19 @@ local Constants = {
 		{ MinDepthRatio = 0.65, MaxDepthRatio = 1.00 },
 	},
 	ZONE_ITEM_CAPS = {
+		["Zone0"] = 50,
 		["Zone1"] = 300,
 		["Zone2"] = 250,
 		["Zone3"] = 200,
 		["Zone4"] = 175,
 		["Zone5"] = 150,
 	},
-	ITEM_SPAWN_BATCH_SIZE = 8,
+
+	ITEM_SPAWN_BATCH_SIZE = 300,
 	ITEM_SPAWN_BATCH_YIELD = 0.03,
 	
 	SPAWNER_TIERS = {
+		["Zone0"] = { Common = 70, Uncommon = 30 },
 		["Zone1"] = { Common = 70, Uncommon = 30 },
 		["Zone2"] = { Uncommon = 80, Rare = 20 },
 		["Zone3"] = { Rare = 70, Epic = 30 },

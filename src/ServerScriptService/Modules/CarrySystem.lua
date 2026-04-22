@@ -196,6 +196,19 @@ local function getFallbackDropPosition(): (Vector3, Vector3)
 	return Vector3.new(0, 12, 0), Vector3.new(0, 12, 0)
 end
 
+local function getDropPositionsNearPlayer(player: Player, distance: number?): (Vector3, Vector3)
+	local character = player.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	local head = character and character:FindFirstChild("Head")
+
+	if root and root:IsA("BasePart") then
+		local originPosition = if head and head:IsA("BasePart") then head.Position else root.Position
+		return root.Position + (root.CFrame.LookVector * (distance or 4)), originPosition
+	end
+
+	return getFallbackDropPosition()
+end
+
 -- [ HELPERS ]
 local function isInsideAnyZone(position: Vector3): boolean
 	for _, zonePart in ipairs(CollectionZones:GetChildren()) do
@@ -558,6 +571,8 @@ local function processZoneExit(player: Player)
 	if hadItems then
 		if isAlive then
 			local lastGivenTool = nil
+			local deliveredItems = {}
+			local failedDeliveryCount = 0
 			local profile = PlayerController:GetProfile(player)
 			local totalCollected = profile and (profile.Data.TotalBrainrotsCollected or 0) or 0
 
@@ -584,6 +599,13 @@ local function processZoneExit(player: Player)
 					tostring(newTool and summarizeTool(newTool) or "nil")
 				))
 				if newTool then
+					table.insert(deliveredItems, {
+						Name = itemData.Name,
+						Mutation = itemData.Mutation,
+						Rarity = itemData.Rarity,
+						Level = itemData.Level or 1,
+					})
+
 					AnalyticsEconomyService:LogItemValueSourceForItem(
 						player,
 						itemData.Name,
@@ -605,9 +627,24 @@ local function processZoneExit(player: Player)
 					if roundBrainrotEventManager and roundBrainrotEventManager.HandleEventItemDelivered then
 						roundBrainrotEventManager:HandleEventItemDelivered(newTool)
 					end
+
+					totalCollected += 1
+					BadgeManager:EvaluateBrainrotMilestones(player, itemData.Rarity, totalCollected)
+				else
+					failedDeliveryCount += 1
+					local dropPosition, originPosition = getDropPositionsNearPlayer(player, 4)
+					dropCarriedItemData(itemData, dropPosition, originPosition)
+					logCriticalCarryTrace(player, ("processZoneExit fallbackDrop name=%s mut=%s rar=%s pos=%s"):format(
+						tostring(itemData.Name),
+						tostring(itemData.Mutation),
+						tostring(itemData.Rarity),
+						formatVector3(dropPosition)
+					))
 				end
-				totalCollected += 1
-				BadgeManager:EvaluateBrainrotMilestones(player, itemData.Rarity, totalCollected)
+			end
+
+			if #deliveredItems > 0 and PlayerController.EnsureInventoryContainsItems then
+				PlayerController:EnsureInventoryContainsItems(player, deliveredItems, "mine_exit")
 			end
 
 			if profile then
@@ -625,6 +662,9 @@ local function processZoneExit(player: Player)
 				humanoid:EquipTool(lastGivenTool)
 				logCriticalCarryTrace(player, ("processZoneExit equipped tool=%s"):format(summarizeTool(lastGivenTool)))
 				logCarryTrace(player, "processZoneExit equip complete")
+			end
+			if #deliveredItems > 0 and PlayerController.EnsureInventoryContainsItems then
+				PlayerController:EnsureInventoryContainsItems(player, deliveredItems, "mine_exit:post_equip")
 			end
 			if lastGivenTool then
 				AnalyticsFunnelsService:HandleMineExitToolGranted(player)
@@ -647,7 +687,13 @@ local function processZoneExit(player: Player)
 			end
 
 			local notif = Events:FindFirstChild("ShowNotification")
-			if notif then notif:FireClient(player, "Items Unlocked!", "Success") end
+			if notif then
+				if #deliveredItems > 0 then
+					notif:FireClient(player, "Items Unlocked!", "Success")
+				elseif failedDeliveryCount > 0 then
+					notif:FireClient(player, "Items dropped nearby.", "Success")
+				end
+			end
 
 			local effectEvent = Events:FindFirstChild("TriggerUIEffect")
 			if effectEvent then 

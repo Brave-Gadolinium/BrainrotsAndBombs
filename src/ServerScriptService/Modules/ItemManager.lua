@@ -95,7 +95,8 @@ local SESSION_END_MESSAGE_DURATION = Constants.SESSION_END_MESSAGE_DURATION
 local MIN_ITEM_SPACING = Constants.MIN_ITEM_SPACING
 local ZONE_ITEM_CAPS = Constants.ZONE_ITEM_CAPS or {}
 local ITEM_SPAWN_BATCH_SIZE = math.max(1, tonumber(Constants.ITEM_SPAWN_BATCH_SIZE) or 8)
-local ITEM_SPAWN_BATCH_YIELD = math.max(0, tonumber(Constants.ITEM_SPAWN_BATCH_YIELD) or 0.03)
+local ITEM_SPAWN_BATCH_YIELD = 0 -- Temporary test switch: spawn all zone brainrots without batch delay.
+local MINE_STARTUP_ZONE_DELAY_SECONDS = math.max(0, tonumber(Constants.MINE_STARTUP_ZONE_DELAY_SECONDS) or 0)
 local FinishTime = ensureTimerFinishEvent()
 local RoundStarted = ensureRoundStartedEvent()
 local MINE_BRAINROT_SPAWNS_ENABLED = true -- Temporary test switch.
@@ -416,11 +417,13 @@ local pendingRoundRefill = false
 local started = false
 local startupFinalized = false
 local startupSeededZones: {[string]: boolean} = {}
+local startupSeedQueuedZones: {[string]: boolean} = {}
+local startupSeedSchedulerRunning = false
 local startupAllZonesReadyQueued = false
 local startupFinalReconcileJobsRemaining = 0
 local STARTUP_ZONE_ORDER = if type(Constants.MINE_STARTUP_ZONE_ORDER) == "table"
 	then Constants.MINE_STARTUP_ZONE_ORDER
-	else {"Zone1", "Zone2", "Zone3", "Zone4", "Zone5"}
+	else {"Zone0", "Zone1", "Zone2", "Zone3", "Zone4", "Zone5"}
 local STARTUP_INITIAL_SEED_RATIO = math.max(0, tonumber(Constants.MINE_STARTUP_INITIAL_SEED_RATIO) or 0.15)
 local STARTUP_INITIAL_SEED_MINIMUM = math.max(1, math.floor(tonumber(Constants.MINE_STARTUP_INITIAL_SEED_MINIMUM) or 12))
 local STARTUP_BACKFILL_CHUNK_RATIO = math.max(0, tonumber(Constants.MINE_STARTUP_BACKFILL_CHUNK_RATIO) or 0.05)
@@ -1188,7 +1191,7 @@ function ItemManager.SpawnInMine(mineZonePart: BasePart, options: {[string]: any
 		end
 
 		spawnedThisPass += 1
-		if spawnedThisPass % ITEM_SPAWN_BATCH_SIZE == 0 then
+		if ITEM_SPAWN_BATCH_YIELD > 0 and spawnedThisPass % ITEM_SPAWN_BATCH_SIZE == 0 then
 			task.wait(ITEM_SPAWN_BATCH_YIELD)
 		end
 	end
@@ -1372,7 +1375,9 @@ function ensureSpawnWorker()
 				end
 			end
 
-			task.wait()
+			if ITEM_SPAWN_BATCH_YIELD > 0 then
+				task.wait()
+			end
 		end
 
 		spawnWorkerRunning = false
@@ -1458,6 +1463,9 @@ local function maybeQueueStartupFinalReconcile()
 		if not TerrainGeneratorManager.IsZoneReady(mineZonePart.Name) then
 			return
 		end
+		if not startupSeededZones[mineZonePart.Name] then
+			return
+		end
 	end
 
 	startupAllZonesReadyQueued = true
@@ -1496,7 +1504,6 @@ end
 
 local function handleStartupSeedCompleted(mineZonePart: BasePart)
 	startupSeededZones[mineZonePart.Name] = true
-	queueStartupBackfill(mineZonePart)
 
 	local playableZoneName = STARTUP_ZONE_ORDER[1]
 	if mineZonePart.Name == playableZoneName then
@@ -1507,41 +1514,84 @@ local function handleStartupSeedCompleted(mineZonePart: BasePart)
 	maybeQueueStartupFinalReconcile()
 end
 
-local function queueStartupSeed(mineZonePart: BasePart)
-	if startupSeededZones[mineZonePart.Name] then
-		return
+local function queueStartupSeedNow(mineZonePart: BasePart): boolean
+	if startupSeededZones[mineZonePart.Name] or startupSeedQueuedZones[mineZonePart.Name] then
+		return false
 	end
 
 	if not TerrainGeneratorManager.IsZoneReady(mineZonePart.Name) then
-		return
+		return false
 	end
 
 	local targetItemCount = getTargetItemCountForMine(mineZonePart)
-	local requestedCount = math.min(
-		targetItemCount,
-		math.max(STARTUP_INITIAL_SEED_MINIMUM, math.ceil(targetItemCount * STARTUP_INITIAL_SEED_RATIO))
-	)
+	local requestedCount = targetItemCount
 
-	queueSpawnJob({
+	startupSeedQueuedZones[mineZonePart.Name] = true
+	local queued = queueSpawnJob({
 		Key = string.format("seed:%s", mineZonePart.Name),
 		Zone = mineZonePart,
 		Mode = "seed",
 		RequestedCount = requestedCount,
 		MinDepthRatio = 0,
-		MaxDepthRatio = 0.35,
+		MaxDepthRatio = 1,
 		OnCompleted = function(zonePart)
+			startupSeedQueuedZones[zonePart.Name] = nil
 			handleStartupSeedCompleted(zonePart)
 		end,
 	})
+
+	if not queued then
+		startupSeedQueuedZones[mineZonePart.Name] = nil
+	end
+
+	return queued
 end
 
-local function bootstrapReadyZones()
+local function getNextReadyStartupSeedZone(): BasePart?
 	for _, mineZonePart in ipairs(getOrderedMineZoneParts()) do
-		if TerrainGeneratorManager.IsZoneReady(mineZonePart.Name) then
-			queueStartupSeed(mineZonePart)
+		if not startupSeededZones[mineZonePart.Name]
+			and not startupSeedQueuedZones[mineZonePart.Name]
+			and TerrainGeneratorManager.IsZoneReady(mineZonePart.Name)
+		then
+			return mineZonePart
 		end
 	end
 
+	return nil
+end
+
+local function scheduleStartupSeeds()
+	if startupSeedSchedulerRunning then
+		return
+	end
+
+	startupSeedSchedulerRunning = true
+	task.spawn(function()
+		while true do
+			local mineZonePart = getNextReadyStartupSeedZone()
+			if not mineZonePart then
+				break
+			end
+
+			queueStartupSeedNow(mineZonePart)
+
+			if MINE_STARTUP_ZONE_DELAY_SECONDS > 0 then
+				task.wait(MINE_STARTUP_ZONE_DELAY_SECONDS)
+			else
+				task.wait()
+			end
+		end
+
+		startupSeedSchedulerRunning = false
+
+		if getNextReadyStartupSeedZone() then
+			scheduleStartupSeeds()
+		end
+	end)
+end
+
+local function bootstrapReadyZones()
+	scheduleStartupSeeds()
 	maybeQueueStartupFinalReconcile()
 end
 
@@ -1668,7 +1718,7 @@ function ItemManager:Start()
 	TerrainGeneratorManager.ZoneReadyChanged:Connect(function(zoneName: string)
 		local zonePart = MinesFolder:FindFirstChild(zoneName)
 		if zonePart and zonePart:IsA("BasePart") then
-			queueStartupSeed(zonePart)
+			scheduleStartupSeeds()
 		end
 
 		maybeQueueStartupFinalReconcile()

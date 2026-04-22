@@ -668,10 +668,22 @@ end
 
 local function handleCharacterSpawn(player: Player, character: Model)
 	local plotModel = activePlotModels[player]
+	local baseSpawnCFrame = if plotModel then SpawnUtils.GetPlotSpawnCFrame(plotModel, 3) else nil
+	local spawnCFrame = baseSpawnCFrame or SpawnUtils.GetCharacterSpawnCFrame(plotModel, getOnboardingStepForSpawn(player), 3)
 
-	local spawnCFrame = SpawnUtils.GetCharacterSpawnCFrame(plotModel, getOnboardingStepForSpawn(player), 3)
 	if spawnCFrame then
 		character:PivotTo(spawnCFrame)
+	end
+
+	if baseSpawnCFrame then
+		local newPlayerSpawnCFrame = SpawnUtils.GetNewPlayerSpawnCFrame(3)
+		if newPlayerSpawnCFrame then
+			task.defer(function()
+				if character.Parent then
+					character:PivotTo(newPlayerSpawnCFrame)
+				end
+			end)
+		end
 	end
 end
 

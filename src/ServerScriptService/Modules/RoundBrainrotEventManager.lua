@@ -26,7 +26,7 @@ type ActiveEventState = {
 }
 
 local RoundBrainrotEventManager = {}
-local ROUND_BRAINROT_EVENTS_ENABLED = false -- Temporary test switch.
+local ROUND_BRAINROT_EVENTS_ENABLED = true -- Temporary test switch.
 
 local MinesFolder = Workspace:WaitForChild("Mines")
 local workspaceAttributes = BrainrotEventConfiguration.WorkspaceAttributes

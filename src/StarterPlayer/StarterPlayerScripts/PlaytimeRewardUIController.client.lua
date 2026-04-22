@@ -64,6 +64,21 @@ type RewardCardView = {
 	Stroke: UIStroke?,
 }
 
+local function ensureRewardCardContentVisible(button: ImageButton, cardView: RewardCardView)
+	button.Visible = true
+	cardView.Container.Visible = true
+
+	if cardView.RewardAmount then
+		cardView.RewardAmount.Visible = true
+	end
+	if cardView.RewardImage then
+		cardView.RewardImage.Visible = true
+	end
+	if cardView.RewardTime then
+		cardView.RewardTime.Visible = true
+	end
+end
+
 local function reportStoreOpened(surface: string)
 	reportAnalyticsIntent:FireServer("StoreOpened", {
 		surface = surface,
@@ -546,6 +561,8 @@ local function updateButtonVisual(button: ImageButton, reward, status)
 	if not cardView then
 		return
 	end
+
+	ensureRewardCardContentVisible(button, cardView)
 
 	if cardView.RewardAmount then
 		cardView.RewardAmount.Text = getRewardAmountText(reward)

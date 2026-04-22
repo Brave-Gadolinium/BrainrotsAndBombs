@@ -48,16 +48,26 @@ local STARTUP_BLOCKER_THICKNESS = 6
 local STARTUP_PLAYABLE_TERRAIN_PROGRESS = 0.85
 local MINE_ZONE_GENERATION_ENABLED = true -- Temporary test switch.
 local ENABLED_MINE_ZONES = {
+	Zone0 = true,
 	Zone1 = true,
+	Zone2 = true,
+	Zone3 = true,
+	Zone4 = true,
+	Zone5 = true,
 }
 local STARTUP_ZONE_ORDER = if type(Constants.MINE_STARTUP_ZONE_ORDER) == "table"
 	then Constants.MINE_STARTUP_ZONE_ORDER
-	else { "Zone1", "Zone2", "Zone3", "Zone4", "Zone5" }
+	else { "Zone0", "Zone1", "Zone2", "Zone3", "Zone4", "Zone5" }
+local MINE_STARTUP_ZONE_DELAY_SECONDS = math.max(0, tonumber(Constants.MINE_STARTUP_ZONE_DELAY_SECONDS) or 0)
 local TERRAIN_STARTUP_SLICE_HEIGHT = math.max(4, tonumber(Constants.TERRAIN_STARTUP_SLICE_HEIGHT) or 24)
 local CHUNK_SIZE_VECTOR = Vector3.new(TERRAIN_CHUNK_SIZE, TERRAIN_CHUNK_SIZE, TERRAIN_CHUNK_SIZE)
 local CHUNK_BOUNDARY_EPSILON = 0.001
 
 local ZoneMaterialConfigs = {
+	Zone0 = {
+		Material = Enum.Material.Sand,
+		MaterialVariant = "SandTerrain",
+	},
 	Zone1 = {
 		Material = Enum.Material.Sand,
 		MaterialVariant = "SandTerrain",
@@ -673,7 +683,7 @@ local function runInitialBootstrap()
 
 			local playableZoneName = getStartupPlayableZoneName()
 
-			for _, zonePlan in ipairs(orderedZonePlans) do
+			for index, zonePlan in ipairs(orderedZonePlans) do
 				local reporter = if zonePlan.Name == playableZoneName
 					then createStartupProgressReporter((#zonePlan.Slices * 2) + #zonePlan.Chunks)
 					else nil
@@ -687,7 +697,9 @@ local function runInitialBootstrap()
 					setStartupProgress(STARTUP_PLAYABLE_TERRAIN_PROGRESS)
 				end
 
-				task.wait()
+				if index < #orderedZonePlans then
+					task.wait(MINE_STARTUP_ZONE_DELAY_SECONDS)
+				end
 			end
 		end)
 

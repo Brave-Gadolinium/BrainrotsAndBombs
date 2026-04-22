@@ -8,6 +8,7 @@ local MineSpawnUtils = {}
 
 local DEFAULT_MAX_ATTEMPTS_PER_ITEM = 15
 local ZONE_Y_OFFSETS = {
+	Zone0 = 2,
 	Zone1 = 2,
 }
 

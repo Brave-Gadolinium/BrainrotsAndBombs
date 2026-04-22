@@ -914,6 +914,111 @@ local function consumeInventoryItemCount(counts: {[string]: number}?, itemData: 
 	return true
 end
 
+function PlayerController:EnsureInventoryContainsItems(player: Player, items: {ItemData}, reason: string?): number
+	local profile = profiles[player]
+	if not profile or type(items) ~= "table" then
+		return 0
+	end
+
+	if type(profile.Data.Inventory) ~= "table" then
+		profile.Data.Inventory = {}
+	end
+	if type(profile.Data.DiscoveredItems) ~= "table" then
+		profile.Data.DiscoveredItems = {}
+	end
+
+	local normalizedItems: {ItemData} = {}
+	local requestedCounts: {[string]: number} = {}
+	local liveCounts: {[string]: number} = {}
+	local profileCounts = buildInventoryItemCounts(profile.Data.Inventory)
+	local addedCount = 0
+	local discoveredChanged = false
+
+	for _, itemData in ipairs(items) do
+		if type(itemData) ~= "table" then
+			continue
+		end
+
+		local name = if type(itemData.Name) == "string" and itemData.Name ~= "" then itemData.Name else nil
+		if not name then
+			continue
+		end
+
+		local mutation = if type(itemData.Mutation) == "string" and itemData.Mutation ~= "" then itemData.Mutation else "Normal"
+		local rarity = if type(itemData.Rarity) == "string" and itemData.Rarity ~= "" then itemData.Rarity else "Common"
+		local level = math.max(1, math.floor(tonumber(itemData.Level) or 1))
+		local normalizedItemData: ItemData = {
+			Name = name,
+			Mutation = mutation,
+			Rarity = rarity,
+			Level = level,
+		}
+
+		table.insert(normalizedItems, normalizedItemData)
+		local itemKey = getInventoryItemKey(normalizedItemData)
+		requestedCounts[itemKey] = (requestedCounts[itemKey] or 0) + 1
+
+		local discoveryKey = mutation .. "_" .. name
+		if not profile.Data.DiscoveredItems[discoveryKey] then
+			profile.Data.DiscoveredItems[discoveryKey] = true
+			discoveredChanged = true
+		end
+	end
+
+	local function scanLiveContainer(container: Instance?)
+		if not container then
+			return
+		end
+
+		for _, child in ipairs(container:GetChildren()) do
+			if child:IsA("Tool") and child:GetAttribute("IsTemporary") ~= true then
+				local data = toolToData(child)
+				if data then
+					local itemKey = getInventoryItemKey(data)
+					liveCounts[itemKey] = (liveCounts[itemKey] or 0) + 1
+				end
+			end
+		end
+	end
+
+	scanLiveContainer(player:FindFirstChild("Backpack"))
+	scanLiveContainer(player.Character)
+
+	local processedKeys: {[string]: boolean} = {}
+	for _, itemData in ipairs(normalizedItems) do
+		local itemKey = getInventoryItemKey(itemData)
+		if processedKeys[itemKey] then
+			continue
+		end
+		processedKeys[itemKey] = true
+
+		local requiredCount = math.max(requestedCounts[itemKey] or 0, liveCounts[itemKey] or 0)
+		while (profileCounts[itemKey] or 0) < requiredCount do
+			table.insert(profile.Data.Inventory, {
+				Name = itemData.Name,
+				Mutation = itemData.Mutation,
+				Rarity = itemData.Rarity,
+				Level = itemData.Level,
+			})
+			profileCounts[itemKey] = (profileCounts[itemKey] or 0) + 1
+			addedCount += 1
+		end
+	end
+
+	logBrainrotTrace(player, ("EnsureInventoryContainsItems reason=%s added=%d"):format(
+		tostring(reason or "unspecified"),
+		addedCount
+	), profile.Data.Inventory)
+
+	if discoveredChanged then
+		local Events = ReplicatedStorage:FindFirstChild("Events")
+		local refresh = Events and Events:FindFirstChild("RefreshIndex")
+		if refresh then refresh:FireClient(player) end
+	end
+
+	return addedCount
+end
+
 local function preserveLiveFtueBrainrotsBeforeHydrate(player: Player, profile: any)
 	if not shouldPreserveFtueBrainrotsBeforeHydrate(player, profile) then
 		return
