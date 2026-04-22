@@ -64,12 +64,24 @@ local tutorialGuiStepLabel: TextLabel? = nil
 local tutorialGuiPulseScale: UIScale? = nil
 local tutorialGuiPulseTween: Tween? = nil
 local tutorialGuiTargetStep: number? = nil
+local tutorialBombCursor: GuiObject? = nil
+local tutorialBombPulseScale: UIScale? = nil
+local tutorialBombPulseTween: Tween? = nil
+local tutorialBombButton: GuiButton? = nil
+local tutorialBombButtonConnection: RBXScriptConnection? = nil
+local tutorialBombGuidanceDismissedStep: number? = nil
 local guiOverlaySuppressedUntil = 0
 local hiddenHudBackState: {[Instance]: {[string]: any}} = {}
 local postTutorialCompletionQueue: {QueuedPostTutorialCompletion} = {}
 local activePostTutorialCompletion: ActivePostTutorialCompletion? = nil
 local shouldUseTutorialGuiProxy: ((number) -> boolean)? = nil
 local getTutorialGuiTarget: ((number) -> GuiButton?)? = nil
+local findMobileBombButton: () -> GuiButton? = function()
+	return nil
+end
+local getHighestGuiZIndex: (Instance, Instance?) -> number = function()
+	return 1
+end
 local maskedGuiVisibility: {[GuiObject]: boolean} = {}
 local maskedGuiEnabled: {[Instance]: boolean} = {}
 local tutorialCursorState: {[GuiObject]: {Visible: boolean, ZIndex: number}} = {}
@@ -335,6 +347,133 @@ local function destroyTutorialGuiCursor()
 	end
 end
 
+local function stopTutorialBombPulse()
+	if tutorialBombPulseTween then
+		tutorialBombPulseTween:Cancel()
+		tutorialBombPulseTween = nil
+	end
+
+	if tutorialBombPulseScale then
+		tutorialBombPulseScale.Scale = 1
+	end
+end
+
+local function hideTutorialBombGuidance()
+	stopTutorialBombPulse()
+
+	if tutorialBombCursor then
+		tutorialBombCursor.Visible = false
+	end
+end
+
+local function ensureTutorialBombCursor(button: GuiButton): GuiObject?
+	if tutorialBombCursor and tutorialBombCursor.Parent == button then
+		return tutorialBombCursor
+	end
+
+	if tutorialBombCursor then
+		tutorialBombCursor:Destroy()
+		tutorialBombCursor = nil
+	end
+
+	local cursorTemplate = Templates:FindFirstChild("Cursor")
+	local cursor: GuiObject
+	if cursorTemplate and cursorTemplate:IsA("GuiObject") then
+		cursor = cursorTemplate:Clone()
+	else
+		local fallbackCursor = Instance.new("TextLabel")
+		fallbackCursor.BackgroundTransparency = 1
+		fallbackCursor.Font = Enum.Font.GothamBlack
+		fallbackCursor.Text = "v"
+		fallbackCursor.TextColor3 = Color3.fromRGB(255, 235, 85)
+		fallbackCursor.TextScaled = true
+		cursor = fallbackCursor
+	end
+
+	cursor.Name = "TutorialCursor"
+	cursor.AnchorPoint = Vector2.new(0.5, 1)
+	cursor.Position = UDim2.fromScale(0.5, -0.08)
+	cursor.Size = UDim2.fromScale(0.8, 0.8)
+	cursor.BackgroundTransparency = 1
+	cursor.Visible = false
+	cursor.ZIndex = getHighestGuiZIndex(button, nil) + 2
+	cursor.Parent = button
+	tutorialBombCursor = cursor
+
+	return cursor
+end
+
+local function ensureTutorialBombPulse(button: GuiButton): UIScale
+	if tutorialBombPulseScale and tutorialBombPulseScale.Parent == button then
+		return tutorialBombPulseScale
+	end
+
+	if tutorialBombPulseScale then
+		tutorialBombPulseScale:Destroy()
+	end
+
+	local pulseScale = Instance.new("UIScale")
+	pulseScale.Name = "TutorialBombPulseScale"
+	pulseScale.Scale = 1
+	pulseScale.Parent = button
+	tutorialBombPulseScale = pulseScale
+
+	return pulseScale
+end
+
+local function bindTutorialBombButton(button: GuiButton)
+	if tutorialBombButton == button and tutorialBombButtonConnection then
+		return
+	end
+
+	if tutorialBombButtonConnection then
+		tutorialBombButtonConnection:Disconnect()
+		tutorialBombButtonConnection = nil
+	end
+
+	tutorialBombButton = button
+	tutorialBombButtonConnection = button.Activated:Connect(function()
+		if currentStep ~= 2 then
+			return
+		end
+
+		tutorialBombGuidanceDismissedStep = currentStep
+		hideTutorialBombGuidance()
+	end)
+end
+
+local function syncTutorialBombGuidance()
+	if currentStep ~= 2 or tutorialBombGuidanceDismissedStep == currentStep then
+		hideTutorialBombGuidance()
+		return
+	end
+
+	local button = findMobileBombButton()
+	if not button or not button.Visible then
+		hideTutorialBombGuidance()
+		return
+	end
+
+	bindTutorialBombButton(button)
+
+	local cursor = ensureTutorialBombCursor(button)
+	if cursor then
+		cursor.Visible = true
+		cursor.ZIndex = getHighestGuiZIndex(button, cursor) + 2
+	end
+
+	local pulseScale = ensureTutorialBombPulse(button)
+	if not tutorialBombPulseTween then
+		pulseScale.Scale = 1
+		tutorialBombPulseTween = TweenService:Create(
+			pulseScale,
+			TweenInfo.new(0.55, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
+			{Scale = 1.12}
+		)
+		tutorialBombPulseTween:Play()
+	end
+end
+
 local function destroyTutorialGuiLabel()
 	if tutorialGuiStepLabel then
 		tutorialGuiStepLabel:Destroy()
@@ -471,9 +610,9 @@ local function findMoneyLabel(): GuiObject?
 	return nil
 end
 
-local function findMobileBombButton(): GuiObject?
+findMobileBombButton = function(): GuiButton?
 	local mobileBombButton = mainGui:FindFirstChild("MobileBombButton")
-	if mobileBombButton and mobileBombButton:IsA("GuiObject") then
+	if mobileBombButton and mobileBombButton:IsA("GuiButton") then
 		return mobileBombButton
 	end
 
@@ -653,6 +792,7 @@ end
 local function restoreTutorialUiMask()
 	pickaxesFrame:SetAttribute("IgnoreFrameManagerBlocking", false)
 	upgradesFrame:SetAttribute("IgnoreFrameManagerBlocking", false)
+	hideTutorialBombGuidance()
 
 	local maskedGuiObjects = {}
 	for guiObject in pairs(maskedGuiVisibility) do
@@ -747,7 +887,7 @@ local function getTutorialGuiCursorTarget(targetButton: GuiButton): GuiObject
 	return targetButton
 end
 
-local function getHighestGuiZIndex(root: Instance, excluded: Instance?): number
+getHighestGuiZIndex = function(root: Instance, excluded: Instance?): number
 	local highestZIndex = 1
 
 	if root ~= excluded and root:IsA("GuiObject") then
@@ -1246,6 +1386,7 @@ local function applyTutorialUiMask(presentation)
 			setMaskedGuiVisibleForTarget(mobileBombButton, false, "MobileBombButton")
 		end
 	end
+	syncTutorialBombGuidance()
 
 	local jumpButton = findMobileJumpButton()
 	if jumpButton then
