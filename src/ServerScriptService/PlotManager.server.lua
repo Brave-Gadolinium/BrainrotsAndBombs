@@ -24,6 +24,7 @@ local BoosterService = require(ServerScriptService.Modules.BoosterService)
 -- Assets
 local Templates = ReplicatedStorage:WaitForChild("Templates")
 local PlotTemplate = Templates:WaitForChild("Plot")
+local PlotEmptyTemplate = Templates:WaitForChild("PlotEmpty")
 local PlotsFolder = Workspace:WaitForChild("Plots")
 local Events = ReplicatedStorage:WaitForChild("Events")
 
@@ -41,6 +42,7 @@ local TUTORIAL_PLACE_BRAINROT_STEP = math.max(1, math.floor(tonumber(TutorialCon
 -- State
 local occupiedPlots = {}
 local activePlotModels = {}
+local activeEmptyPlotModels = {}
 local collectAllDebounce = {}
 
 local PlotManager = {}
@@ -68,20 +70,95 @@ local function getOnboardingStepForSpawn(player: Player): number
 	return 1
 end
 
-local function getFreePlotIndex(): number?
-	for i = 1, 5 do
-		local taken = false
-		for _, index in pairs(occupiedPlots) do
-			if index == i then
-				taken = true
-				break
-			end
+local function getPlotLocator(index: number): BasePart?
+	local locator = PlotsFolder:FindFirstChild(tostring(index))
+	if locator and locator:IsA("BasePart") then
+		return locator
+	end
+
+	return nil
+end
+
+local function getPlotIndices(): {number}
+	local indices = {}
+
+	for _, child in ipairs(PlotsFolder:GetChildren()) do
+		local index = tonumber(child.Name)
+		if index and child:IsA("BasePart") then
+			table.insert(indices, index)
 		end
-		if not taken then
-			return i
+	end
+
+	table.sort(indices)
+	return indices
+end
+
+local function isPlotIndexOccupied(index: number): boolean
+	for _, occupiedIndex in pairs(occupiedPlots) do
+		if occupiedIndex == index then
+			return true
+		end
+	end
+
+	return false
+end
+
+local function getFreePlotIndex(): number?
+	for _, index in ipairs(getPlotIndices()) do
+		if not isPlotIndexOccupied(index) then
+			return index
 		end
 	end
 	return nil
+end
+
+local function pivotInstanceToCFrame(instance: Instance, cframe: CFrame)
+	if instance:IsA("Model") then
+		instance:PivotTo(cframe)
+	elseif instance:IsA("BasePart") then
+		instance.CFrame = cframe
+	else
+		warn(`[PlotManager] Unsupported plot template class "{instance.ClassName}"`)
+	end
+end
+
+local function destroyEmptyPlot(index: number)
+	local existing = activeEmptyPlotModels[index]
+	if existing then
+		existing:Destroy()
+		activeEmptyPlotModels[index] = nil
+	end
+end
+
+local function spawnEmptyPlot(index: number)
+	if activeEmptyPlotModels[index] or isPlotIndexOccupied(index) then
+		return
+	end
+
+	local locator = getPlotLocator(index)
+	if not locator then
+		warn(`[PlotManager] Locator {index} not found for empty plot`)
+		return
+	end
+
+	local emptyPlot = PlotEmptyTemplate:Clone()
+	emptyPlot.Name = PlotEmptyTemplate.Name
+	emptyPlot:SetAttribute("BaseNumber", index)
+	emptyPlot:SetAttribute("IsEmptyPlot", true)
+	emptyPlot.Parent = Workspace
+	pivotInstanceToCFrame(emptyPlot, locator.CFrame)
+
+	activeEmptyPlotModels[index] = emptyPlot
+end
+
+local function refreshEmptyPlots()
+	for _, index in ipairs(getPlotIndices()) do
+		if isPlotIndexOccupied(index) then
+			destroyEmptyPlot(index)
+		else
+			spawnEmptyPlot(index)
+		end
+	end
 end
 
 local function hasBrainrotTool(container: Instance?): boolean
@@ -688,13 +765,14 @@ local function spawnPlot(player: Player)
 		return
 	end
 
-	occupiedPlots[player] = index
-
-	local locator = PlotsFolder:FindFirstChild(tostring(index))
+	local locator = getPlotLocator(index)
 	if not locator then
-		warn("Locator not found")
+		warn(`[PlotManager] Locator {index} not found`)
 		return
 	end
+
+	destroyEmptyPlot(index)
+	occupiedPlots[player] = index
 
 	local newPlot = PlotTemplate:Clone()
 	newPlot.Name = "Plot_" .. player.Name
@@ -729,6 +807,8 @@ local function handleCharacterSpawn(player: Player, character: Model)
 	end
 end
 
+refreshEmptyPlots()
+
 Players.PlayerAdded:Connect(function(player)
 	repeat
 		task.wait()
@@ -747,12 +827,17 @@ Players.PlayerAdded:Connect(function(player)
 end)
 
 Players.PlayerRemoving:Connect(function(player)
+	local index = occupiedPlots[player]
 	if activePlotModels[player] then
 		activePlotModels[player]:Destroy()
 		activePlotModels[player] = nil
 	end
 	occupiedPlots[player] = nil
 	collectAllDebounce[player] = nil
+
+	if type(index) == "number" then
+		spawnEmptyPlot(index)
+	end
 end)
 
 local requestSlotPurchase = Events:FindFirstChild("RequestSlotPurchase")

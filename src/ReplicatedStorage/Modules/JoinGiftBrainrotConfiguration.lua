@@ -3,8 +3,8 @@
 local JoinGiftBrainrotConfiguration = {
 	Enabled = true,
 
-	PreviewDelaySeconds = 2,
-	AutoPickupDelaySeconds = 3,
+	PreviewDelaySeconds = 5,
+	AutoPickupDelaySeconds = 5,
 
 	PreviewForwardDistance = 5,
 	PreviewMaxActivationDistance = 12,
