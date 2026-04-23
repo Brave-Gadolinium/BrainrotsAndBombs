@@ -1903,8 +1903,7 @@ local function applyStepPresentation()
 	end
 
 	local presentation = TutorialConfiguration.GetStepPresentation(currentStep)
-	local currentFrameName = FrameManager.getCurrentFrameName()
-	if currentStep < TutorialConfiguration.FinalStep or currentFrameName == "Pickaxes" then
+	if currentStep < TutorialConfiguration.FinalStep then
 		syncTutorialFrames(presentation)
 	end
 	if presentation.MaskUi then
