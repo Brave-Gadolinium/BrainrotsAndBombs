@@ -541,6 +541,7 @@ function PickaxeController:PurchaseBombForTutorial(player: Player, pickaxeName: 
 		NotificationEvent:FireClient(player, "Purchased " .. config.DisplayName .. "!", "Success")
 	end
 
+	AnalyticsFunnelsService:HandleBombTutorialAutoPurchased(player)
 	TutorialService:HandleBombPurchased(player)
 	return true
 end

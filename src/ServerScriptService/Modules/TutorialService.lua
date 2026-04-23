@@ -655,6 +655,9 @@ function TutorialService:SyncPlayer(player: Player)
 	syncTutorialSkippedAttribute(player, isTutorialSkipped(profile))
 	setCurrentPostTutorialStage(player, profile, resolvePostTutorialStage(player, profile))
 	AnalyticsFunnelsService:SyncTutorial(player, step)
+	if step >= TutorialConfiguration.FinalStep then
+		AnalyticsFunnelsService:HandleTutorialCompleted(player)
+	end
 
 	if step == PRE_FINAL_AUTO_ADVANCE_STEP then
 		schedulePreFinalAutoAdvance(player)

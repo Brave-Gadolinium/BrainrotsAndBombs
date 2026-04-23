@@ -654,6 +654,45 @@ local function advanceRecurringFunnel(player: Player, funnelKey: string, targetS
 	return true
 end
 
+-- Used by tutorial automation paths that should record the terminal conversion
+-- without synthesizing intermediate click steps.
+local function logRecurringFunnelStepWithoutBackfill(player: Player, funnelKey: string, targetStep: number): boolean
+	local funnelConfig = RecurringFunnels[funnelKey]
+	if not funnelConfig then
+		return false
+	end
+
+	local sessions = getPlayerSessions(player)
+	local session = sessions[funnelKey]
+	if not session then
+		return false
+	end
+
+	local clampedTarget = math.clamp(targetStep, 1, #funnelConfig.Steps)
+	if clampedTarget <= session.Step then
+		return false
+	end
+
+	local logged = safeLogFunnelStep(
+		player,
+		funnelConfig.FunnelName,
+		session.SessionId,
+		clampedTarget,
+		funnelConfig.Steps[clampedTarget],
+		nil
+	)
+	if not logged then
+		return false
+	end
+
+	session.Step = clampedTarget
+	if funnelConfig.ClearOnComplete and session.Step >= #funnelConfig.Steps then
+		clearRecurringSession(player, funnelKey)
+	end
+
+	return true
+end
+
 local function hasSpinAvailable(profile: any): boolean
 	local spins = tonumber(profile.Data.SpinNumber) or 0
 	if spins > 0 then
@@ -929,6 +968,10 @@ function AnalyticsFunnelsService:HandleBombPurchased(player: Player, pickaxeName
 	end
 
 	advanceRecurringFunnel(player, "BombShopConversion", 4)
+end
+
+function AnalyticsFunnelsService:HandleBombTutorialAutoPurchased(player: Player)
+	logRecurringFunnelStepWithoutBackfill(player, "BombShopConversion", 4)
 end
 
 function AnalyticsFunnelsService:HandleMineZoneEntered(player: Player)
