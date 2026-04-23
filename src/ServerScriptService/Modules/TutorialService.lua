@@ -411,23 +411,7 @@ local function resolvePostTutorialStage(player: Player?, profile: any): number
 		return getStoredPostTutorialStage(profile)
 	end
 
-	local currentMoney = getCurrentMoney(player, profile)
-	if not hasSpecificCharacterUpgrade(profile, TutorialConfiguration.TutorialCharacterUpgradeId) then
-		if currentMoney >= PostTutorialConfiguration.CharacterUpgradeMoneyThreshold then
-			return PostTutorialConfiguration.Stages.PromptCharacterUpgrade
-		end
-
-		return PostTutorialConfiguration.Stages.WaitingForCharacterMoney
-	end
-
-	if not hasBaseSlotUpgrade(profile) then
-		if currentMoney >= PostTutorialConfiguration.BaseUpgradeMoneyThreshold then
-			return PostTutorialConfiguration.Stages.PromptBaseUpgrade
-		end
-
-		return PostTutorialConfiguration.Stages.WaitingForBaseMoney
-	end
-
+	-- Upgrade prompts are no longer part of the onboarding/post-tutorial guidance flow.
 	return PostTutorialConfiguration.Stages.Completed
 end
 
@@ -882,18 +866,9 @@ function TutorialService:HandlePostTutorialCharacterUpgradePurchased(player: Pla
 	ensureTutorialFlags(profile)
 	local isTutorialCharacterUpgrade = type(_upgradeId) == "string"
 		and _upgradeId == TutorialConfiguration.TutorialCharacterUpgradeId
-	local storedPostTutorialStage = getStoredPostTutorialStage(profile)
-	local shouldFirePostTutorialCompletion = isTutorialCharacterUpgrade
-		and isMainTutorialCompleted(profile)
-		and storedPostTutorialStage >= PostTutorialConfiguration.Stages.WaitingForCharacterMoney
-		and storedPostTutorialStage <= PostTutorialConfiguration.Stages.PromptCharacterUpgrade
 
 	if isTutorialCharacterUpgrade then
 		consumeTutorialCharacterUpgrade(profile)
-	end
-
-	if shouldFirePostTutorialCompletion then
-		firePostTutorialCompletion(player, PostTutorialConfiguration.CompletionTexts.CharacterUpgrade)
 	end
 
 	self:EvaluatePostTutorial(player)
@@ -907,15 +882,7 @@ function TutorialService:HandlePostTutorialBaseUpgradePurchased(player: Player)
 	end
 
 	ensureTutorialFlags(profile)
-	local storedPostTutorialStage = getStoredPostTutorialStage(profile)
-	local shouldFirePostTutorialCompletion = isMainTutorialCompleted(profile)
-		and storedPostTutorialStage >= PostTutorialConfiguration.Stages.WaitingForBaseMoney
-		and storedPostTutorialStage <= PostTutorialConfiguration.Stages.PromptBaseUpgrade
 	consumeTutorialBaseUpgrade(profile)
-
-	if shouldFirePostTutorialCompletion then
-		firePostTutorialCompletion(player, PostTutorialConfiguration.CompletionTexts.BaseUpgrade)
-	end
 
 	self:EvaluatePostTutorial(player)
 	self:EvaluateCurrentStep(player)

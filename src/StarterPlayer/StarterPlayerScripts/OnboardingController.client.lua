@@ -1863,28 +1863,6 @@ local function findClosestTaggedPart(tagName: string): BasePart?
 	return closestPart
 end
 
-local function findUpgradeSlotsButtonTarget(): BasePart?
-	local plot = getPlayerPlot()
-	if not plot then
-		return nil
-	end
-
-	local upgradeSlotsButton = plot:FindFirstChild("UpgradeSlotsButton", true)
-	if not upgradeSlotsButton then
-		return nil
-	end
-
-	if upgradeSlotsButton:IsA("BasePart") then
-		return upgradeSlotsButton
-	end
-
-	if upgradeSlotsButton:IsA("Model") then
-		return upgradeSlotsButton.PrimaryPart or upgradeSlotsButton:FindFirstChildWhichIsA("BasePart", true)
-	end
-
-	return upgradeSlotsButton:FindFirstChildWhichIsA("BasePart", true)
-end
-
 local function resolveWorldTargetForStep(step: number): Instance?
 	if step == 1 then
 		return findTutorialMiningZonePart()
@@ -1907,28 +1885,10 @@ local function resolveWorldTargetForStep(step: number): Instance?
 end
 
 local function resolvePostTutorialWorldTarget(stage: number): BasePart?
-	if stage == PostTutorialConfiguration.Stages.PromptCharacterUpgrade then
-		if upgradesFrame.Visible then
-			return nil
-		end
-
-		return findClosestTaggedPart("UpgradePart")
-	elseif stage == PostTutorialConfiguration.Stages.PromptBaseUpgrade then
-		return findUpgradeSlotsButtonTarget()
-	end
-
 	return nil
 end
 
 local function getActivePostTutorialPromptStage(): number?
-	if currentPostTutorialStage == PostTutorialConfiguration.Stages.PromptCharacterUpgrade then
-		return currentPostTutorialStage
-	end
-
-	if currentPostTutorialStage == PostTutorialConfiguration.Stages.PromptBaseUpgrade then
-		return currentPostTutorialStage
-	end
-
 	return nil
 end
 

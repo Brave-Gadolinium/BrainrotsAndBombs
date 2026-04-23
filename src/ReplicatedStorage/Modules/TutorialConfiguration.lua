@@ -102,7 +102,7 @@ TutorialConfiguration.Steps = {
 		TargetType = "None",
 	},
 	[10] = {
-		Text = "Tutorial complete",
+		Text = "",
 		TargetType = "None",
 	},
 } :: {[number]: TutorialStepDefinition}
