@@ -732,6 +732,7 @@ function SlotManager.CollectMoney(player: Player, floorName: string, slotName: s
 		context = "base",
 	})
 	AnalyticsFunnelsService:HandleManualCollect(player, amount)
+	TutorialService:HandleManualCollect(player, amount)
 
 	local collectPart = slotModel:FindFirstChild("CollectTouch")
 	if collectPart then

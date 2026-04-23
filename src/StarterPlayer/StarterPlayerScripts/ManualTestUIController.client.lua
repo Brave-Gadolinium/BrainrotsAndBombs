@@ -64,6 +64,7 @@ local SNAPSHOT_FIELDS = {
 	{ key = "TimePlayed", label = "Time Played" },
 	{ key = "OnboardingStep", label = "Onboarding Step" },
 	{ key = "PostTutorialStage", label = "Post Tutorial Stage" },
+	{ key = "TutorialSkipped", label = "Tutorial Skipped" },
 	{ key = "MaxDepthLevelReached", label = "Max Depth" },
 	{ key = "GroupRewardClaimed", label = "Group Reward Claimed" },
 	{ key = "DailyRewardClaimDay", label = "Daily Claim Day" },

@@ -482,6 +482,7 @@ local function collectAllFromPlot(player: Player, plotModel: Model)
 			content_id = "CollectAll",
 			context = "base",
 		})
+		TutorialService:HandleManualCollect(player, totalCollected)
 
 		local popupEvent = Events:FindFirstChild("ShowCashPopUp")
 		if popupEvent then

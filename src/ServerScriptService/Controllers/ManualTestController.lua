@@ -725,6 +725,7 @@ local function buildTargetSnapshot(player: Player, executor: Player, accessLevel
 		TimePlayed = tonumber(profile.Data.TimePlayed) or 0,
 		OnboardingStep = tonumber(profile.Data.OnboardingStep) or 1,
 		PostTutorialStage = tonumber(profile.Data.PostTutorialStage) or PostTutorialConfiguration.Stages.WaitingForCharacterMoney,
+		TutorialSkipped = profile.Data.TutorialSkipped == true,
 		MaxDepthLevelReached = tonumber(profile.Data.MaxDepthLevelReached) or 0,
 		GroupRewardClaimed = player:GetAttribute("GroupRewardClaimed") == true,
 		DailyRewardClaimDay = dailyStatus.ClaimDay,
@@ -1173,7 +1174,7 @@ local function setPostTutorialStageDirect(target: Player, stage: number)
 	return true
 end
 
-local function setTutorialFtueState(target: Player, characterUpgradeConsumed: boolean, baseUpgradeConsumed: boolean)
+local function setTutorialFtueState(target: Player, characterUpgradeConsumed: boolean, baseUpgradeConsumed: boolean, tutorialSkipped: boolean)
 	local profile = ensureProfileTables(target)
 	if not profile then
 		return false
@@ -1182,6 +1183,8 @@ local function setTutorialFtueState(target: Player, characterUpgradeConsumed: bo
 	profile.Data.TutorialVersion = 3
 	profile.Data.TutorialFreeCharacterUpgradeConsumed = characterUpgradeConsumed
 	profile.Data.TutorialFreeBaseUpgradeConsumed = baseUpgradeConsumed
+	profile.Data.TutorialSkipped = tutorialSkipped == true
+	target:SetAttribute("TutorialSkipped", profile.Data.TutorialSkipped)
 	return true
 end
 
@@ -2043,7 +2046,7 @@ registerAction({
 	inputs = {},
 	handler = function(_executor, target)
 		if setOnboardingStepDirect(target, TutorialConfiguration.FinalStep)
-			and setTutorialFtueState(target, true, true) then
+			and setTutorialFtueState(target, true, true, false) then
 			refreshTargetState(target)
 			return true, "FTUE marked as completed."
 		end
@@ -2065,7 +2068,7 @@ registerAction({
 	handler = function(_executor, target)
 		local success = setOnboardingStepDirect(target, 1)
 			and setPostTutorialStageDirect(target, PostTutorialConfiguration.Stages.WaitingForCharacterMoney)
-			and setTutorialFtueState(target, false, false)
+			and setTutorialFtueState(target, false, false, false)
 		if success then
 			refreshTargetState(target)
 			return true, "FTUE reset to step 1."

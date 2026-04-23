@@ -24,7 +24,7 @@ export type TutorialStepPresentation = {
 	UseBlackout: boolean,
 }
 
-TutorialConfiguration.FinalStep = 12
+TutorialConfiguration.FinalStep = 10
 TutorialConfiguration.TutorialCharacterUpgradeId = "Speed1"
 TutorialConfiguration.TutorialBaseUpgradeMode = "FirstSlotUnlock"
 TutorialConfiguration.LegacyCompletedFinalStep = 9
@@ -86,30 +86,22 @@ TutorialConfiguration.Steps = {
 		TargetType = "HybridInventoryOrSlot",
 	},
 	[6] = {
+		Text = "Collect cash from your Brainrot",
+		TargetType = "WorldCollectCash",
+	},
+	[7] = {
 		Text = "Upgrade your bomb",
 		TargetType = "WorldBombShop",
 	},
-	[7] = {
+	[8] = {
 		Text = "Buy Venom Bomb",
 		TargetType = "GuiBuyBombButton",
 	},
-	[8] = {
-		Text = "Upgrade your character",
-		TargetType = "WorldCharacterUpgrade",
-	},
 	[9] = {
-		Text = "Well done! Upgrade your character and become faster!",
-		TargetType = "GuiCharacterUpgradeButton",
-	},
-	[10] = {
-		Text = "Upgrade your base",
-		TargetType = "GuiBaseUpgradeButton",
-	},
-	[11] = {
-		Text = "Well done! Upgrade your base and get more money!",
+		Text = "",
 		TargetType = "None",
 	},
-	[12] = {
+	[10] = {
 		Text = "Tutorial complete",
 		TargetType = "None",
 	},
@@ -192,19 +184,19 @@ TutorialConfiguration.StepPresentations = {
 		UseBlackout = false,
 	},
 	[6] = {
-		MaskUi = FULL_UI_STEP_PRESENTATION.MaskUi,
-		ShowText = FULL_UI_STEP_PRESENTATION.ShowText,
+		MaskUi = true,
+		ShowText = true,
 		ShowMoney = TutorialUiConfiguration.ShouldShowMoney(6),
-		ShowInventory = FULL_UI_STEP_PRESENTATION.ShowInventory,
-		ShowBombShopButton = FULL_UI_STEP_PRESENTATION.ShowBombShopButton,
-		ShowPickaxesFrame = FULL_UI_STEP_PRESENTATION.ShowPickaxesFrame,
-		ShowUpgradesFrame = FULL_UI_STEP_PRESENTATION.ShowUpgradesFrame,
-		ShowBaseUpgradeSurfaceButton = FULL_UI_STEP_PRESENTATION.ShowBaseUpgradeSurfaceButton,
-		ShowMobileBombButton = FULL_UI_STEP_PRESENTATION.ShowMobileBombButton,
-		ShowJumpButton = FULL_UI_STEP_PRESENTATION.ShowJumpButton,
-		ShowBackButton = FULL_UI_STEP_PRESENTATION.ShowBackButton,
-		BackProxyScale = FULL_UI_STEP_PRESENTATION.BackProxyScale,
-		UseBlackout = FULL_UI_STEP_PRESENTATION.UseBlackout,
+		ShowInventory = false,
+		ShowBombShopButton = false,
+		ShowPickaxesFrame = false,
+		ShowUpgradesFrame = false,
+		ShowBaseUpgradeSurfaceButton = false,
+		ShowMobileBombButton = false,
+		ShowJumpButton = false,
+		ShowBackButton = false,
+		BackProxyScale = 1,
+		UseBlackout = false,
 	},
 	[7] = {
 		MaskUi = FULL_UI_STEP_PRESENTATION.MaskUi,
@@ -227,7 +219,7 @@ TutorialConfiguration.StepPresentations = {
 		ShowMoney = TutorialUiConfiguration.ShouldShowMoney(8),
 		ShowInventory = FULL_UI_STEP_PRESENTATION.ShowInventory,
 		ShowBombShopButton = FULL_UI_STEP_PRESENTATION.ShowBombShopButton,
-		ShowPickaxesFrame = FULL_UI_STEP_PRESENTATION.ShowPickaxesFrame,
+		ShowPickaxesFrame = true,
 		ShowUpgradesFrame = FULL_UI_STEP_PRESENTATION.ShowUpgradesFrame,
 		ShowBaseUpgradeSurfaceButton = FULL_UI_STEP_PRESENTATION.ShowBaseUpgradeSurfaceButton,
 		ShowMobileBombButton = FULL_UI_STEP_PRESENTATION.ShowMobileBombButton,
@@ -237,51 +229,21 @@ TutorialConfiguration.StepPresentations = {
 		UseBlackout = FULL_UI_STEP_PRESENTATION.UseBlackout,
 	},
 	[9] = {
-		MaskUi = FULL_UI_STEP_PRESENTATION.MaskUi,
-		ShowText = FULL_UI_STEP_PRESENTATION.ShowText,
-		ShowMoney = TutorialUiConfiguration.ShouldShowMoney(9),
-		ShowInventory = FULL_UI_STEP_PRESENTATION.ShowInventory,
-		ShowBombShopButton = FULL_UI_STEP_PRESENTATION.ShowBombShopButton,
-		ShowPickaxesFrame = FULL_UI_STEP_PRESENTATION.ShowPickaxesFrame,
-		ShowUpgradesFrame = FULL_UI_STEP_PRESENTATION.ShowUpgradesFrame,
-		ShowBaseUpgradeSurfaceButton = FULL_UI_STEP_PRESENTATION.ShowBaseUpgradeSurfaceButton,
-		ShowMobileBombButton = FULL_UI_STEP_PRESENTATION.ShowMobileBombButton,
-		ShowJumpButton = FULL_UI_STEP_PRESENTATION.ShowJumpButton,
-		ShowBackButton = FULL_UI_STEP_PRESENTATION.ShowBackButton,
-		BackProxyScale = FULL_UI_STEP_PRESENTATION.BackProxyScale,
-		UseBlackout = FULL_UI_STEP_PRESENTATION.UseBlackout,
+		MaskUi = DEFAULT_STEP_PRESENTATION.MaskUi,
+		ShowText = DEFAULT_STEP_PRESENTATION.ShowText,
+		ShowMoney = DEFAULT_STEP_PRESENTATION.ShowMoney,
+		ShowInventory = DEFAULT_STEP_PRESENTATION.ShowInventory,
+		ShowBombShopButton = DEFAULT_STEP_PRESENTATION.ShowBombShopButton,
+		ShowPickaxesFrame = DEFAULT_STEP_PRESENTATION.ShowPickaxesFrame,
+		ShowUpgradesFrame = DEFAULT_STEP_PRESENTATION.ShowUpgradesFrame,
+		ShowBaseUpgradeSurfaceButton = DEFAULT_STEP_PRESENTATION.ShowBaseUpgradeSurfaceButton,
+		ShowMobileBombButton = DEFAULT_STEP_PRESENTATION.ShowMobileBombButton,
+		ShowJumpButton = DEFAULT_STEP_PRESENTATION.ShowJumpButton,
+		ShowBackButton = DEFAULT_STEP_PRESENTATION.ShowBackButton,
+		BackProxyScale = DEFAULT_STEP_PRESENTATION.BackProxyScale,
+		UseBlackout = DEFAULT_STEP_PRESENTATION.UseBlackout,
 	},
-	[10] = {
-		MaskUi = FULL_UI_STEP_PRESENTATION.MaskUi,
-		ShowText = FULL_UI_STEP_PRESENTATION.ShowText,
-		ShowMoney = TutorialUiConfiguration.ShouldShowMoney(10),
-		ShowInventory = FULL_UI_STEP_PRESENTATION.ShowInventory,
-		ShowBombShopButton = FULL_UI_STEP_PRESENTATION.ShowBombShopButton,
-		ShowPickaxesFrame = FULL_UI_STEP_PRESENTATION.ShowPickaxesFrame,
-		ShowUpgradesFrame = FULL_UI_STEP_PRESENTATION.ShowUpgradesFrame,
-		ShowBaseUpgradeSurfaceButton = FULL_UI_STEP_PRESENTATION.ShowBaseUpgradeSurfaceButton,
-		ShowMobileBombButton = FULL_UI_STEP_PRESENTATION.ShowMobileBombButton,
-		ShowJumpButton = FULL_UI_STEP_PRESENTATION.ShowJumpButton,
-		ShowBackButton = FULL_UI_STEP_PRESENTATION.ShowBackButton,
-		BackProxyScale = FULL_UI_STEP_PRESENTATION.BackProxyScale,
-		UseBlackout = FULL_UI_STEP_PRESENTATION.UseBlackout,
-	},
-	[11] = {
-		MaskUi = FULL_UI_STEP_PRESENTATION.MaskUi,
-		ShowText = FULL_UI_STEP_PRESENTATION.ShowText,
-		ShowMoney = TutorialUiConfiguration.ShouldShowMoney(11),
-		ShowInventory = FULL_UI_STEP_PRESENTATION.ShowInventory,
-		ShowBombShopButton = FULL_UI_STEP_PRESENTATION.ShowBombShopButton,
-		ShowPickaxesFrame = FULL_UI_STEP_PRESENTATION.ShowPickaxesFrame,
-		ShowUpgradesFrame = FULL_UI_STEP_PRESENTATION.ShowUpgradesFrame,
-		ShowBaseUpgradeSurfaceButton = FULL_UI_STEP_PRESENTATION.ShowBaseUpgradeSurfaceButton,
-		ShowMobileBombButton = FULL_UI_STEP_PRESENTATION.ShowMobileBombButton,
-		ShowJumpButton = FULL_UI_STEP_PRESENTATION.ShowJumpButton,
-		ShowBackButton = FULL_UI_STEP_PRESENTATION.ShowBackButton,
-		BackProxyScale = FULL_UI_STEP_PRESENTATION.BackProxyScale,
-		UseBlackout = FULL_UI_STEP_PRESENTATION.UseBlackout,
-	},
-	[12] = DEFAULT_STEP_PRESENTATION,
+	[10] = DEFAULT_STEP_PRESENTATION,
 } :: {[number]: TutorialStepPresentation}
 
 function TutorialConfiguration.GetStepPresentation(step: number): TutorialStepPresentation

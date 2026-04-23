@@ -19,17 +19,24 @@ type PlayerControllerType = {
 local TutorialService = {}
 
 local PlayerController: PlayerControllerType? = nil
+local PickaxeController: any = nil
 local reportActionEvent: RemoteEvent? = nil
 local postTutorialCompletionEvent: RemoteEvent? = nil
-local CURRENT_TUTORIAL_VERSION = 3
-local CURRENT_TUTORIAL_ANALYTICS_KEY = "Tutor_22_04"
+local CURRENT_TUTORIAL_VERSION = 4
+local PREVIOUS_TUTORIAL_ANALYTICS_KEY = "Tutor_22_04"
 local LEGACY_TUTORIAL_ANALYTICS_KEY = "TutorialFTUE"
 local PRE_FINAL_AUTO_ADVANCE_STEP = TutorialConfiguration.FinalStep - 1
 local STEP_ONE_MIN_DISPLAY_TIME = 1.5
 local PRE_FINAL_AUTO_ADVANCE_DELAY = 0
+local COLLECT_CASH_STEP = 6
+local OPEN_BOMB_SHOP_STEP = 7
+local BUY_BOMB_TWO_STEP = 8
+local BUY_BOMB_TWO_ID = "Bomb 2"
+local BUY_BOMB_TWO_AUTO_PURCHASE_DELAY = 10
 local stepActivatedAt: {[Player]: number} = {}
 local stepOneEvaluationTokens: {[Player]: number} = {}
 local preFinalAutoAdvanceTokens: {[Player]: number} = {}
+local buyBombTwoAutoPurchaseStates: {[Player]: {StartedAt: number}} = {}
 local DEBUG_TUTORIAL = false
 local DEBUG_BRAINROT_TRACE = false
 
@@ -104,6 +111,10 @@ local function getStoredPostTutorialStage(profile: any): number
 	)
 end
 
+local function isTutorialSkipped(profile: any): boolean
+	return profile ~= nil and profile.Data ~= nil and profile.Data.TutorialSkipped == true
+end
+
 local function getProfile(player: Player)
 	if not PlayerController then
 		return nil
@@ -137,6 +148,36 @@ end
 
 local function invalidateScheduledPreFinalAutoAdvance(player: Player)
 	preFinalAutoAdvanceTokens[player] = (preFinalAutoAdvanceTokens[player] or 0) + 1
+end
+
+local function cancelBuyBombTwoAutoPurchase(player: Player)
+	buyBombTwoAutoPurchaseStates[player] = nil
+end
+
+local function ensureBuyBombTwoAutoPurchase(player: Player)
+	if buyBombTwoAutoPurchaseStates[player] or getCurrentStep(player) ~= BUY_BOMB_TWO_STEP then
+		return
+	end
+
+	local state = {
+		StartedAt = os.clock(),
+	}
+	buyBombTwoAutoPurchaseStates[player] = state
+
+	task.delay(BUY_BOMB_TWO_AUTO_PURCHASE_DELAY, function()
+		if buyBombTwoAutoPurchaseStates[player] ~= state then
+			return
+		end
+
+		buyBombTwoAutoPurchaseStates[player] = nil
+		if not player.Parent or getCurrentStep(player) ~= BUY_BOMB_TWO_STEP then
+			return
+		end
+
+		if PickaxeController and PickaxeController.PurchaseBombForTutorial then
+			PickaxeController:PurchaseBombForTutorial(player, BUY_BOMB_TWO_ID)
+		end
+	end)
 end
 
 local function schedulePreFinalAutoAdvance(player: Player)
@@ -184,6 +225,10 @@ end
 
 local function syncPostTutorialStageAttribute(player: Player, stage: number)
 	player:SetAttribute("PostTutorialStage", PostTutorialConfiguration.ClampStage(stage))
+end
+
+local function syncTutorialSkippedAttribute(player: Player, skipped: boolean)
+	player:SetAttribute("TutorialSkipped", skipped == true)
 end
 
 local function getRootPart(player: Player): BasePart?
@@ -358,6 +403,10 @@ local function resolvePostTutorialStage(player: Player?, profile: any): number
 		return PostTutorialConfiguration.Stages.WaitingForCharacterMoney
 	end
 
+	if isTutorialSkipped(profile) then
+		return PostTutorialConfiguration.Stages.Completed
+	end
+
 	if not isMainTutorialCompleted(profile) then
 		return getStoredPostTutorialStage(profile)
 	end
@@ -408,7 +457,13 @@ local function setCurrentStep(player: Player, profile: any, step: number)
 	markStepActivated(player)
 	invalidateScheduledStepOneEvaluation(player)
 	invalidateScheduledPreFinalAutoAdvance(player)
+	if clampedStep ~= BUY_BOMB_TWO_STEP then
+		cancelBuyBombTwoAutoPurchase(player)
+	end
 	AnalyticsFunnelsService:SyncTutorial(player, clampedStep)
+	if previousStep < TutorialConfiguration.FinalStep and clampedStep >= TutorialConfiguration.FinalStep then
+		AnalyticsFunnelsService:HandleTutorialCompleted(player)
+	end
 
 	if PlayerController and PlayerController.OnTutorialStepChanged then
 		PlayerController:OnTutorialStepChanged(player, clampedStep)
@@ -437,6 +492,10 @@ local function ensureTutorialFlags(profile: any)
 	if type(profile.Data.TutorialFreeBaseUpgradeConsumed) ~= "boolean" then
 		profile.Data.TutorialFreeBaseUpgradeConsumed = false
 	end
+
+	if type(profile.Data.TutorialSkipped) ~= "boolean" then
+		profile.Data.TutorialSkipped = false
+	end
 end
 
 local function consumeTutorialCharacterUpgrade(profile: any)
@@ -454,6 +513,18 @@ local function remapLegacyTutorialStepForVersionThree(step: number): number
 	end
 
 	return math.clamp(remappedStep, 1, TutorialConfiguration.FinalStep)
+end
+
+local function remapVersionThreeStepForVersionFour(step: number): number
+	local remappedStep = math.max(1, math.floor(tonumber(step) or 1))
+	if remappedStep <= COLLECT_CASH_STEP then
+		return math.clamp(remappedStep, 1, TutorialConfiguration.FinalStep)
+	end
+	if remappedStep == OPEN_BOMB_SHOP_STEP then
+		return BUY_BOMB_TWO_STEP
+	end
+
+	return TutorialConfiguration.FinalStep
 end
 
 local function migrateTutorialProgress(profile: any)
@@ -474,24 +545,24 @@ local function migrateTutorialProgress(profile: any)
 	local currentStep = math.max(1, tonumber(profile.Data.OnboardingStep) or 1)
 	if previousTutorialVersion < 2 then
 		if currentStep >= TutorialConfiguration.LegacyCompletedFinalStep then
-			profile.Data.OnboardingStep = TutorialConfiguration.FinalStep
-			profile.Data.OnboardingFunnelStep = TutorialConfiguration.FinalStep
-
-			if type(profile.Data.AnalyticsFunnels) == "table" and type(profile.Data.AnalyticsFunnels.OneTime) == "table" then
-				profile.Data.AnalyticsFunnels.OneTime[CURRENT_TUTORIAL_ANALYTICS_KEY] = TutorialConfiguration.FinalStep
-				profile.Data.AnalyticsFunnels.OneTime[LEGACY_TUTORIAL_ANALYTICS_KEY] = nil
-			end
+			currentStep = TutorialConfiguration.FinalStep
 		end
-	else
+	elseif previousTutorialVersion < 3 then
 		if currentStep >= 13 then
-			profile.Data.OnboardingStep = TutorialConfiguration.FinalStep
+			currentStep = 12
 		else
-			profile.Data.OnboardingStep = remapLegacyTutorialStepForVersionThree(currentStep)
+			currentStep = remapLegacyTutorialStepForVersionThree(currentStep)
 		end
+	end
 
-		if type(profile.Data.AnalyticsFunnels) == "table" and type(profile.Data.AnalyticsFunnels.OneTime) == "table" then
-			profile.Data.AnalyticsFunnels.OneTime[LEGACY_TUTORIAL_ANALYTICS_KEY] = nil
-		end
+	if previousTutorialVersion < CURRENT_TUTORIAL_VERSION then
+		currentStep = remapVersionThreeStepForVersionFour(currentStep)
+	end
+
+	profile.Data.OnboardingStep = math.clamp(currentStep, 1, TutorialConfiguration.FinalStep)
+	if type(profile.Data.AnalyticsFunnels) == "table" and type(profile.Data.AnalyticsFunnels.OneTime) == "table" then
+		profile.Data.AnalyticsFunnels.OneTime[PREVIOUS_TUTORIAL_ANALYTICS_KEY] = nil
+		profile.Data.AnalyticsFunnels.OneTime[LEGACY_TUTORIAL_ANALYTICS_KEY] = nil
 	end
 
 	if hasSpecificCharacterUpgrade(profile, TutorialConfiguration.TutorialCharacterUpgradeId) then
@@ -543,30 +614,11 @@ function TutorialService:GetStepDefinition(step: number)
 end
 
 function TutorialService:IsTutorialCharacterUpgradeFreeAvailable(player: Player, upgradeId: string): boolean
-	local profile = getProfile(player)
-	if not profile or not profile.Data then
-		return false
-	end
-
-	ensureTutorialFlags(profile)
-
-	return getCurrentStep(player) == 9
-		and upgradeId == TutorialConfiguration.TutorialCharacterUpgradeId
-		and profile.Data.TutorialFreeCharacterUpgradeConsumed ~= true
-		and not hasSpecificCharacterUpgrade(profile, upgradeId)
+	return false
 end
 
 function TutorialService:IsTutorialBaseUpgradeFreeAvailable(player: Player): boolean
-	local profile = getProfile(player)
-	if not profile or not profile.Data then
-		return false
-	end
-
-	ensureTutorialFlags(profile)
-
-	return profile.Data.TutorialFreeBaseUpgradeConsumed ~= true
-		and getCurrentStep(player) == 10
-		and not hasBaseSlotUpgrade(profile)
+	return false
 end
 
 function TutorialService:SyncPlayer(player: Player)
@@ -574,10 +626,12 @@ function TutorialService:SyncPlayer(player: Player)
 	if not profile or not profile.Data then
 		local step = getCurrentStep(player)
 		local storedStage = tonumber(player:GetAttribute("PostTutorialStage"))
+		local tutorialSkipped = player:GetAttribute("TutorialSkipped") == true
 		syncStepAttribute(player, step)
 		markStepActivated(player)
 		invalidateScheduledStepOneEvaluation(player)
 		invalidateScheduledPreFinalAutoAdvance(player)
+		syncTutorialSkippedAttribute(player, tutorialSkipped)
 		syncPostTutorialStageAttribute(
 			player,
 			PostTutorialConfiguration.ClampStage(
@@ -595,6 +649,10 @@ function TutorialService:SyncPlayer(player: Player)
 	markStepActivated(player)
 	invalidateScheduledStepOneEvaluation(player)
 	invalidateScheduledPreFinalAutoAdvance(player)
+	if step ~= BUY_BOMB_TWO_STEP then
+		cancelBuyBombTwoAutoPurchase(player)
+	end
+	syncTutorialSkippedAttribute(player, isTutorialSkipped(profile))
 	setCurrentPostTutorialStage(player, profile, resolvePostTutorialStage(player, profile))
 	AnalyticsFunnelsService:SyncTutorial(player, step)
 
@@ -620,6 +678,30 @@ function TutorialService:AdvanceToStep(player: Player, step: number): boolean
 	debugTutorialLog(player, ("AdvanceToStep %d -> %d"):format(currentStep, targetStep))
 	setCurrentStep(player, profile, targetStep)
 	self:EvaluateCurrentStep(player)
+	return true
+end
+
+function TutorialService:SkipTutorial(player: Player): boolean
+	local profile = getProfile(player)
+	if not profile or not profile.Data then
+		return false
+	end
+
+	ensureTutorialFlags(profile)
+
+	local currentStep = getCurrentStep(player)
+	if currentStep >= TutorialConfiguration.FinalStep or isTutorialSkipped(profile) then
+		return false
+	end
+
+	debugTutorialLog(player, ("SkipTutorial step=%d"):format(currentStep))
+	profile.Data.TutorialSkipped = true
+	syncTutorialSkippedAttribute(player, true)
+	consumeTutorialCharacterUpgrade(profile)
+	consumeTutorialBaseUpgrade(profile)
+	setCurrentPostTutorialStage(player, profile, PostTutorialConfiguration.Stages.Completed)
+	AnalyticsFunnelsService:HandleTutorialSkipped(player, currentStep)
+	self:AdvanceToStep(player, TutorialConfiguration.FinalStep)
 	return true
 end
 
@@ -671,22 +753,11 @@ function TutorialService:EvaluateCurrentStep(player: Player)
 			end
 		elseif currentStep == 5 then
 			if hasPlacedBrainrot(player) then
-				nextStep = 6
+				nextStep = COLLECT_CASH_STEP
 			end
-		elseif currentStep == 7 then
+		elseif currentStep == BUY_BOMB_TWO_STEP then
 			if hasPurchasedAdditionalBomb(player, profile) then
-				nextStep = 8
-			end
-		elseif currentStep == 9 then
-			if hasSpecificCharacterUpgrade(profile, TutorialConfiguration.TutorialCharacterUpgradeId) then
-				consumeTutorialCharacterUpgrade(profile)
-				nextStep = 10
-			end
-		elseif currentStep == 10 then
-			if hasBaseSlotUpgrade(profile) then
-				consumeTutorialBaseUpgrade(profile)
-				firePostTutorialCompletion(player, PostTutorialConfiguration.CompletionTexts.BaseUpgrade)
-				nextStep = 11
+				nextStep = PRE_FINAL_AUTO_ADVANCE_STEP
 			end
 		end
 
@@ -768,9 +839,20 @@ function TutorialService:HandleBrainrotPlaced(player: Player)
 	logBrainrotTrace(player, ("HandleBrainrotPlaced currentStep=%s"):format(tostring(getCurrentStep(player))))
 	debugTutorialLog(player, "HandleBrainrotPlaced")
 	if getCurrentStep(player) == 5 then
-		self:AdvanceToStep(player, 6)
+		self:AdvanceToStep(player, COLLECT_CASH_STEP)
 	else
 		self:EvaluateCurrentStep(player)
+	end
+end
+
+function TutorialService:HandleManualCollect(player: Player, amount: number)
+	debugTutorialLog(player, ("HandleManualCollect amount=%d"):format(math.floor(tonumber(amount) or 0)))
+	if math.floor(tonumber(amount) or 0) <= 0 then
+		return
+	end
+
+	if getCurrentStep(player) == COLLECT_CASH_STEP then
+		self:AdvanceToStep(player, OPEN_BOMB_SHOP_STEP)
 	end
 end
 
@@ -781,8 +863,8 @@ end
 
 function TutorialService:HandleBombPurchased(player: Player)
 	debugTutorialLog(player, "HandleBombPurchased")
-	if getCurrentStep(player) == 7 then
-		self:AdvanceToStep(player, 8)
+	if getCurrentStep(player) == BUY_BOMB_TWO_STEP then
+		self:AdvanceToStep(player, PRE_FINAL_AUTO_ADVANCE_STEP)
 	else
 		self:EvaluateCurrentStep(player)
 	end
@@ -807,11 +889,6 @@ function TutorialService:HandlePostTutorialCharacterUpgradePurchased(player: Pla
 		consumeTutorialCharacterUpgrade(profile)
 	end
 
-	if getCurrentStep(player) == 9 and isTutorialCharacterUpgrade then
-		self:AdvanceToStep(player, 10)
-		return
-	end
-
 	if shouldFirePostTutorialCompletion then
 		firePostTutorialCompletion(player, PostTutorialConfiguration.CompletionTexts.CharacterUpgrade)
 	end
@@ -833,12 +910,6 @@ function TutorialService:HandlePostTutorialBaseUpgradePurchased(player: Player)
 		and storedPostTutorialStage <= PostTutorialConfiguration.Stages.PromptBaseUpgrade
 	consumeTutorialBaseUpgrade(profile)
 
-	if getCurrentStep(player) == 10 then
-		firePostTutorialCompletion(player, PostTutorialConfiguration.CompletionTexts.BaseUpgrade)
-		self:AdvanceToStep(player, 11)
-		return
-	end
-
 	if shouldFirePostTutorialCompletion then
 		firePostTutorialCompletion(player, PostTutorialConfiguration.CompletionTexts.BaseUpgrade)
 	end
@@ -855,19 +926,21 @@ function TutorialService:ReportAction(player: Player, actionId: string)
 		if currentStep == 4 then
 			self:AdvanceToStep(player, 5)
 		end
+	elseif actionId == "SkipTutorialPressed" then
+		self:SkipTutorial(player)
 	elseif actionId == "ShopOpened" then
-		if currentStep == 6 then
-			self:AdvanceToStep(player, 7)
-		end
-	elseif actionId == "UpgradesOpened" then
-		if currentStep == 8 then
-			self:AdvanceToStep(player, 9)
+		if currentStep == OPEN_BOMB_SHOP_STEP then
+			self:AdvanceToStep(player, BUY_BOMB_TWO_STEP)
+			ensureBuyBombTwoAutoPurchase(player)
+		elseif currentStep == BUY_BOMB_TWO_STEP then
+			ensureBuyBombTwoAutoPurchase(player)
 		end
 	end
 end
 
 function TutorialService:Init(controllers)
 	PlayerController = controllers.PlayerController
+	PickaxeController = controllers.PickaxeController
 
 	local events = ReplicatedStorage:WaitForChild("Events")
 	reportActionEvent = events:FindFirstChild("ReportTutorialAction") :: RemoteEvent
@@ -894,6 +967,7 @@ function TutorialService:Init(controllers)
 		stepActivatedAt[player] = nil
 		stepOneEvaluationTokens[player] = nil
 		preFinalAutoAdvanceTokens[player] = nil
+		buyBombTwoAutoPurchaseStates[player] = nil
 	end)
 end
 

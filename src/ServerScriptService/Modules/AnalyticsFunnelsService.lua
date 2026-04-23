@@ -33,10 +33,13 @@ local purchaseAttributions: {[Player]: {[string]: PurchaseAttribution}} = {}
 local autoBombToggleSurfaces: {[Player]: {Surface: string, ExpiresAt: number}} = {}
 local initialized = false
 
-local TUTORIAL_VERSION = "tutor_22_04"
-local TUTORIAL_FUNNEL_KEY = "Tutor_22_04"
-local TUTORIAL_FUNNEL_NAME = "Tutor_22/04"
-local LEGACY_TUTORIAL_FUNNEL_KEYS = {"TutorialFTUE"}
+local TUTORIAL_VERSION = "tutor_23_04"
+local TUTORIAL_FUNNEL_KEY = "Tutor_23_04"
+local TUTORIAL_FUNNEL_NAME = "Tutor_23/04"
+local LEGACY_TUTORIAL_FUNNEL_KEYS = {"Tutor_22_04", "TutorialFTUE"}
+local TUTORIAL_ENTERED_MARKER_KEY = "tutorial_entered"
+local TUTORIAL_COMPLETED_MARKER_KEY = "tutorial_completed"
+local TUTORIAL_SKIPPED_MARKER_KEY = "tutorial_skipped"
 local SECONDS_PER_DAY = 86400
 local FREE_SPIN_COOLDOWN_SECONDS = math.max(0, tonumber(DailySpinConfiguration.FreeSpinCooldownSeconds) or (15 * 60))
 local PURCHASE_ATTRIBUTION_TTL = 120
@@ -52,12 +55,10 @@ local OneTimeFunnels = {
 			[4] = "PickupBrainrot",
 			[5] = "BackToSurface",
 			[6] = "PlaceBrainrot",
-			[7] = "OpenBombShop",
-			[8] = "BuyBomb2",
-			[9] = "OpenCharacterUpgrader",
-			[10] = "CharacterUpgradeComplete",
-			[11] = "BaseUpgradeComplete",
-			[12] = "TutorialComplete",
+			[7] = "CollectCash",
+			[8] = "OpenBombShop",
+			[9] = "BuyBomb2",
+			[10] = "TutorialComplete",
 		},
 	},
 	EarlyProgressionToFirstRebirth = {
@@ -176,8 +177,15 @@ local function ensureAnalyticsData(profile: any)
 	if type(analyticsData.OneTime) ~= "table" then
 		analyticsData.OneTime = {}
 	end
+	if type(analyticsData.Markers) ~= "table" then
+		analyticsData.Markers = {}
+	end
 
 	return analyticsData
+end
+
+local function isTutorialSkipped(profile: any): boolean
+	return profile ~= nil and profile.Data ~= nil and profile.Data.TutorialSkipped == true
 end
 
 local function getBombTierFromName(bombName: string?): number
@@ -468,13 +476,26 @@ local function setOneTimeStep(profile: any, funnelKey: string, step: number)
 	end
 end
 
+local function hasMarker(profile: any, markerKey: string): boolean
+	local analyticsData = ensureAnalyticsData(profile)
+	return analyticsData.Markers[markerKey] == true
+end
+
+local function setMarker(profile: any, markerKey: string)
+	local analyticsData = ensureAnalyticsData(profile)
+	analyticsData.Markers[markerKey] = true
+end
+
 local function safeLogCustomEvent(player: Player, eventName: string, value: number?, customFields: {[string]: any}?)
 	local success, err = pcall(function()
 		AnalyticsService:LogCustomEvent(player, eventName, value or 1, sanitizeCustomFields(customFields))
 	end)
 	if not success then
 		warn(`[AnalyticsFunnelsService] Failed to log custom event {eventName} for {player.Name}: {err}`)
+		return false
 	end
+
+	return true
 end
 
 local function safeLogOnboardingStep(player: Player, step: number, stepName: string, customFields: {[string]: any}?)
@@ -546,6 +567,21 @@ local function advanceOneTimeFunnel(player: Player, funnelKey: string, targetSte
 		setOneTimeStep(profile, funnelKey, step)
 	end
 
+	return true
+end
+
+local function logOneTimeMarkerEvent(player: Player, markerKey: string, eventName: string, customFields: {[string]: any}?): boolean
+	local profile = getProfile(player)
+	if not profile or hasMarker(profile, markerKey) then
+		return false
+	end
+
+	local logged = safeLogCustomEvent(player, eventName, 1, buildFirstStepFields(player, customFields))
+	if not logged then
+		return false
+	end
+
+	setMarker(profile, markerKey)
 	return true
 end
 
@@ -776,9 +812,30 @@ function AnalyticsFunnelsService:LogFailure(player: Player, reason: string, cust
 end
 
 function AnalyticsFunnelsService:SyncTutorial(player: Player, tutorialStep: number)
+	local profile = getProfile(player)
+	if not profile then
+		return
+	end
+
 	local tutorialFunnelConfig = OneTimeFunnels[TUTORIAL_FUNNEL_KEY]
 	local funnelFinalStep = tutorialFunnelConfig and #tutorialFunnelConfig.Steps or TutorialConfiguration.FinalStep
 	local funnelStep = math.clamp(tutorialStep, 1, funnelFinalStep)
+	local currentFunnelStep = getOneTimeStep(profile, TUTORIAL_FUNNEL_KEY)
+	local tutorialSkipped = isTutorialSkipped(profile)
+
+	if not tutorialSkipped
+		and currentFunnelStep <= 0
+		and tutorialStep > 0
+		and tutorialStep < TutorialConfiguration.FinalStep then
+		logOneTimeMarkerEvent(player, TUTORIAL_ENTERED_MARKER_KEY, "tutorial_entered", {
+			zone = "tutorial",
+		})
+	end
+
+	if tutorialSkipped and tutorialStep >= TutorialConfiguration.FinalStep then
+		return
+	end
+
 	if advanceOneTimeFunnel(player, TUTORIAL_FUNNEL_KEY, funnelStep, {
 		zone = "tutorial",
 	}) and tutorialStep >= TutorialConfiguration.FinalStep then
@@ -786,6 +843,29 @@ function AnalyticsFunnelsService:SyncTutorial(player: Player, tutorialStep: numb
 			zone = "base",
 		})
 	end
+end
+
+function AnalyticsFunnelsService:HandleTutorialCompleted(player: Player)
+	local profile = getProfile(player)
+	if not profile or isTutorialSkipped(profile) or hasMarker(profile, TUTORIAL_SKIPPED_MARKER_KEY) then
+		return
+	end
+
+	logOneTimeMarkerEvent(player, TUTORIAL_COMPLETED_MARKER_KEY, "tutorial_completed", {
+		zone = "tutorial",
+	})
+end
+
+function AnalyticsFunnelsService:HandleTutorialSkipped(player: Player, skippedStep: number)
+	local profile = getProfile(player)
+	if not profile or hasMarker(profile, TUTORIAL_COMPLETED_MARKER_KEY) then
+		return
+	end
+
+	logOneTimeMarkerEvent(player, TUTORIAL_SKIPPED_MARKER_KEY, "tutorial_skipped", {
+		zone = "tutorial",
+		skip_step = math.max(1, math.floor(tonumber(skippedStep) or 1)),
+	})
 end
 
 function AnalyticsFunnelsService:HandleMoneyBalanceChanged(player: Player)

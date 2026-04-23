@@ -74,6 +74,33 @@ local function unlockPickaxeThroughTier(profile, targetPickaxeName: string)
 	end
 end
 
+local function refreshPickaxeUi(player: Player)
+	local updateUIEvent = Events:FindFirstChild("UpdatePickaxeUI")
+	if updateUIEvent and updateUIEvent:IsA("RemoteEvent") then
+		updateUIEvent:FireClient(player)
+	end
+end
+
+local function finalizeBombOwnership(player: Player, profile, pickaxeName: string, unlockThroughTierPurchase: boolean?): boolean
+	local config = BombsConfigurations.Bombs[pickaxeName]
+	if not config then
+		return false
+	end
+
+	ensureOwnedPickaxes(profile)
+	if unlockThroughTierPurchase == true then
+		unlockPickaxeThroughTier(profile, pickaxeName)
+	else
+		profile.Data.OwnedPickaxes[pickaxeName] = true
+	end
+	profile.Data.EquippedPickaxe = pickaxeName
+
+	PickaxeController.EquipPickaxe(player, pickaxeName)
+	BadgeManager:EvaluatePickaxeMilestones(player, pickaxeName)
+	refreshPickaxeUi(player)
+	return true
+end
+
 -- [ CORE LOGIC ]
 local function clearExistingPickaxes(player: Player)
 	local character = player.Character
@@ -431,8 +458,6 @@ function PickaxeController.HandlePickaxeAction(player: Player, pickaxeName: stri
 	local price = config.Price
 	AnalyticsEconomyService:FlushBombIncome(player)
 	if PlayerController:DeductMoney(player, price) then
-		profile.Data.OwnedPickaxes[pickaxeName] = true
-		profile.Data.EquippedPickaxe = pickaxeName -- Auto-Equip the new best pickaxe!
 		AnalyticsEconomyService:LogCashSink(player, price, TRANSACTION_TYPES.Shop, `Bomb:{pickaxeName}`, {
 			feature = "bomb_shop",
 			content_id = pickaxeName,
@@ -440,19 +465,13 @@ function PickaxeController.HandlePickaxeAction(player: Player, pickaxeName: stri
 			bomb_tier = getBombTier(pickaxeName),
 		})
 
-		PickaxeController.EquipPickaxe(player, pickaxeName)
-		BadgeManager:EvaluatePickaxeMilestones(player, pickaxeName)
+		finalizeBombOwnership(player, profile, pickaxeName, false)
 
 		if NotificationEvent then 
 			NotificationEvent:FireClient(player, "Purchased " .. config.DisplayName .. "!", "Success") 
 		end
 		AnalyticsFunnelsService:HandleBombPurchased(player, pickaxeName)
 		TutorialService:HandleBombPurchased(player)
-
-		local UpdateUIEvent = Events:FindFirstChild("UpdatePickaxeUI")
-		if UpdateUIEvent and UpdateUIEvent:IsA("RemoteEvent") then
-			UpdateUIEvent:FireClient(player)
-		end
 	else
 		if NotificationEvent then 
 			NotificationEvent:FireClient(player, "Not enough money!", "Error") 
@@ -472,14 +491,8 @@ function PickaxeController.GrantPickaxeByRobux(player: Player, pickaxeName: stri
 		return false
 	end
 
-	ensureOwnedPickaxes(profile)
-	unlockPickaxeThroughTier(profile, pickaxeName)
-	profile.Data.EquippedPickaxe = pickaxeName
-
-	PickaxeController.EquipPickaxe(player, pickaxeName)
-	BadgeManager:EvaluatePickaxeMilestones(player, pickaxeName)
+	finalizeBombOwnership(player, profile, pickaxeName, true)
 	TutorialService:HandleBombPurchased(player)
-	PickaxeController.RefreshUI(player)
 
 	if NotificationEvent then
 		NotificationEvent:FireClient(player, "Purchased " .. config.DisplayName .. "!", "Success")
@@ -488,11 +501,52 @@ function PickaxeController.GrantPickaxeByRobux(player: Player, pickaxeName: stri
 	return true
 end
 
-function PickaxeController.RefreshUI(player: Player)
-	local updateUIEvent = Events:FindFirstChild("UpdatePickaxeUI")
-	if updateUIEvent and updateUIEvent:IsA("RemoteEvent") then
-		updateUIEvent:FireClient(player)
+function PickaxeController:PurchaseBombForTutorial(player: Player, pickaxeName: string): boolean
+	local profile = PlayerController:GetProfile(player)
+	local config = BombsConfigurations.Bombs[pickaxeName]
+	if not profile or not config then
+		return false
 	end
+
+	ensureOwnedPickaxes(profile)
+	if profile.Data.OwnedPickaxes[pickaxeName] == true then
+		TutorialService:HandleBombPurchased(player)
+		refreshPickaxeUi(player)
+		return true
+	end
+
+	local nextToBuy = getNextPickaxeToBuy(profile)
+	if nextToBuy ~= pickaxeName then
+		return false
+	end
+
+	local price = tonumber(config.Price) or 0
+	if price > 0 then
+		AnalyticsEconomyService:FlushBombIncome(player)
+		if PlayerController:DeductMoney(player, price) then
+			AnalyticsEconomyService:LogCashSink(player, price, TRANSACTION_TYPES.Shop, `Bomb:{pickaxeName}`, {
+				feature = "bomb_shop",
+				content_id = pickaxeName,
+				context = "tutorial_auto_buy",
+				bomb_tier = getBombTier(pickaxeName),
+			})
+		end
+	end
+
+	if not finalizeBombOwnership(player, profile, pickaxeName, false) then
+		return false
+	end
+
+	if NotificationEvent then
+		NotificationEvent:FireClient(player, "Purchased " .. config.DisplayName .. "!", "Success")
+	end
+
+	TutorialService:HandleBombPurchased(player)
+	return true
+end
+
+function PickaxeController.RefreshUI(player: Player)
+	refreshPickaxeUi(player)
 end
 
 function PickaxeController.UnlockPickaxeForTesting(player: Player, pickaxeName: string, equipAfter: boolean?): boolean

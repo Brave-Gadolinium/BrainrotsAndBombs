@@ -570,6 +570,60 @@ local function getBackButton(): GuiButton?
 	return nil
 end
 
+local function getSkipTutorialRoot(): GuiObject?
+	local skipTutorialRoot = hud:FindFirstChild("SkipTutorial")
+	if skipTutorialRoot and skipTutorialRoot:IsA("GuiObject") then
+		return skipTutorialRoot
+	end
+
+	return nil
+end
+
+local function getSkipTutorialButton(): GuiButton?
+	local skipTutorialRoot = getSkipTutorialRoot()
+	if not skipTutorialRoot then
+		return nil
+	end
+
+	local directButton = skipTutorialRoot:FindFirstChild("Button")
+	if directButton and directButton:IsA("GuiButton") then
+		return directButton
+	end
+
+	local fallbackButton = skipTutorialRoot:FindFirstChildWhichIsA("GuiButton", true)
+	if fallbackButton then
+		return fallbackButton
+	end
+
+	return nil
+end
+
+local function shouldShowSkipTutorial(): boolean
+	return currentStep > 0
+		and currentStep < TutorialConfiguration.FinalStep
+		and player:GetAttribute("TutorialSkipped") ~= true
+end
+
+local function syncSkipTutorialVisibility()
+	local skipTutorialRoot = getSkipTutorialRoot()
+	local skipTutorialButton = getSkipTutorialButton()
+	if not skipTutorialRoot and not skipTutorialButton then
+		return
+	end
+
+	if maskActive and shouldShowSkipTutorial() then
+		return
+	end
+
+	local shouldShow = shouldShowSkipTutorial()
+	if skipTutorialRoot then
+		skipTutorialRoot.Visible = shouldShow
+	end
+	if skipTutorialButton then
+		skipTutorialButton.Visible = shouldShow
+	end
+end
+
 local function findMoneyLabel(): GuiObject?
 	local moneyLabel = hud:FindFirstChild("Money", true)
 	if moneyLabel and moneyLabel:IsA("GuiObject") then
@@ -1233,23 +1287,14 @@ local function syncTutorialFrames(presentation)
 
 	local currentFrameName = FrameManager.getCurrentFrameName()
 	local transitionalFrameName: string? = nil
-	if currentStep == 6 then
+	if currentStep == 7 then
 		transitionalFrameName = "Pickaxes"
-	elseif currentStep == 8 then
-		transitionalFrameName = "Upgrades"
 	end
 
 	if currentFrameName
 		and currentFrameName ~= allowedFrameName
 		and currentFrameName ~= transitionalFrameName then
 		FrameManager.closeCurrent()
-	end
-
-	if presentation.ShowUpgradesFrame and not upgradesFrame.Visible then
-		requestTutorialFrameOpen("Upgrades", function()
-			local currentPresentation = getCurrentStepPresentation()
-			return currentStep == 9 and currentPresentation.ShowUpgradesFrame and not upgradesFrame.Visible
-		end)
 	end
 end
 
@@ -1298,8 +1343,6 @@ local function applyTutorialUiMask(presentation)
 		tostring(presentation.ShowJumpButton)
 	))
 
-	syncTutorialFrames(presentation)
-
 	local allowedLineage: {[Instance]: boolean} = {}
 	local forceVisibleLineage: {[Instance]: boolean} = {}
 	local fullTreeRoots = {}
@@ -1330,6 +1373,10 @@ local function applyTutorialUiMask(presentation)
 		allowFullTree(getBackButton())
 	end
 
+	if shouldShowSkipTutorial() then
+		allowFullTree(getSkipTutorialRoot() or getSkipTutorialButton())
+	end
+
 	if presentation.ShowPickaxesFrame then
 		allowFullTree(pickaxesFrame)
 	end
@@ -1344,6 +1391,13 @@ local function applyTutorialUiMask(presentation)
 	for instance in pairs(forceVisibleLineage) do
 		if instance:IsA("GuiObject") then
 			setMaskedGuiVisible(instance, true)
+		end
+	end
+
+	if shouldShowSkipTutorial() then
+		local skipTutorialButton = getSkipTutorialButton()
+		if skipTutorialButton then
+			setMaskedGuiVisible(skipTutorialButton, true)
 		end
 	end
 
@@ -1371,9 +1425,8 @@ local function applyTutorialUiMask(presentation)
 	local baseSurfaceGui = findBaseUpgradeSurfaceGui()
 	local baseButton = findBaseUpgradeGuiButton()
 	for _, surfaceGui in ipairs(getPlayerPlotSurfaceGuis()) do
-		local shouldShowSurface = presentation.ShowBaseUpgradeSurfaceButton and surfaceGui == baseSurfaceGui
-		if currentStep == 10 or currentStep == 11 then
-			setMaskedGuiEnabled(surfaceGui, shouldShowSurface)
+		if presentation.ShowBaseUpgradeSurfaceButton and surfaceGui == baseSurfaceGui then
+			setMaskedGuiEnabled(surfaceGui, true)
 		else
 			restoreMaskedGuiEnabled(surfaceGui)
 		end
@@ -1416,12 +1469,8 @@ end
 getTutorialGuiTarget = function(step: number): GuiButton?
 	if step == 4 then
 		return getBackButton()
-	elseif step == 7 then
+	elseif step == 8 then
 		return findBombBuyButton()
-	elseif step == 9 then
-		return findCharacterUpgradeButton()
-	elseif step == 10 then
-		return findBaseUpgradeGuiButton()
 	end
 
 	return nil
@@ -1655,7 +1704,23 @@ local function findClosestCollectTouch(): BasePart?
 
 	iteratePlotSlots(function(_, spawnPart, collectTouch)
 		local collectGui = collectTouch and collectTouch:FindFirstChild("CollectGUI")
-		if collectTouch and spawnPart:FindFirstChild("VisualItem") and (not collectGui or not collectGui:IsA("SurfaceGui") or collectGui.Enabled) then
+		local collectFrame = collectGui and collectGui:IsA("SurfaceGui") and collectGui:FindFirstChild("CollectFrame")
+		local priceLabel = collectFrame and collectFrame:FindFirstChild("Price")
+		local normalizedAmountText = if priceLabel and priceLabel:IsA("TextLabel")
+			then priceLabel.Text:gsub("%s+", ""):gsub("%$", ""):gsub(",", "")
+			else ""
+		end
+		local numericAmount = tonumber(normalizedAmountText)
+		local hasPositiveCollectAmount = if numericAmount ~= nil
+			then numericAmount >= 1
+			else normalizedAmountText ~= "" and not normalizedAmountText:match("^0+([%.]0+)?[kKmMbBtT]?$")
+		end
+		if collectTouch
+			and spawnPart:FindFirstChild("VisualItem")
+			and collectGui
+			and collectGui:IsA("SurfaceGui")
+			and collectGui.Enabled
+			and hasPositiveCollectAmount then
 			local distance = (collectTouch.Position - rootPart.Position).Magnitude
 			if distance < closestDistance then
 				closestDistance = distance
@@ -1829,18 +1894,13 @@ local function resolveWorldTargetForStep(step: number): Instance?
 		return findTutorialBaseTarget()
 	elseif step == 5 then
 		return findClosestFreeSlot()
-	elseif step == 6 or step == 7 then
+	elseif step == 6 then
+		return findClosestCollectTouch()
+	elseif step == 7 or step == 8 then
 		if not pickaxesFrame.Visible then
 			return findClosestTaggedPart("ShopPart")
 		end
 		return nil
-	elseif step == 8 or step == 9 then
-		if not upgradesFrame.Visible then
-			return findClosestTaggedPart("UpgradePart")
-		end
-		return nil
-	elseif step == 10 then
-		return findUpgradeSlotsButtonTarget()
 	end
 
 	return nil
@@ -1877,13 +1937,19 @@ local function applyStepPresentation()
 	if not stepDefinition then
 		restoreTutorialUiMask()
 		hideTutorialGuiOverlay()
+		syncSkipTutorialVisibility()
 		clearAllTargets()
 		return
 	end
 
 	local presentation = TutorialConfiguration.GetStepPresentation(currentStep)
+	local currentFrameName = FrameManager.getCurrentFrameName()
+	if currentStep < TutorialConfiguration.FinalStep or currentFrameName == "Pickaxes" then
+		syncTutorialFrames(presentation)
+	end
 	if presentation.MaskUi then
 		applyTutorialUiMask(presentation)
+		syncSkipTutorialVisibility()
 		instructionsLabel.Text = stepDefinition.Text
 		instructionsLabel.Visible = presentation.ShowText
 
@@ -1917,6 +1983,7 @@ local function applyStepPresentation()
 
 	restoreTutorialUiMask()
 	hideTutorialGuiOverlay()
+	syncSkipTutorialVisibility()
 
 	if currentStep < TutorialConfiguration.FinalStep then
 		hasAppliedTutorialCompletionCleanup = false
@@ -1951,6 +2018,7 @@ local function applyStepPresentation()
 	end
 
 	applyTutorialCompletionCleanup()
+	syncSkipTutorialVisibility()
 
 	clearExpiredPostTutorialCompletion()
 
@@ -2055,7 +2123,7 @@ local function connectUiReporting()
 		pickaxesFrame:GetPropertyChangedSignal("Visible"):Connect(function()
 			if pickaxesFrame.Visible then
 				debugTutorialLog("PickaxesFrame Visible")
-				if pickaxesFrame:GetAttribute("OpenedByTouchTrigger") == true then
+				if currentStep == 7 or currentStep == 8 then
 					reportAction("ShopOpened")
 				end
 				task.defer(refreshCurrentStep)
@@ -2071,6 +2139,14 @@ local function connectUiReporting()
 				reportAction("UpgradesOpened")
 			end
 			task.defer(refreshCurrentStep)
+		end)
+	end
+
+	local skipTutorialButton = getSkipTutorialButton()
+	if skipTutorialButton and not skipTutorialButton:GetAttribute("TutorialConnected") then
+		skipTutorialButton:SetAttribute("TutorialConnected", true)
+		skipTutorialButton.Activated:Connect(function()
+			reportAction("SkipTutorialPressed")
 		end)
 	end
 end
@@ -2097,6 +2173,10 @@ player:GetAttributeChangedSignal("OnboardingStep"):Connect(function()
 end)
 
 player:GetAttributeChangedSignal("PostTutorialStage"):Connect(function()
+	refreshCurrentStep()
+end)
+
+player:GetAttributeChangedSignal("TutorialSkipped"):Connect(function()
 	refreshCurrentStep()
 end)
 
