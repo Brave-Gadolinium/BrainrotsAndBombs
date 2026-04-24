@@ -33,6 +33,7 @@ local ACTION_BUTTON_BUY = Color3.fromRGB(34, 255, 0)
 local ACTION_BUTTON_EQUIP = Color3.fromRGB(255, 214, 64)
 local ACTION_BUTTON_LOCKED = Color3.fromRGB(120, 120, 120)
 local ACTION_BUTTON_TEXT = Color3.fromRGB(255, 255, 255)
+local SELECTED_PICKAXE_BACKGROUND = Color3.fromRGB(255, 213, 0)
 
 type TextVisualSnapshot = {
 	TextColor3: Color3,
@@ -224,12 +225,40 @@ local function setButtonText(button: GuiButton?, text: string)
 	end
 end
 
+local function findNestedTextLabel(parent: Instance?, containerName: string, labelName: string): TextLabel?
+	if not parent then
+		return nil
+	end
+
+	local container = parent:FindFirstChild(containerName)
+	if not container then
+		return nil
+	end
+
+	local label = container:FindFirstChild(labelName)
+	if label and label:IsA("TextLabel") then
+		return label
+	end
+
+	return container:FindFirstChildWhichIsA("TextLabel", true)
+end
+
 local function isPickaxesFrameVisible(): boolean
 	local playerGui = player:FindFirstChild("PlayerGui")
 	local mainGui = playerGui and playerGui:FindFirstChild("GUI")
 	local frames = mainGui and mainGui:FindFirstChild("Frames")
 	local pickaxesFrame = frames and frames:FindFirstChild("Pickaxes")
 	return pickaxesFrame ~= nil and pickaxesFrame:IsA("GuiObject") and pickaxesFrame.Visible
+end
+
+local function getCurrentMoney(): number
+	local leaderstats = player:FindFirstChild("leaderstats")
+	local moneyValue = leaderstats and leaderstats:FindFirstChild("Money")
+	if moneyValue and moneyValue:IsA("NumberValue") then
+		return moneyValue.Value
+	end
+
+	return 0
 end
 
 local function getRobuxPriceText(productId: number?): string?
@@ -450,11 +479,33 @@ local function bindTemplateSelection(template: GuiObject, onSelected: () -> ())
 	end)
 end
 
+local function updatePickaxeEntrySelectionState(scrollingFrame: ScrollingFrame, showcaseFrame: Frame, selectedId: string)
+	for _, child in ipairs(scrollingFrame:GetChildren()) do
+		if child ~= showcaseFrame and child:GetAttribute("GeneratedPickaxeEntry") == true and child:IsA("GuiObject") then
+			local isSelected = child.Name == selectedId
+			child.BackgroundColor3 = if isSelected then SELECTED_PICKAXE_BACKGROUND else Color3.fromRGB(255, 255, 255)
+		end
+	end
+end
+
+local function updateShowcaseSelectionState(showcaseFrame: Frame, hasSelection: boolean)
+	if hasSelection then
+		showcaseFrame.BackgroundColor3 = SELECTED_PICKAXE_BACKGROUND
+	end
+
+	local stroke = showcaseFrame:FindFirstChild("Stroke")
+	if stroke and stroke:IsA("UIStroke") and hasSelection then
+		stroke.Color = SELECTED_PICKAXE_BACKGROUND
+	end
+end
+
 local function updateShowcase(pickaxesFrame: Frame, pickaxeId: string, shouldReport: boolean?)
 	selectedPickaxeId = pickaxeId
 
 	local scrollingFrame = getScrollingFrame(pickaxesFrame)
 	local showcaseFrame = getShowcaseFrame(pickaxesFrame, scrollingFrame)
+	updatePickaxeEntrySelectionState(scrollingFrame, showcaseFrame, pickaxeId)
+	updateShowcaseSelectionState(showcaseFrame, pickaxeId ~= nil)
 	local config = PickaxesConfigurations.Pickaxes[pickaxeId]
 	if not config then
 		return
@@ -470,10 +521,10 @@ local function updateShowcase(pickaxesFrame: Frame, pickaxeId: string, shouldRep
 	local infoFrame = showcaseFrame:FindFirstChild("Info")
 	local leftFrame = infoFrame and infoFrame:FindFirstChild("Left")
 	local rightFrame = infoFrame and infoFrame:FindFirstChild("Right")
-	local leftPrimary = leftFrame and leftFrame:FindFirstChild("Damage") :: TextLabel?
-	local leftSecondary = leftFrame and leftFrame:FindFirstChild("Speed") :: TextLabel?
-	local rightPrimary = rightFrame and rightFrame:FindFirstChild("Damage") :: TextLabel?
-	local rightSecondary = rightFrame and rightFrame:FindFirstChild("Speed") :: TextLabel?
+	local depthLabel = findNestedTextLabel(leftFrame, "Deep", "Deep")
+	local radiusLabel = findNestedTextLabel(leftFrame, "Radius", "Radius")
+	local cooldownLabel = findNestedTextLabel(rightFrame, "CD", "Cooldown")
+	local punchForceLabel = findNestedTextLabel(rightFrame, "Punch", "PunchForce")
 
 	local buttonsFrame = showcaseFrame:FindFirstChild("Buttons")
 	local softBuyButton = buttonsFrame and buttonsFrame:FindFirstChild("Buy") :: GuiButton?
@@ -488,17 +539,17 @@ local function updateShowcase(pickaxesFrame: Frame, pickaxeId: string, shouldRep
 		imageLabel.ImageColor3 = if isOwned or not isLockedForSoftPurchase then Color3.new(1, 1, 1) else Color3.new(0.2, 0.2, 0.2)
 	end
 
-	if leftPrimary then
-		leftPrimary.Text = "Radius: " .. formatStatValue(config.ExplosionRadius)
+	if depthLabel then
+		depthLabel.Text = "Depth: " .. formatStatValue(config.MaxDepthLevel)
 	end
-	if leftSecondary then
-		leftSecondary.Text = "KB: " .. formatStatValue(config.KnockbackForce)
+	if radiusLabel then
+		radiusLabel.Text = "Radius: " .. formatStatValue(config.ExplosionRadius)
 	end
-	if rightPrimary then
-		rightPrimary.Text = "Depth: " .. formatStatValue(config.MaxDepthLevel)
+	if cooldownLabel then
+		cooldownLabel.Text = "CD: " .. formatStatValue(config.Cooldown) .. "s"
 	end
-	if rightSecondary then
-		rightSecondary.Text = "CD: " .. formatStatValue(config.Cooldown) .. "s"
+	if punchForceLabel then
+		punchForceLabel.Text = "KB: " .. formatStatValue(config.KnockbackForce)
 	end
 
 	if softBuyButton then
@@ -511,26 +562,14 @@ local function updateShowcase(pickaxesFrame: Frame, pickaxeId: string, shouldRep
 			setButtonEnabled(softBuyButton, false)
 			applyButtonTheme(softBuyButton, ACTION_BUTTON_LOCKED)
 		else
-			setButtonText(softBuyButton, "Buy")
+			setButtonText(softBuyButton, string.format("Buy $%s", NumberFormatter.Format(math.max(0, config.Price or 0))))
 			setButtonEnabled(softBuyButton, true)
 			applyButtonTheme(softBuyButton, ACTION_BUTTON_BUY)
 		end
 	end
 
 	if robuxButton then
-		if isOwned then
-			setButtonText(robuxButton, if isEquipped then "EQUIPPED" else "OWNED")
-			setButtonEnabled(robuxButton, false)
-		else
-			local robuxPriceText = getRobuxPriceText(robuxProductId)
-			if robuxPriceText then
-				setButtonText(robuxButton, robuxPriceText)
-				setButtonEnabled(robuxButton, true)
-			else
-				setButtonText(robuxButton, "N/A")
-				setButtonEnabled(robuxButton, false)
-			end
-		end
+		robuxButton.Visible = false
 	end
 
 	if shouldReport ~= false then
@@ -569,6 +608,39 @@ local function bindShowcaseButtons(pickaxesFrame: Frame)
 			local isEquipped = currentEquippedPickaxe == selectedPickaxeId
 			local isLockedForSoftPurchase = not isOwned and currentNextAvailableId ~= nil and selectedPickaxeId ~= currentNextAvailableId
 			if isLockedForSoftPurchase or isEquipped then
+				return
+			end
+
+			if not isOwned then
+				local config = PickaxesConfigurations.Pickaxes[selectedPickaxeId]
+				if not config then
+					return
+				end
+
+				local price = math.max(0, config.Price or 0)
+				if getCurrentMoney() >= price then
+					requestEvent:FireServer(selectedPickaxeId)
+					return
+				end
+
+				local robuxProductId = config.RobuxProductId
+				if type(robuxProductId) == "number" and robuxProductId > 0 then
+					reportAnalyticsIntent:FireServer("BombPurchaseRequested", {
+						pickaxeName = selectedPickaxeId,
+						paymentType = "robux",
+						surface = "pickaxes",
+					})
+					local success, err = pcall(function()
+						MarketplaceService:PromptProductPurchase(player, robuxProductId)
+					end)
+					if not success then
+						warn("[PickaxesUIController] Failed to prompt robux purchase for bomb:", selectedPickaxeId, err)
+						reportStorePromptFailed(selectedPickaxeId, robuxProductId, "prompt_failed")
+					end
+				else
+					reportStorePromptFailed(selectedPickaxeId, robuxProductId, "missing_product_id")
+					warn("[PickaxesUIController] Robux purchase is not configured for bomb:", selectedPickaxeId)
+				end
 				return
 			end
 
@@ -612,7 +684,7 @@ local function bindShowcaseButtons(pickaxesFrame: Frame)
 	end
 end
 
-local function initializeUI(preferHighestOwned: boolean?)
+local function initializeUI(preferHighestOwned: boolean?, focusNextAvailable: boolean?)
 	local pickaxesFrame = getPickaxesFrame()
 	local scrollingFrame = getScrollingFrame(pickaxesFrame)
 	local template = getTemplate(scrollingFrame)
@@ -648,8 +720,17 @@ local function initializeUI(preferHighestOwned: boolean?)
 		return
 	end
 
+	local shouldFocusNextAvailable = focusNextAvailable == true
+		and currentNextAvailableId ~= nil
+		and PickaxesConfigurations.Pickaxes[currentNextAvailableId] ~= nil
 	local pickaxeToAutoSelect = resolveAutoSelectedPickaxeId(sortedPickaxes, preferHighestOwned)
-	local pickaxeToScrollTo = if preferHighestOwned then getHighestOwnedPickaxeId(sortedPickaxes) or pickaxeToAutoSelect else nil
+	local pickaxeToScrollTo: string? = nil
+	if shouldFocusNextAvailable then
+		pickaxeToAutoSelect = currentNextAvailableId
+		pickaxeToScrollTo = currentNextAvailableId
+	elseif preferHighestOwned then
+		pickaxeToScrollTo = getHighestOwnedPickaxeId(sortedPickaxes) or pickaxeToAutoSelect
+	end
 	local scrollTargetEntry: GuiObject? = nil
 
 	for index, pickaxe in ipairs(sortedPickaxes) do
@@ -753,7 +834,7 @@ task.spawn(function()
 	local pickaxesFrame = getPickaxesFrame()
 	pickaxesFrame:GetPropertyChangedSignal("Visible"):Connect(function()
 		if pickaxesFrame.Visible then
-			initializeUI(true)
+			initializeUI(false, true)
 			reportAnalyticsIntent:FireServer("BombShopOpened")
 			reportStoreOpened("pickaxes")
 		end

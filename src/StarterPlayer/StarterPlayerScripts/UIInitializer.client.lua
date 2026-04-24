@@ -42,35 +42,85 @@ local OWN_BASE_INTERACTION_RADIUS = 100
 local OWN_BASE_TOUCH_TAGS = {
 	UpgradePart = true,
 }
+local TOUCH_TAG_TO_FRAME: {[string]: string} = {
+	UpgradePart = "Upgrades",
+	ShopPart = "Pickaxes",
+	RobuxShop = "Shop",
+}
+local TUTORIAL_ALLOWED_TOUCH_FRAMES: {[number]: {[string]: boolean}} = {
+	[7] = {
+		Pickaxes = true,
+	},
+	[8] = {
+		Pickaxes = true,
+	},
+	[9] = {
+		Upgrades = true,
+	},
+	[10] = {
+		Upgrades = true,
+	},
+}
+local tutorialTouchPartStates: {[BasePart]: {FrameName: string, OriginalCanCollide: boolean, OriginalCanTouch: boolean}} = {}
+
+local function isTutorialTouchRestrictionActive(onboardingStep: number): boolean
+	return onboardingStep > 0
+		and onboardingStep < TutorialConfiguration.FinalStep
+		and player:GetAttribute("TutorialSkipped") ~= true
+end
 
 local function isTouchFrameAllowedByTutorial(frameName: string): boolean
 	local onboardingStep = tonumber(player:GetAttribute("OnboardingStep")) or 0
-	if onboardingStep <= 0 then
+	if not isTutorialTouchRestrictionActive(onboardingStep) then
 		return true
 	end
 
-	local presentation = TutorialConfiguration.GetStepPresentation(onboardingStep)
-	if not presentation.MaskUi then
+	local allowedFrames = TUTORIAL_ALLOWED_TOUCH_FRAMES[onboardingStep]
+	if not allowedFrames then
+		if TOUCH_TAG_TO_FRAME.UpgradePart == frameName
+			or TOUCH_TAG_TO_FRAME.ShopPart == frameName
+			or TOUCH_TAG_TO_FRAME.RobuxShop == frameName
+		then
+			debugTutorialLog(("TouchOpenBlocked frame=%s step=%d"):format(frameName, onboardingStep))
+			return false
+		end
+
 		return true
 	end
 
-	if frameName == "Pickaxes" then
-		local allowed = onboardingStep == 7 or onboardingStep == 8
-		if not allowed then
-			debugTutorialLog(("TouchOpenBlocked frame=%s step=%d"):format(frameName, onboardingStep))
-		end
-		return allowed
+	local allowed = allowedFrames[frameName] == true
+	if not allowed then
+		debugTutorialLog(("TouchOpenBlocked frame=%s step=%d"):format(frameName, onboardingStep))
 	end
 
-	if frameName == "Upgrades" then
-		local allowed = onboardingStep == 9 or onboardingStep == 10
-		if not allowed then
-			debugTutorialLog(("TouchOpenBlocked frame=%s step=%d"):format(frameName, onboardingStep))
+	return allowed
+end
+
+local function syncTutorialTouchPartCollision()
+	for touchPart, state in pairs(tutorialTouchPartStates) do
+		if not touchPart.Parent then
+			tutorialTouchPartStates[touchPart] = nil
+			continue
 		end
-		return allowed
+
+		local isAllowed = isTouchFrameAllowedByTutorial(state.FrameName)
+		touchPart.CanCollide = if isAllowed then state.OriginalCanCollide else false
+		touchPart.CanTouch = if isAllowed then state.OriginalCanTouch else false
+	end
+end
+
+local function trackTutorialTouchPart(touchPart: BasePart, frameName: string)
+	if tutorialTouchPartStates[touchPart] == nil then
+		tutorialTouchPartStates[touchPart] = {
+			FrameName = frameName,
+			OriginalCanCollide = touchPart.CanCollide,
+			OriginalCanTouch = touchPart.CanTouch,
+		}
+	else
+		tutorialTouchPartStates[touchPart].FrameName = frameName
 	end
 
-	return true
+	syncTutorialTouchPartCollision()
 end
 
 local function ensureGuiCorner(target: Instance, radius: UDim)
@@ -349,6 +399,8 @@ local function setupTaggedTouchTrigger(tagName: string, frameName: string)
 			return
 		end
 
+		trackTutorialTouchPart(touchPart, frameName)
+
 		if touchPart:GetAttribute("TouchTriggerConnected") then
 			return
 		end
@@ -433,6 +485,10 @@ function UIInitializer:Init()
 	setupTaggedTouchTrigger("UpgradePart", "Upgrades")
 	setupTaggedTouchTrigger("ShopPart", "Pickaxes")
 	setupTaggedTouchTrigger("RobuxShop", "Shop")
+	syncTutorialTouchPartCollision()
+
+	player:GetAttributeChangedSignal("OnboardingStep"):Connect(syncTutorialTouchPartCollision)
+	player:GetAttributeChangedSignal("TutorialSkipped"):Connect(syncTutorialTouchPartCollision)
 
 end
 

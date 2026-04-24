@@ -15,6 +15,7 @@ TutorialUiConfiguration.PersistentMoneyStartStep = 6
 local RETRY_TARGETS_BY_STEP: {[number]: {TutorialUiTargetKey}} = {
 	[2] = {"MobileBombButton", "JumpButton"},
 	[3] = {"MobileBombButton", "JumpButton"},
+	[10] = {"CharacterUpgradeButton"},
 }
 
 local PRESERVE_ORIGINAL_VISIBILITY_TARGETS: {[TutorialUiTargetKey]: boolean} = {

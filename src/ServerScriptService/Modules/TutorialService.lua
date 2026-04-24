@@ -4,6 +4,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
+local Debris = game:GetService("Debris")
 
 local PostTutorialConfiguration = require(ReplicatedStorage.Modules.PostTutorialConfiguration)
 local TutorialConfiguration = require(ReplicatedStorage.Modules.TutorialConfiguration)
@@ -19,24 +20,21 @@ type PlayerControllerType = {
 local TutorialService = {}
 
 local PlayerController: PlayerControllerType? = nil
-local PickaxeController: any = nil
 local reportActionEvent: RemoteEvent? = nil
 local postTutorialCompletionEvent: RemoteEvent? = nil
-local CURRENT_TUTORIAL_VERSION = 4
+local Templates = ReplicatedStorage:WaitForChild("Templates")
+local ConfettiTemplate = Templates:WaitForChild("Confetti")
+local CURRENT_TUTORIAL_VERSION = 5
 local PREVIOUS_TUTORIAL_ANALYTICS_KEY = "Tutor_22_04"
 local LEGACY_TUTORIAL_ANALYTICS_KEY = "TutorialFTUE"
-local PRE_FINAL_AUTO_ADVANCE_STEP = TutorialConfiguration.FinalStep - 1
 local STEP_ONE_MIN_DISPLAY_TIME = 1.5
-local PRE_FINAL_AUTO_ADVANCE_DELAY = 0
 local COLLECT_CASH_STEP = 6
 local OPEN_BOMB_SHOP_STEP = 7
 local BUY_BOMB_TWO_STEP = 8
-local BUY_BOMB_TWO_ID = "Bomb 2"
-local BUY_BOMB_TWO_AUTO_PURCHASE_DELAY = 10
+local CHARACTER_UPGRADE_OPEN_STEP = 9
+local CHARACTER_UPGRADE_PURCHASE_STEP = 10
 local stepActivatedAt: {[Player]: number} = {}
 local stepOneEvaluationTokens: {[Player]: number} = {}
-local preFinalAutoAdvanceTokens: {[Player]: number} = {}
-local buyBombTwoAutoPurchaseStates: {[Player]: {StartedAt: number}} = {}
 local DEBUG_TUTORIAL = false
 local DEBUG_BRAINROT_TRACE = false
 
@@ -144,61 +142,6 @@ end
 
 local function invalidateScheduledStepOneEvaluation(player: Player)
 	stepOneEvaluationTokens[player] = (stepOneEvaluationTokens[player] or 0) + 1
-end
-
-local function invalidateScheduledPreFinalAutoAdvance(player: Player)
-	preFinalAutoAdvanceTokens[player] = (preFinalAutoAdvanceTokens[player] or 0) + 1
-end
-
-local function cancelBuyBombTwoAutoPurchase(player: Player)
-	buyBombTwoAutoPurchaseStates[player] = nil
-end
-
-local function ensureBuyBombTwoAutoPurchase(player: Player)
-	if buyBombTwoAutoPurchaseStates[player] or getCurrentStep(player) ~= BUY_BOMB_TWO_STEP then
-		return
-	end
-
-	local state = {
-		StartedAt = os.clock(),
-	}
-	buyBombTwoAutoPurchaseStates[player] = state
-
-	task.delay(BUY_BOMB_TWO_AUTO_PURCHASE_DELAY, function()
-		if buyBombTwoAutoPurchaseStates[player] ~= state then
-			return
-		end
-
-		buyBombTwoAutoPurchaseStates[player] = nil
-		if not player.Parent or getCurrentStep(player) ~= BUY_BOMB_TWO_STEP then
-			return
-		end
-
-		if PickaxeController and PickaxeController.PurchaseBombForTutorial then
-			PickaxeController:PurchaseBombForTutorial(player, BUY_BOMB_TWO_ID)
-		end
-	end)
-end
-
-local function schedulePreFinalAutoAdvance(player: Player)
-	local token = (preFinalAutoAdvanceTokens[player] or 0) + 1
-	preFinalAutoAdvanceTokens[player] = token
-
-	task.delay(PRE_FINAL_AUTO_ADVANCE_DELAY, function()
-		if preFinalAutoAdvanceTokens[player] ~= token then
-			return
-		end
-
-		if not player.Parent then
-			return
-		end
-
-		if getCurrentStep(player) ~= PRE_FINAL_AUTO_ADVANCE_STEP then
-			return
-		end
-
-		TutorialService:AdvanceToStep(player, TutorialConfiguration.FinalStep)
-	end)
 end
 
 local function getRemainingInitialStepOneDisplayTime(player: Player, step: number): number
@@ -384,6 +327,23 @@ local function getBaseUpgradeTargetPart(player: Player): BasePart?
 	return upgradeButton:FindFirstChildWhichIsA("BasePart", true)
 end
 
+local function playTutorialCompletionEffect(player: Player)
+	local targetPart = getBaseUpgradeTargetPart(player)
+	if not targetPart then
+		return
+	end
+
+	local confetti = ConfettiTemplate:Clone()
+	confetti.Parent = targetPart
+	for _, child in ipairs(confetti:GetChildren()) do
+		if child:IsA("ParticleEmitter") then
+			child:Emit(child:GetAttribute("EmitCount") or 20)
+		end
+	end
+
+	Debris:AddItem(confetti, 3)
+end
+
 local function isNearBaseUpgradeButton(player: Player): boolean
 	local rootPart = getRootPart(player)
 	local targetPart = getBaseUpgradeTargetPart(player)
@@ -440,10 +400,6 @@ local function setCurrentStep(player: Player, profile: any, step: number)
 	))
 	markStepActivated(player)
 	invalidateScheduledStepOneEvaluation(player)
-	invalidateScheduledPreFinalAutoAdvance(player)
-	if clampedStep ~= BUY_BOMB_TWO_STEP then
-		cancelBuyBombTwoAutoPurchase(player)
-	end
 	AnalyticsFunnelsService:SyncTutorial(player, clampedStep)
 	if previousStep < TutorialConfiguration.FinalStep and clampedStep >= TutorialConfiguration.FinalStep then
 		AnalyticsFunnelsService:HandleTutorialCompleted(player)
@@ -451,10 +407,6 @@ local function setCurrentStep(player: Player, profile: any, step: number)
 
 	if PlayerController and PlayerController.OnTutorialStepChanged then
 		PlayerController:OnTutorialStepChanged(player, clampedStep)
-	end
-
-	if clampedStep == PRE_FINAL_AUTO_ADVANCE_STEP then
-		schedulePreFinalAutoAdvance(player)
 	end
 end
 
@@ -511,6 +463,15 @@ local function remapVersionThreeStepForVersionFour(step: number): number
 	return TutorialConfiguration.FinalStep
 end
 
+local function remapVersionFourStepForVersionFive(step: number): number
+	local remappedStep = math.max(1, math.floor(tonumber(step) or 1))
+	if remappedStep <= BUY_BOMB_TWO_STEP then
+		return math.clamp(remappedStep, 1, TutorialConfiguration.FinalStep)
+	end
+
+	return TutorialConfiguration.FinalStep
+end
+
 local function migrateTutorialProgress(profile: any)
 	ensureTutorialFlags(profile)
 
@@ -540,7 +501,12 @@ local function migrateTutorialProgress(profile: any)
 	end
 
 	if previousTutorialVersion < CURRENT_TUTORIAL_VERSION then
-		currentStep = remapVersionThreeStepForVersionFour(currentStep)
+		if previousTutorialVersion < 4 then
+			currentStep = remapVersionThreeStepForVersionFour(currentStep)
+		end
+		if previousTutorialVersion < 5 then
+			currentStep = remapVersionFourStepForVersionFive(currentStep)
+		end
 	end
 
 	profile.Data.OnboardingStep = math.clamp(currentStep, 1, TutorialConfiguration.FinalStep)
@@ -598,7 +564,17 @@ function TutorialService:GetStepDefinition(step: number)
 end
 
 function TutorialService:IsTutorialCharacterUpgradeFreeAvailable(player: Player, upgradeId: string): boolean
-	return false
+	local profile = getProfile(player)
+	if not profile or not profile.Data then
+		return false
+	end
+
+	ensureTutorialFlags(profile)
+
+	return getCurrentStep(player) == CHARACTER_UPGRADE_PURCHASE_STEP
+		and upgradeId == TutorialConfiguration.TutorialCharacterUpgradeId
+		and profile.Data.TutorialFreeCharacterUpgradeConsumed ~= true
+		and not hasSpecificCharacterUpgrade(profile, upgradeId)
 end
 
 function TutorialService:IsTutorialBaseUpgradeFreeAvailable(player: Player): boolean
@@ -614,7 +590,6 @@ function TutorialService:SyncPlayer(player: Player)
 		syncStepAttribute(player, step)
 		markStepActivated(player)
 		invalidateScheduledStepOneEvaluation(player)
-		invalidateScheduledPreFinalAutoAdvance(player)
 		syncTutorialSkippedAttribute(player, tutorialSkipped)
 		syncPostTutorialStageAttribute(
 			player,
@@ -632,19 +607,11 @@ function TutorialService:SyncPlayer(player: Player)
 	syncStepAttribute(player, step)
 	markStepActivated(player)
 	invalidateScheduledStepOneEvaluation(player)
-	invalidateScheduledPreFinalAutoAdvance(player)
-	if step ~= BUY_BOMB_TWO_STEP then
-		cancelBuyBombTwoAutoPurchase(player)
-	end
 	syncTutorialSkippedAttribute(player, isTutorialSkipped(profile))
 	setCurrentPostTutorialStage(player, profile, resolvePostTutorialStage(player, profile))
 	AnalyticsFunnelsService:SyncTutorial(player, step)
 	if step >= TutorialConfiguration.FinalStep then
 		AnalyticsFunnelsService:HandleTutorialCompleted(player)
-	end
-
-	if step == PRE_FINAL_AUTO_ADVANCE_STEP then
-		schedulePreFinalAutoAdvance(player)
 	end
 
 	return step
@@ -744,7 +711,13 @@ function TutorialService:EvaluateCurrentStep(player: Player)
 			end
 		elseif currentStep == BUY_BOMB_TWO_STEP then
 			if hasPurchasedAdditionalBomb(player, profile) then
-				nextStep = PRE_FINAL_AUTO_ADVANCE_STEP
+				nextStep = CHARACTER_UPGRADE_OPEN_STEP
+			end
+		elseif currentStep == CHARACTER_UPGRADE_PURCHASE_STEP then
+			if hasSpecificCharacterUpgrade(profile, TutorialConfiguration.TutorialCharacterUpgradeId) then
+				consumeTutorialCharacterUpgrade(profile)
+				playTutorialCompletionEffect(player)
+				nextStep = TutorialConfiguration.FinalStep
 			end
 		end
 
@@ -851,7 +824,7 @@ end
 function TutorialService:HandleBombPurchased(player: Player)
 	debugTutorialLog(player, "HandleBombPurchased")
 	if getCurrentStep(player) == BUY_BOMB_TWO_STEP then
-		self:AdvanceToStep(player, PRE_FINAL_AUTO_ADVANCE_STEP)
+		self:AdvanceToStep(player, CHARACTER_UPGRADE_OPEN_STEP)
 	else
 		self:EvaluateCurrentStep(player)
 	end
@@ -866,6 +839,13 @@ function TutorialService:HandlePostTutorialCharacterUpgradePurchased(player: Pla
 	ensureTutorialFlags(profile)
 	local isTutorialCharacterUpgrade = type(_upgradeId) == "string"
 		and _upgradeId == TutorialConfiguration.TutorialCharacterUpgradeId
+
+	if getCurrentStep(player) == CHARACTER_UPGRADE_PURCHASE_STEP and isTutorialCharacterUpgrade then
+		consumeTutorialCharacterUpgrade(profile)
+		playTutorialCompletionEffect(player)
+		self:AdvanceToStep(player, TutorialConfiguration.FinalStep)
+		return
+	end
 
 	if isTutorialCharacterUpgrade then
 		consumeTutorialCharacterUpgrade(profile)
@@ -901,16 +881,16 @@ function TutorialService:ReportAction(player: Player, actionId: string)
 	elseif actionId == "ShopOpened" then
 		if currentStep == OPEN_BOMB_SHOP_STEP then
 			self:AdvanceToStep(player, BUY_BOMB_TWO_STEP)
-			ensureBuyBombTwoAutoPurchase(player)
-		elseif currentStep == BUY_BOMB_TWO_STEP then
-			ensureBuyBombTwoAutoPurchase(player)
+		end
+	elseif actionId == "UpgradesOpened" then
+		if currentStep == CHARACTER_UPGRADE_OPEN_STEP then
+			self:AdvanceToStep(player, CHARACTER_UPGRADE_PURCHASE_STEP)
 		end
 	end
 end
 
 function TutorialService:Init(controllers)
 	PlayerController = controllers.PlayerController
-	PickaxeController = controllers.PickaxeController
 
 	local events = ReplicatedStorage:WaitForChild("Events")
 	reportActionEvent = events:FindFirstChild("ReportTutorialAction") :: RemoteEvent
@@ -936,8 +916,6 @@ function TutorialService:Init(controllers)
 	Players.PlayerRemoving:Connect(function(player)
 		stepActivatedAt[player] = nil
 		stepOneEvaluationTokens[player] = nil
-		preFinalAutoAdvanceTokens[player] = nil
-		buyBombTwoAutoPurchaseStates[player] = nil
 	end)
 end
 

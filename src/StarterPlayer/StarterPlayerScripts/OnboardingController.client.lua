@@ -69,6 +69,10 @@ local tutorialBombPulseTween: Tween? = nil
 local tutorialBombButton: GuiButton? = nil
 local tutorialBombButtonConnection: RBXScriptConnection? = nil
 local tutorialBombGuidanceDismissedStep: number? = nil
+local tutorialActionPulseScale: UIScale? = nil
+local tutorialActionPulseTween: Tween? = nil
+local tutorialActionPulseButton: GuiButton? = nil
+local tutorialManagedPulseBaseScales: {[UIScale]: number} = {}
 local guiOverlaySuppressedUntil = 0
 local hiddenHudBackState: {[Instance]: {[string]: any}} = {}
 local postTutorialCompletionQueue: {QueuedPostTutorialCompletion} = {}
@@ -76,6 +80,15 @@ local activePostTutorialCompletion: ActivePostTutorialCompletion? = nil
 local shouldUseTutorialGuiProxy: ((number) -> boolean)? = nil
 local getTutorialGuiTarget: ((number) -> GuiButton?)? = nil
 local findMobileBombButton: () -> GuiButton? = function()
+	return nil
+end
+local getBackButton: () -> GuiButton? = function()
+	return nil
+end
+local findBombBuyButton: () -> GuiButton? = function()
+	return nil
+end
+local findCharacterUpgradeButton: () -> GuiButton? = function()
 	return nil
 end
 local getHighestGuiZIndex: (Instance, Instance?) -> number = function()
@@ -348,19 +361,121 @@ local function destroyTutorialGuiCursor()
 	end
 end
 
+local function rememberTutorialPulseBaseScale(scale: UIScale)
+	if tutorialManagedPulseBaseScales[scale] == nil then
+		tutorialManagedPulseBaseScales[scale] = scale.Scale
+
+		scale.AncestryChanged:Connect(function(_, parent)
+			if not parent then
+				tutorialManagedPulseBaseScales[scale] = nil
+			end
+		end)
+	end
+end
+
+local function restoreTutorialPulseBaseScale(scale: UIScale?)
+	if not scale then
+		return
+	end
+
+	local baseScale = tutorialManagedPulseBaseScales[scale]
+	if baseScale ~= nil then
+		scale.Scale = baseScale
+	else
+		scale.Scale = 1
+	end
+end
+
+local function getOrCreateTutorialManagedPulseScale(button: GuiButton, createdScaleName: string): UIScale
+	local effectScale = button:FindFirstChild("EffectScale")
+	if effectScale and effectScale:IsA("UIScale") then
+		rememberTutorialPulseBaseScale(effectScale)
+		return effectScale
+	end
+
+	local animationScale = button:FindFirstChild("AnimationScale")
+	if animationScale and animationScale:IsA("UIScale") then
+		rememberTutorialPulseBaseScale(animationScale)
+		return animationScale
+	end
+
+	local existingScale = button:FindFirstChildOfClass("UIScale")
+	if existingScale then
+		rememberTutorialPulseBaseScale(existingScale)
+		return existingScale
+	end
+
+	local createdScale = Instance.new("UIScale")
+	createdScale.Name = createdScaleName
+	createdScale.Scale = 1
+	createdScale.Parent = button
+	rememberTutorialPulseBaseScale(createdScale)
+	return createdScale
+end
+
 local function stopTutorialBombPulse()
 	if tutorialBombPulseTween then
 		tutorialBombPulseTween:Cancel()
 		tutorialBombPulseTween = nil
 	end
 
-	if tutorialBombPulseScale then
-		tutorialBombPulseScale.Scale = 1
-	end
+	restoreTutorialPulseBaseScale(tutorialBombPulseScale)
 end
 
 local function hideTutorialBombGuidance()
 	stopTutorialBombPulse()
+end
+
+local function stopTutorialActionPulse()
+	if tutorialActionPulseTween then
+		tutorialActionPulseTween:Cancel()
+		tutorialActionPulseTween = nil
+	end
+
+	restoreTutorialPulseBaseScale(tutorialActionPulseScale)
+end
+
+local function hideTutorialActionPulse()
+	stopTutorialActionPulse()
+
+	if tutorialActionPulseScale and tutorialActionPulseScale.Name == "TutorialActionPulseScale" then
+		tutorialActionPulseScale:Destroy()
+	end
+
+	tutorialActionPulseScale = nil
+	tutorialActionPulseButton = nil
+end
+
+local function ensureTutorialActionPulse(button: GuiButton): UIScale
+	if tutorialActionPulseButton == button and tutorialActionPulseScale and tutorialActionPulseScale.Parent == button then
+		return tutorialActionPulseScale
+	end
+
+	hideTutorialActionPulse()
+
+	local pulseScale = getOrCreateTutorialManagedPulseScale(button, "TutorialActionPulseScale")
+
+	tutorialActionPulseScale = pulseScale
+	tutorialActionPulseButton = button
+
+	return pulseScale
+end
+
+local function startTutorialActionPulse(button: GuiButton)
+	local pulseScale = ensureTutorialActionPulse(button)
+	if tutorialActionPulseTween and tutorialActionPulseButton == button and tutorialActionPulseScale == pulseScale then
+		return
+	end
+
+	stopTutorialActionPulse()
+	local baseScale = tutorialManagedPulseBaseScales[pulseScale] or 1
+	pulseScale.Scale = baseScale
+	tutorialActionPulseTween = TweenService:Create(
+		pulseScale,
+		TUTORIAL_BOMB_PULSE_TWEEN_INFO,
+		{Scale = baseScale * TUTORIAL_BOMB_PULSE_SCALE}
+	)
+	tutorialActionPulseTween:Play()
 end
 
 local function ensureTutorialBombPulse(button: GuiButton): UIScale
@@ -376,13 +491,7 @@ local function ensureTutorialBombPulse(button: GuiButton): UIScale
 		tutorialBombPulseScale = nil
 	end
 
-	local pulseScale = button:FindFirstChildOfClass("UIScale") :: UIScale?
-	if not pulseScale then
-		pulseScale = Instance.new("UIScale")
-		pulseScale.Name = "TutorialBombPulseScale"
-		pulseScale.Scale = 1
-		pulseScale.Parent = button
-	end
+	local pulseScale = getOrCreateTutorialManagedPulseScale(button, "TutorialBombPulseScale")
 
 	tutorialBombPulseScale = pulseScale
 
@@ -396,11 +505,12 @@ local function startTutorialBombPulse(button: GuiButton)
 	end
 
 	stopTutorialBombPulse()
-	pulseScale.Scale = 1
+	local baseScale = tutorialManagedPulseBaseScales[pulseScale] or 1
+	pulseScale.Scale = baseScale
 	tutorialBombPulseTween = TweenService:Create(
 		pulseScale,
 		TUTORIAL_BOMB_PULSE_TWEEN_INFO,
-		{Scale = TUTORIAL_BOMB_PULSE_SCALE}
+		{Scale = baseScale * TUTORIAL_BOMB_PULSE_SCALE}
 	)
 	tutorialBombPulseTween:Play()
 end
@@ -441,6 +551,31 @@ local function syncTutorialBombGuidance()
 	bindTutorialBombButton(button)
 
 	startTutorialBombPulse(button)
+end
+
+local function getTutorialActionPulseButton(): GuiButton?
+	if shouldUseTutorialGuiProxy and shouldUseTutorialGuiProxy(currentStep) then
+		return nil
+	end
+
+	if currentStep == 4 then
+		local backButton = getBackButton()
+		if backButton and backButton.Visible then
+			return backButton
+		end
+	end
+
+	return nil
+end
+
+local function syncTutorialActionPulse()
+	local button = getTutorialActionPulseButton()
+	if not button then
+		hideTutorialActionPulse()
+		return
+	end
+
+	startTutorialActionPulse(button)
 end
 
 local function destroyTutorialGuiLabel()
@@ -561,7 +696,7 @@ local function requestTutorialFrameOpen(frameName: string, shouldOpen: () -> boo
 	end)
 end
 
-local function getBackButton(): GuiButton?
+getBackButton = function(): GuiButton?
 	local backButton = hud:FindFirstChild("Back")
 	if backButton and backButton:IsA("GuiButton") then
 		return backButton
@@ -816,6 +951,7 @@ local function restoreTutorialUiMask()
 	pickaxesFrame:SetAttribute("IgnoreFrameManagerBlocking", false)
 	upgradesFrame:SetAttribute("IgnoreFrameManagerBlocking", false)
 	hideTutorialBombGuidance()
+	hideTutorialActionPulse()
 
 	local maskedGuiObjects = {}
 	for guiObject in pairs(maskedGuiVisibility) do
@@ -1026,12 +1162,17 @@ local function createTutorialGuiProxyButton(targetButton: GuiButton)
 	ensureTutorialGuiOverlay()
 	destroyTutorialGuiProxyButton()
 
+	local isInteractiveProxy = currentStep == 4
 	local proxyButton = targetButton:Clone()
 	removeScripts(proxyButton)
 	proxyButton.Name = "TutorialGuiProxy"
 	proxyButton.Visible = true
-	proxyButton.Active = true
-	proxyButton.Selectable = true
+	proxyButton.Active = isInteractiveProxy
+	proxyButton.Selectable = isInteractiveProxy
+	proxyButton.AutoButtonColor = false
+	pcall(function()
+		(proxyButton :: any).Interactable = isInteractiveProxy
+	end)
 	proxyButton.Parent = tutorialGuiOverlay
 	tutorialGuiProxyButton = proxyButton
 	tutorialGuiTargetStep = currentStep
@@ -1059,9 +1200,11 @@ local function createTutorialGuiProxyButton(targetButton: GuiButton)
 	)
 	pulseTween:Play()
 
-	proxyButton.MouseButton1Click:Connect(function()
-		handleTutorialGuiProxyClick()
-	end)
+	if isInteractiveProxy then
+		proxyButton.MouseButton1Click:Connect(function()
+			handleTutorialGuiProxyClick()
+		end)
+	end
 
 	tutorialGuiPulseScale = pulseScale
 	tutorialGuiPulseTween = pulseTween
@@ -1090,7 +1233,7 @@ local function findBombShopButton(): GuiButton?
 	return nil
 end
 
-local function findBombBuyButton(): GuiButton?
+findBombBuyButton = function(): GuiButton?
 	local showcaseFrame = pickaxesFrame:FindFirstChild("Showcase")
 	if not showcaseFrame then
 		local scrollingFrame = pickaxesFrame:FindFirstChild("ScrollingFrame") or pickaxesFrame:FindFirstChild("Scrolling")
@@ -1114,7 +1257,7 @@ local function findBombBuyButton(): GuiButton?
 	return nil
 end
 
-local function findCharacterUpgradeButton(): GuiButton?
+findCharacterUpgradeButton = function(): GuiButton?
 	local scrollingFrame = upgradesFrame:FindFirstChild("Scrolling")
 	if not scrollingFrame then
 		scrollingFrame = upgradesFrame:FindFirstChildWhichIsA("ScrollingFrame", true)
@@ -1275,8 +1418,8 @@ local function applyMaskToRoot(root: Instance, allowedLineage: {[Instance]: bool
 end
 
 local function syncTutorialFrames(presentation)
-	pickaxesFrame:SetAttribute("IgnoreFrameManagerBlocking", presentation.ShowPickaxesFrame == true)
-	upgradesFrame:SetAttribute("IgnoreFrameManagerBlocking", presentation.ShowUpgradesFrame == true)
+	pickaxesFrame:SetAttribute("IgnoreFrameManagerBlocking", false)
+	upgradesFrame:SetAttribute("IgnoreFrameManagerBlocking", false)
 
 	local allowedFrameName: string? = nil
 	if presentation.ShowPickaxesFrame then
@@ -1289,12 +1432,21 @@ local function syncTutorialFrames(presentation)
 	local transitionalFrameName: string? = nil
 	if currentStep == 7 then
 		transitionalFrameName = "Pickaxes"
+	elseif currentStep == 9 then
+		transitionalFrameName = "Upgrades"
 	end
 
 	if currentFrameName
 		and currentFrameName ~= allowedFrameName
 		and currentFrameName ~= transitionalFrameName then
 		FrameManager.closeCurrent()
+	end
+
+	if presentation.ShowUpgradesFrame and not upgradesFrame.Visible then
+		requestTutorialFrameOpen("Upgrades", function()
+			local currentPresentation = getCurrentStepPresentation()
+			return currentStep == 10 and currentPresentation.ShowUpgradesFrame and not upgradesFrame.Visible
+		end)
 	end
 end
 
@@ -1471,6 +1623,8 @@ getTutorialGuiTarget = function(step: number): GuiButton?
 		return getBackButton()
 	elseif step == 8 then
 		return findBombBuyButton()
+	elseif step == 10 then
+		return findCharacterUpgradeButton()
 	end
 
 	return nil
@@ -1478,7 +1632,8 @@ end
 
 local function refreshTutorialGuiOverlay()
 	local presentation = getCurrentStepPresentation()
-	if not presentation.MaskUi then
+	local shouldUseProxy = shouldUseTutorialGuiProxy(currentStep)
+	if not presentation.MaskUi and not shouldUseProxy then
 		hideTutorialGuiOverlay()
 		return
 	end
@@ -1512,7 +1667,7 @@ local function refreshTutorialGuiOverlay()
 
 	destroyTutorialGuiLabel()
 
-	if shouldUseTutorialGuiProxy(currentStep) then
+	if shouldUseProxy then
 		if not tutorialGuiProxyButton
 			or tutorialGuiProxyButton.Parent ~= tutorialGuiOverlay
 			or tutorialGuiTargetStep ~= currentStep then
@@ -1706,14 +1861,17 @@ local function findClosestCollectTouch(): BasePart?
 		local collectGui = collectTouch and collectTouch:FindFirstChild("CollectGUI")
 		local collectFrame = collectGui and collectGui:IsA("SurfaceGui") and collectGui:FindFirstChild("CollectFrame")
 		local priceLabel = collectFrame and collectFrame:FindFirstChild("Price")
-		local normalizedAmountText = if priceLabel and priceLabel:IsA("TextLabel")
-			then priceLabel.Text:gsub("%s+", ""):gsub("%$", ""):gsub(",", "")
-			else ""
+		local normalizedAmountText = ""
+		if priceLabel and priceLabel:IsA("TextLabel") then
+			normalizedAmountText = priceLabel.Text:gsub("%s+", ""):gsub("%$", ""):gsub(",", "")
 		end
 		local numericAmount = tonumber(normalizedAmountText)
-		local hasPositiveCollectAmount = if numericAmount ~= nil
-			then numericAmount >= 1
-			else normalizedAmountText ~= "" and not normalizedAmountText:match("^0+([%.]0+)?[kKmMbBtT]?$")
+		local hasPositiveCollectAmount = false
+		if numericAmount ~= nil then
+			hasPositiveCollectAmount = numericAmount >= 1
+		else
+			hasPositiveCollectAmount = normalizedAmountText ~= ""
+				and not normalizedAmountText:match("^0+([%.]0+)?[kKmMbBtT]?$")
 		end
 		if collectTouch
 			and spawnPart:FindFirstChild("VisualItem")
@@ -1879,6 +2037,11 @@ local function resolveWorldTargetForStep(step: number): Instance?
 			return findClosestTaggedPart("ShopPart")
 		end
 		return nil
+	elseif step == 9 then
+		if not upgradesFrame.Visible then
+			return findClosestTaggedPart("UpgradePart")
+		end
+		return nil
 	end
 
 	return nil
@@ -2025,6 +2188,20 @@ local function refreshCurrentStep()
 		local previousStep = currentStep
 		currentStep = clampedStep
 		debugTutorialLog(("StepChanged %d -> %d"):format(previousStep, currentStep))
+
+		if currentStep == 7 and pickaxesFrame.Visible then
+			task.defer(function()
+				if currentStep == 7 and pickaxesFrame.Visible then
+					reportAction("ShopOpened")
+				end
+			end)
+		elseif currentStep == 9 and upgradesFrame.Visible then
+			task.defer(function()
+				if currentStep == 9 and upgradesFrame.Visible then
+					reportAction("UpgradesOpened")
+				end
+			end)
+		end
 	end
 
 	local savedPostTutorialStage = player:GetAttribute("PostTutorialStage")
@@ -2035,6 +2212,7 @@ local function refreshCurrentStep()
 	end
 
 	applyStepPresentation()
+	syncTutorialActionPulse()
 	isRefreshingStep = false
 end
 
@@ -2166,6 +2344,7 @@ end)
 
 RunService.RenderStepped:Connect(function(deltaTime)
 	refreshTutorialGuiOverlay()
+	syncTutorialActionPulse()
 
 	refreshAccumulator += deltaTime
 	if refreshAccumulator >= 0.25 then
