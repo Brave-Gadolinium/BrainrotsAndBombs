@@ -33,7 +33,10 @@ local ACTION_BUTTON_BUY = Color3.fromRGB(34, 255, 0)
 local ACTION_BUTTON_EQUIP = Color3.fromRGB(255, 214, 64)
 local ACTION_BUTTON_LOCKED = Color3.fromRGB(120, 120, 120)
 local ACTION_BUTTON_TEXT = Color3.fromRGB(255, 255, 255)
-local SELECTED_PICKAXE_BACKGROUND = Color3.fromRGB(255, 213, 0)
+local LOCKED_PICKAXE_ENTRY_BACKGROUND = Color3.fromRGB(0, 0, 0)
+local DEFAULT_PICKAXE_ENTRY_BACKGROUND = Color3.fromRGB(255, 255, 255)
+local PICKAXE_PANEL_BACKGROUND_TRANSPARENCY = 0.2
+local SELECTED_PICKAXE_BACKGROUND = Color3.fromRGB(255, 170, 0)
 
 type TextVisualSnapshot = {
 	TextColor3: Color3,
@@ -479,16 +482,32 @@ local function bindTemplateSelection(template: GuiObject, onSelected: () -> ())
 	end)
 end
 
+local function getPickaxeEntryBackgroundColor(pickaxeId: string, isSelected: boolean): Color3
+	if isSelected then
+		return SELECTED_PICKAXE_BACKGROUND
+	end
+
+	local isOwned = currentOwnedPickaxes[pickaxeId] == true
+	local isLockedForSoftPurchase = not isOwned and currentNextAvailableId ~= nil and pickaxeId ~= currentNextAvailableId
+	if isLockedForSoftPurchase then
+		return LOCKED_PICKAXE_ENTRY_BACKGROUND
+	end
+
+	return DEFAULT_PICKAXE_ENTRY_BACKGROUND
+end
+
 local function updatePickaxeEntrySelectionState(scrollingFrame: ScrollingFrame, showcaseFrame: Frame, selectedId: string)
 	for _, child in ipairs(scrollingFrame:GetChildren()) do
 		if child ~= showcaseFrame and child:GetAttribute("GeneratedPickaxeEntry") == true and child:IsA("GuiObject") then
 			local isSelected = child.Name == selectedId
-			child.BackgroundColor3 = if isSelected then SELECTED_PICKAXE_BACKGROUND else Color3.fromRGB(255, 255, 255)
+			child.BackgroundColor3 = getPickaxeEntryBackgroundColor(child.Name, isSelected)
+			child.BackgroundTransparency = PICKAXE_PANEL_BACKGROUND_TRANSPARENCY
 		end
 	end
 end
 
 local function updateShowcaseSelectionState(showcaseFrame: Frame, hasSelection: boolean)
+	showcaseFrame.BackgroundTransparency = PICKAXE_PANEL_BACKGROUND_TRANSPARENCY
 	if hasSelection then
 		showcaseFrame.BackgroundColor3 = SELECTED_PICKAXE_BACKGROUND
 	end
@@ -691,6 +710,8 @@ local function initializeUI(preferHighestOwned: boolean?, focusNextAvailable: bo
 	local showcaseFrame = getShowcaseFrame(pickaxesFrame, scrollingFrame)
 
 	template.Visible = false
+	template.BackgroundTransparency = PICKAXE_PANEL_BACKGROUND_TRANSPARENCY
+	showcaseFrame.BackgroundTransparency = PICKAXE_PANEL_BACKGROUND_TRANSPARENCY
 
 	local rawData = getDataFunction:InvokeServer()
 	local ownedPickaxes, equippedPickaxe, nextPickaxeToBuy = parsePickaxeData(rawData)
@@ -739,6 +760,8 @@ local function initializeUI(preferHighestOwned: boolean?, focusNextAvailable: bo
 		newTemplate:SetAttribute("GeneratedPickaxeEntry", true)
 		newTemplate.Visible = true
 		newTemplate.LayoutOrder = index
+		newTemplate.BackgroundColor3 = getPickaxeEntryBackgroundColor(pickaxe.Id, false)
+		newTemplate.BackgroundTransparency = PICKAXE_PANEL_BACKGROUND_TRANSPARENCY
 		newTemplate.Parent = scrollingFrame
 
 		local isOwned = currentOwnedPickaxes[pickaxe.Id] == true
