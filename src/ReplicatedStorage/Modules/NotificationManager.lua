@@ -60,7 +60,7 @@ function NotificationManager.show(message: string, messageType: string)
 
 	-- ## FORCE VISIBILITY SETTINGS ##
 	newNotification.Visible = true
-	newNotification.ZIndex = 10 -- Ensure it sits on top
+	newNotification.ZIndex = 999 -- Ensure it sits on top
 	newNotification.TextTransparency = 1 -- Start hidden for fade in
 
 	-- 2. Apply Styles
