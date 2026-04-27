@@ -1625,6 +1625,8 @@ getTutorialGuiTarget = function(step: number): GuiButton?
 		return findBombBuyButton()
 	elseif step == 10 then
 		return findCharacterUpgradeButton()
+	elseif step == 11 then
+		return findBaseUpgradeGuiButton()
 	end
 
 	return nil
@@ -1633,7 +1635,7 @@ end
 local function refreshTutorialGuiOverlay()
 	local presentation = getCurrentStepPresentation()
 	local shouldUseProxy = shouldUseTutorialGuiProxy(currentStep)
-	if not presentation.MaskUi and not shouldUseProxy then
+	if not shouldUseProxy then
 		hideTutorialGuiOverlay()
 		return
 	end
@@ -2042,6 +2044,22 @@ local function resolveWorldTargetForStep(step: number): Instance?
 			return findClosestTaggedPart("UpgradePart")
 		end
 		return nil
+	elseif step == 11 then
+		local plot = getPlayerPlot()
+		if not plot then
+			return nil
+		end
+		local upgradeModel = plot:FindFirstChild("UpgradeSlotsButton", true)
+		if not upgradeModel then
+			return nil
+		end
+		if upgradeModel:IsA("BasePart") then
+			return upgradeModel
+		end
+		if upgradeModel and upgradeModel:IsA("Model") then
+			return upgradeModel.PrimaryPart or upgradeModel:FindFirstChildWhichIsA("BasePart", true)
+		end
+		return upgradeModel and upgradeModel:FindFirstChildWhichIsA("BasePart", true) or nil
 	end
 
 	return nil
@@ -2069,46 +2087,23 @@ local function applyStepPresentation()
 	if currentStep < TutorialConfiguration.FinalStep then
 		syncTutorialFrames(presentation)
 	end
-	if presentation.MaskUi then
-		applyTutorialUiMask(presentation)
-		syncSkipTutorialVisibility()
-		instructionsLabel.Text = stepDefinition.Text
-		instructionsLabel.Visible = presentation.ShowText
-
-		local newWorldTarget = resolveWorldTargetForStep(currentStep)
-		if newWorldTarget then
-			if currentStep == 3 then
-				if newWorldTarget:IsA("Model") then
-					local targetPart = newWorldTarget.PrimaryPart or newWorldTarget:FindFirstChildWhichIsA("BasePart")
-					if targetPart then
-						setupBeam(targetPart)
-					else
-						cleanupBeamVisuals()
-					end
-					setupHighlight(newWorldTarget)
-				else
-					cleanupWorldVisuals()
-				end
-			elseif newWorldTarget:IsA("BasePart") then
-				setupBeam(newWorldTarget)
-				cleanupHighlightVisual()
-			else
-				cleanupWorldVisuals()
-			end
-		else
-			cleanupWorldVisuals()
-		end
-
-		refreshTutorialGuiOverlay()
-		return
-	end
-
 	restoreTutorialUiMask()
 	hideTutorialGuiOverlay()
 	syncSkipTutorialVisibility()
 
 	if currentStep < TutorialConfiguration.FinalStep then
 		hasAppliedTutorialCompletionCleanup = false
+		clearExpiredPostTutorialCompletion()
+		if currentStep == (TutorialConfiguration.FinalStep - 1) then
+			local postTutorialCompletion = getActivePostTutorialCompletion(true)
+			if postTutorialCompletion then
+				instructionsLabel.Text = postTutorialCompletion.Text
+				instructionsLabel.Visible = true
+				clearAllTargets(true)
+				return
+			end
+		end
+
 		instructionsLabel.Text = stepDefinition.Text
 		instructionsLabel.Visible = presentation.ShowText
 

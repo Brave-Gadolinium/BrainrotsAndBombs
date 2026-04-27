@@ -24,17 +24,26 @@ local reportActionEvent: RemoteEvent? = nil
 local postTutorialCompletionEvent: RemoteEvent? = nil
 local Templates = ReplicatedStorage:WaitForChild("Templates")
 local ConfettiTemplate = Templates:WaitForChild("Confetti")
-local CURRENT_TUTORIAL_VERSION = 5
-local PREVIOUS_TUTORIAL_ANALYTICS_KEY = "Tutor_22_04"
-local LEGACY_TUTORIAL_ANALYTICS_KEY = "TutorialFTUE"
+local CURRENT_TUTORIAL_VERSION = 6
+local PREVIOUS_TUTORIAL_ANALYTICS_KEY = "Tutor_24_04"
+local LEGACY_TUTORIAL_ANALYTICS_KEY = "Tutor_23_04"
+local OLDEST_TUTORIAL_ANALYTICS_KEY = "Tutor_22_04"
+local OLDEST_LEGACY_TUTORIAL_ANALYTICS_KEY = "TutorialFTUE"
 local STEP_ONE_MIN_DISPLAY_TIME = 1.5
+local AUTO_HELP_DELAY = 10
+local PLACE_BRAINROT_STEP = 5
 local COLLECT_CASH_STEP = 6
 local OPEN_BOMB_SHOP_STEP = 7
 local BUY_BOMB_TWO_STEP = 8
 local CHARACTER_UPGRADE_OPEN_STEP = 9
 local CHARACTER_UPGRADE_PURCHASE_STEP = 10
+local BASE_UPGRADE_STEP = 11
+local BASE_UPGRADE_COMPLETE_STEP = 12
 local stepActivatedAt: {[Player]: number} = {}
 local stepOneEvaluationTokens: {[Player]: number} = {}
+local autoHelpTokens: {[Player]: number} = {}
+local autoPlaceTutorialBrainrotHandler: ((Player) -> boolean)? = nil
+local autoCollectTutorialCashHandler: ((Player) -> boolean)? = nil
 local DEBUG_TUTORIAL = false
 local DEBUG_BRAINROT_TRACE = false
 
@@ -142,6 +151,10 @@ end
 
 local function invalidateScheduledStepOneEvaluation(player: Player)
 	stepOneEvaluationTokens[player] = (stepOneEvaluationTokens[player] or 0) + 1
+end
+
+local function invalidateAutoHelp(player: Player)
+	autoHelpTokens[player] = (autoHelpTokens[player] or 0) + 1
 end
 
 local function getRemainingInitialStepOneDisplayTime(player: Player, step: number): number
@@ -393,6 +406,7 @@ local function setCurrentStep(player: Player, profile: any, step: number)
 	local clampedStep = math.clamp(step, 1, TutorialConfiguration.FinalStep)
 	local previousStep = tonumber(profile.Data.OnboardingStep) or 1
 	profile.Data.OnboardingStep = clampedStep
+	invalidateAutoHelp(player)
 	syncStepAttribute(player, clampedStep)
 	logBrainrotTrace(player, ("setCurrentStep %s -> %s"):format(
 		tostring(previousStep),
@@ -442,6 +456,34 @@ local function consumeTutorialBaseUpgrade(profile: any)
 	profile.Data.TutorialFreeBaseUpgradeConsumed = true
 end
 
+local function scheduleAutoHelpIfNeeded(player: Player)
+	invalidateAutoHelp(player)
+
+	local currentStep = getCurrentStep(player)
+	if currentStep ~= PLACE_BRAINROT_STEP and currentStep ~= COLLECT_CASH_STEP then
+		return
+	end
+
+	local token = autoHelpTokens[player] or 0
+	task.delay(AUTO_HELP_DELAY, function()
+		if autoHelpTokens[player] ~= token then
+			return
+		end
+		if not player.Parent then
+			return
+		end
+		if getCurrentStep(player) ~= currentStep then
+			return
+		end
+
+		if currentStep == PLACE_BRAINROT_STEP and autoPlaceTutorialBrainrotHandler then
+			autoPlaceTutorialBrainrotHandler(player)
+		elseif currentStep == COLLECT_CASH_STEP and autoCollectTutorialCashHandler then
+			autoCollectTutorialCashHandler(player)
+		end
+	end)
+end
+
 local function remapLegacyTutorialStepForVersionThree(step: number): number
 	local remappedStep = math.max(1, math.floor(tonumber(step) or 1))
 	if remappedStep >= 7 then
@@ -466,6 +508,15 @@ end
 local function remapVersionFourStepForVersionFive(step: number): number
 	local remappedStep = math.max(1, math.floor(tonumber(step) or 1))
 	if remappedStep <= BUY_BOMB_TWO_STEP then
+		return math.clamp(remappedStep, 1, TutorialConfiguration.FinalStep)
+	end
+
+	return TutorialConfiguration.FinalStep
+end
+
+local function remapVersionFiveStepForVersionSix(step: number): number
+	local remappedStep = math.max(1, math.floor(tonumber(step) or 1))
+	if remappedStep <= CHARACTER_UPGRADE_PURCHASE_STEP then
 		return math.clamp(remappedStep, 1, TutorialConfiguration.FinalStep)
 	end
 
@@ -507,12 +558,17 @@ local function migrateTutorialProgress(profile: any)
 		if previousTutorialVersion < 5 then
 			currentStep = remapVersionFourStepForVersionFive(currentStep)
 		end
+		if previousTutorialVersion < 6 then
+			currentStep = remapVersionFiveStepForVersionSix(currentStep)
+		end
 	end
 
 	profile.Data.OnboardingStep = math.clamp(currentStep, 1, TutorialConfiguration.FinalStep)
 	if type(profile.Data.AnalyticsFunnels) == "table" and type(profile.Data.AnalyticsFunnels.OneTime) == "table" then
 		profile.Data.AnalyticsFunnels.OneTime[PREVIOUS_TUTORIAL_ANALYTICS_KEY] = nil
 		profile.Data.AnalyticsFunnels.OneTime[LEGACY_TUTORIAL_ANALYTICS_KEY] = nil
+		profile.Data.AnalyticsFunnels.OneTime[OLDEST_TUTORIAL_ANALYTICS_KEY] = nil
+		profile.Data.AnalyticsFunnels.OneTime[OLDEST_LEGACY_TUTORIAL_ANALYTICS_KEY] = nil
 	end
 
 	if hasSpecificCharacterUpgrade(profile, TutorialConfiguration.TutorialCharacterUpgradeId) then
@@ -578,7 +634,16 @@ function TutorialService:IsTutorialCharacterUpgradeFreeAvailable(player: Player,
 end
 
 function TutorialService:IsTutorialBaseUpgradeFreeAvailable(player: Player): boolean
-	return false
+	local profile = getProfile(player)
+	if not profile or not profile.Data then
+		return false
+	end
+
+	ensureTutorialFlags(profile)
+
+	return getCurrentStep(player) == BASE_UPGRADE_STEP
+		and profile.Data.TutorialFreeBaseUpgradeConsumed ~= true
+		and not hasBaseSlotUpgrade(profile)
 end
 
 function TutorialService:SyncPlayer(player: Player)
@@ -590,6 +655,7 @@ function TutorialService:SyncPlayer(player: Player)
 		syncStepAttribute(player, step)
 		markStepActivated(player)
 		invalidateScheduledStepOneEvaluation(player)
+		scheduleAutoHelpIfNeeded(player)
 		syncTutorialSkippedAttribute(player, tutorialSkipped)
 		syncPostTutorialStageAttribute(
 			player,
@@ -607,6 +673,7 @@ function TutorialService:SyncPlayer(player: Player)
 	syncStepAttribute(player, step)
 	markStepActivated(player)
 	invalidateScheduledStepOneEvaluation(player)
+	scheduleAutoHelpIfNeeded(player)
 	syncTutorialSkippedAttribute(player, isTutorialSkipped(profile))
 	setCurrentPostTutorialStage(player, profile, resolvePostTutorialStage(player, profile))
 	AnalyticsFunnelsService:SyncTutorial(player, step)
@@ -631,6 +698,7 @@ function TutorialService:AdvanceToStep(player: Player, step: number): boolean
 
 	debugTutorialLog(player, ("AdvanceToStep %d -> %d"):format(currentStep, targetStep))
 	setCurrentStep(player, profile, targetStep)
+	scheduleAutoHelpIfNeeded(player)
 	self:EvaluateCurrentStep(player)
 	return true
 end
@@ -649,6 +717,7 @@ function TutorialService:SkipTutorial(player: Player): boolean
 	end
 
 	debugTutorialLog(player, ("SkipTutorial step=%d"):format(currentStep))
+	invalidateAutoHelp(player)
 	profile.Data.TutorialSkipped = true
 	syncTutorialSkippedAttribute(player, true)
 	consumeTutorialCharacterUpgrade(profile)
@@ -717,12 +786,13 @@ function TutorialService:EvaluateCurrentStep(player: Player)
 			if hasSpecificCharacterUpgrade(profile, TutorialConfiguration.TutorialCharacterUpgradeId) then
 				consumeTutorialCharacterUpgrade(profile)
 				playTutorialCompletionEffect(player)
-				nextStep = TutorialConfiguration.FinalStep
+				nextStep = BASE_UPGRADE_STEP
 			end
 		end
 
 		if nextStep then
 			setCurrentStep(player, profile, nextStep)
+			scheduleAutoHelpIfNeeded(player)
 			advanced = true
 		end
 	end
@@ -796,6 +866,7 @@ function TutorialService:HandleMineZoneExited(player: Player)
 end
 
 function TutorialService:HandleBrainrotPlaced(player: Player)
+	invalidateAutoHelp(player)
 	logBrainrotTrace(player, ("HandleBrainrotPlaced currentStep=%s"):format(tostring(getCurrentStep(player))))
 	debugTutorialLog(player, "HandleBrainrotPlaced")
 	if getCurrentStep(player) == 5 then
@@ -806,6 +877,7 @@ function TutorialService:HandleBrainrotPlaced(player: Player)
 end
 
 function TutorialService:HandleManualCollect(player: Player, amount: number)
+	invalidateAutoHelp(player)
 	debugTutorialLog(player, ("HandleManualCollect amount=%d"):format(math.floor(tonumber(amount) or 0)))
 	if math.floor(tonumber(amount) or 0) <= 0 then
 		return
@@ -843,7 +915,7 @@ function TutorialService:HandlePostTutorialCharacterUpgradePurchased(player: Pla
 	if getCurrentStep(player) == CHARACTER_UPGRADE_PURCHASE_STEP and isTutorialCharacterUpgrade then
 		consumeTutorialCharacterUpgrade(profile)
 		playTutorialCompletionEffect(player)
-		self:AdvanceToStep(player, TutorialConfiguration.FinalStep)
+		self:AdvanceToStep(player, BASE_UPGRADE_STEP)
 		return
 	end
 
@@ -863,9 +935,27 @@ function TutorialService:HandlePostTutorialBaseUpgradePurchased(player: Player)
 
 	ensureTutorialFlags(profile)
 	consumeTutorialBaseUpgrade(profile)
+	if getCurrentStep(player) == BASE_UPGRADE_STEP then
+		firePostTutorialCompletion(player, PostTutorialConfiguration.CompletionTexts.BaseUpgrade)
+		self:AdvanceToStep(player, BASE_UPGRADE_COMPLETE_STEP)
+		task.delay(PostTutorialConfiguration.CompletionMessageDuration, function()
+			if player.Parent and getCurrentStep(player) == BASE_UPGRADE_COMPLETE_STEP then
+				self:AdvanceToStep(player, TutorialConfiguration.FinalStep)
+			end
+		end)
+		return
+	end
 
 	self:EvaluatePostTutorial(player)
 	self:EvaluateCurrentStep(player)
+end
+
+function TutorialService:RegisterAutomationHandlers(handlers: {
+	TryAutoPlaceTutorialBrainrot: ((Player) -> boolean)?,
+	TryAutoCollectTutorialCash: ((Player) -> boolean)?,
+})
+	autoPlaceTutorialBrainrotHandler = handlers.TryAutoPlaceTutorialBrainrot
+	autoCollectTutorialCashHandler = handlers.TryAutoCollectTutorialCash
 end
 
 function TutorialService:ReportAction(player: Player, actionId: string)
@@ -916,6 +1006,7 @@ function TutorialService:Init(controllers)
 	Players.PlayerRemoving:Connect(function(player)
 		stepActivatedAt[player] = nil
 		stepOneEvaluationTokens[player] = nil
+		autoHelpTokens[player] = nil
 	end)
 end
 

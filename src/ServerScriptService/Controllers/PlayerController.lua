@@ -38,11 +38,12 @@ local COLLECT_ALL_GAMEPASS = ProductConfigurations.GamePasses.CollectAll or 1783
 local LIMITED_TIME_COLLECT_ALL_DURATION = math.max(0, math.floor(tonumber(LimitedTimeOfferConfiguration.OfferDurationSeconds) or 0))
 
 local GROUP_ID = 0 
-local CURRENT_TUTORIAL_VERSION = 4
-local CURRENT_TUTORIAL_FUNNEL_KEY = "Tutor_24_04"
-local PREVIOUS_TUTORIAL_FUNNEL_KEY = "Tutor_23_04"
-local LEGACY_TUTORIAL_FUNNEL_KEY = "Tutor_22_04"
-local OLDEST_TUTORIAL_FUNNEL_KEY = "TutorialFTUE"
+local CURRENT_TUTORIAL_VERSION = 6
+local CURRENT_TUTORIAL_FUNNEL_KEY = "Tutor_27_04"
+local PREVIOUS_TUTORIAL_FUNNEL_KEY = "Tutor_24_04"
+local LEGACY_TUTORIAL_FUNNEL_KEY = "Tutor_23_04"
+local OLDEST_TUTORIAL_FUNNEL_KEY = "Tutor_22_04"
+local OLDEST_LEGACY_TUTORIAL_FUNNEL_KEY = "TutorialFTUE"
 local CURRENT_TUTORIAL_FUNNEL_MAX_STEP = TutorialConfiguration.FinalStep
 
 local function remapLegacyTutorialFunnelStep(step: any): number
@@ -76,7 +77,14 @@ local function remapVersionThreeTutorialFunnelStep(step: any): number
 end
 
 local function remapPreviousTutorialFunnelStep(step: any): number
-	return math.clamp(math.max(0, math.floor(tonumber(step) or 0)), 0, CURRENT_TUTORIAL_FUNNEL_MAX_STEP)
+	local legacyStep = math.max(0, math.floor(tonumber(step) or 0))
+	if legacyStep <= 10 then
+		return math.clamp(legacyStep, 0, CURRENT_TUTORIAL_FUNNEL_MAX_STEP)
+	end
+	if legacyStep >= 11 then
+		return CURRENT_TUTORIAL_FUNNEL_MAX_STEP
+	end
+	return legacyStep
 end
 
 local function remapStoredTutorialFunnelStep(step: any, tutorialVersion: number): number
@@ -84,8 +92,12 @@ local function remapStoredTutorialFunnelStep(step: any, tutorialVersion: number)
 		return remapVersionThreeTutorialFunnelStep(remapLegacyTutorialFunnelStep(step))
 	end
 
-	if tutorialVersion < CURRENT_TUTORIAL_VERSION then
+	if tutorialVersion < 4 then
 		return remapVersionThreeTutorialFunnelStep(step)
+	end
+
+	if tutorialVersion < CURRENT_TUTORIAL_VERSION then
+		return remapPreviousTutorialFunnelStep(step)
 	end
 
 	return math.clamp(math.max(0, math.floor(tonumber(step) or 0)), 0, CURRENT_TUTORIAL_FUNNEL_MAX_STEP)
@@ -1398,12 +1410,17 @@ local function onPlayerAdded(player: Player)
 		profile.Data.AnalyticsFunnels.OneTime[OLDEST_TUTORIAL_FUNNEL_KEY],
 		2
 	)
+	local oldestLegacyTutorialFunnelStep = remapStoredTutorialFunnelStep(
+		profile.Data.AnalyticsFunnels.OneTime[OLDEST_LEGACY_TUTORIAL_FUNNEL_KEY],
+		2
+	)
 	local onboardingTutorialFunnelStep = remapStoredTutorialFunnelStep(profile.Data.OnboardingFunnelStep, tutorialVersion)
 	local normalizedTutorialFunnelStep = math.max(
 		currentTutorialFunnelStep,
 		previousTutorialFunnelStep,
 		legacyTutorialFunnelStep,
 		oldestTutorialFunnelStep,
+		oldestLegacyTutorialFunnelStep,
 		onboardingTutorialFunnelStep
 	)
 
@@ -1412,6 +1429,7 @@ local function onPlayerAdded(player: Player)
 	profile.Data.AnalyticsFunnels.OneTime[PREVIOUS_TUTORIAL_FUNNEL_KEY] = nil
 	profile.Data.AnalyticsFunnels.OneTime[LEGACY_TUTORIAL_FUNNEL_KEY] = nil
 	profile.Data.AnalyticsFunnels.OneTime[OLDEST_TUTORIAL_FUNNEL_KEY] = nil
+	profile.Data.AnalyticsFunnels.OneTime[OLDEST_LEGACY_TUTORIAL_FUNNEL_KEY] = nil
 	if profile.Data.DiscoveredItems == nil then profile.Data.DiscoveredItems = {} end
 	if profile.Data.ClaimedPacks == nil then profile.Data.ClaimedPacks = {} end
 	if type(profile.Data.RedeemedCodes) ~= "table" then profile.Data.RedeemedCodes = {} end

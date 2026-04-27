@@ -149,6 +149,149 @@ local LUCKY_BLOCK_VISUAL_VERTICAL_OFFSET = 0
 -- [ STATE ]
 local lastUpgradeTime = {}
 
+local function findAutoPlaceTargetSlot(player: Player): (string, string, Model)?
+	local plot = Workspace:FindFirstChild("Plot_" .. player.Name)
+	if not plot then
+		return nil
+	end
+
+	local rootPart = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+	local closestDistance = math.huge
+	local bestFloorName = nil
+	local bestSlotName = nil
+	local bestSlotModel = nil
+
+	for _, floorModel in ipairs(plot:GetChildren()) do
+		if floorModel:IsA("Model") and floorModel.Name:match("^Floor%d+$") then
+			local slotsFolder = floorModel:FindFirstChild("Slots")
+			if slotsFolder then
+				for _, slotModel in ipairs(slotsFolder:GetChildren()) do
+					if slotModel:IsA("Model") and slotModel:GetAttribute("IsUnlocked") == true then
+						local spawnPart = slotModel:FindFirstChild("Spawn")
+						if spawnPart and spawnPart:IsA("BasePart") and not spawnPart:FindFirstChild("VisualItem") then
+							local distance = if rootPart and rootPart:IsA("BasePart")
+								then (spawnPart.Position - rootPart.Position).Magnitude
+								else 0
+							if distance < closestDistance then
+								closestDistance = distance
+								bestFloorName = floorModel.Name
+								bestSlotName = slotModel.Name
+								bestSlotModel = slotModel
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+
+	if bestFloorName and bestSlotName and bestSlotModel then
+		return bestFloorName, bestSlotName, bestSlotModel
+	end
+
+	return nil
+end
+
+local function findAutoCollectTargetSlot(player: Player): (string, string, Model)?
+	local profile = PlayerController:GetProfile(player)
+	if not profile then
+		return nil
+	end
+
+	local plot = Workspace:FindFirstChild("Plot_" .. player.Name)
+	if not plot then
+		return nil
+	end
+
+	local rootPart = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+	local closestDistance = math.huge
+	local bestFloorName = nil
+	local bestSlotName = nil
+	local bestSlotModel = nil
+
+	for _, floorModel in ipairs(plot:GetChildren()) do
+		if floorModel:IsA("Model") and floorModel.Name:match("^Floor%d+$") then
+			local floorData = profile.Data.Plots[floorModel.Name]
+			local slotsFolder = floorModel:FindFirstChild("Slots")
+			if floorData and slotsFolder then
+				for _, slotModel in ipairs(slotsFolder:GetChildren()) do
+					if slotModel:IsA("Model") and slotModel:GetAttribute("IsUnlocked") == true then
+						local slotData = floorData[slotModel.Name]
+						local spawnPart = slotModel:FindFirstChild("Spawn")
+						if spawnPart
+							and spawnPart:IsA("BasePart")
+							and getSlotContentType(slotData) == "Item"
+							and math.floor(tonumber(slotData.Stored) or 0) > 0 then
+							local distance = if rootPart and rootPart:IsA("BasePart")
+								then (spawnPart.Position - rootPart.Position).Magnitude
+								else 0
+							if distance < closestDistance then
+								closestDistance = distance
+								bestFloorName = floorModel.Name
+								bestSlotName = slotModel.Name
+								bestSlotModel = slotModel
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+
+	if bestFloorName and bestSlotName and bestSlotModel then
+		return bestFloorName, bestSlotName, bestSlotModel
+	end
+
+	return nil
+end
+
+local function findTutorialBrainrotTool(player: Player): Tool?
+	local function findInContainer(container: Instance?): Tool?
+		if not container then
+			return nil
+		end
+
+		for _, child in ipairs(container:GetChildren()) do
+			if child:IsA("Tool") and child:GetAttribute("Mutation") ~= nil then
+				return child
+			end
+		end
+
+		return nil
+	end
+
+	return findInContainer(player.Character) or findInContainer(player:FindFirstChild("Backpack"))
+end
+
+local function tryAutoPlaceTutorialBrainrot(player: Player): boolean
+	local floorName, slotName, slotModel = findAutoPlaceTargetSlot(player)
+	if not floorName or not slotName or not slotModel then
+		return false
+	end
+
+	local brainrotTool = findTutorialBrainrotTool(player)
+	if not brainrotTool then
+		return false
+	end
+
+	if brainrotTool.Parent ~= player.Character and player.Character then
+		brainrotTool.Parent = player.Character
+	end
+
+	SlotManager.HandleInteraction(player, floorName, slotName, slotModel)
+	return true
+end
+
+local function tryAutoCollectTutorialCash(player: Player): boolean
+	local floorName, slotName, slotModel = findAutoCollectTargetSlot(player)
+	if not floorName or not slotName or not slotModel then
+		return false
+	end
+
+	SlotManager.CollectMoney(player, floorName, slotName, slotModel)
+	return true
+end
+
 local function playBrainrotPlacedEffects(player: Player)
 	local character = player.Character
 	local rootPart = character and character:FindFirstChild("HumanoidRootPart")
@@ -901,6 +1044,13 @@ function SlotManager:Init(controllers)
 		upgradeEvent.OnServerEvent:Connect(function(player, floorName, slotName)
 			SlotManager.UpgradeItem(player, floorName, slotName)
 		end)
+	end
+
+	if TutorialService.RegisterAutomationHandlers then
+		TutorialService:RegisterAutomationHandlers({
+			TryAutoPlaceTutorialBrainrot = tryAutoPlaceTutorialBrainrot,
+			TryAutoCollectTutorialCash = tryAutoCollectTutorialCash,
+		})
 	end
 
 	local popupEvent = Events:FindFirstChild("ShowCashPopUp")
