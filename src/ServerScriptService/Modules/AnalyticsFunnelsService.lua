@@ -33,10 +33,10 @@ local purchaseAttributions: {[Player]: {[string]: PurchaseAttribution}} = {}
 local autoBombToggleSurfaces: {[Player]: {Surface: string, ExpiresAt: number}} = {}
 local initialized = false
 
-local TUTORIAL_VERSION = "tutor_23_04"
-local TUTORIAL_FUNNEL_KEY = "Tutor_23_04"
-local TUTORIAL_FUNNEL_NAME = "Tutor_23/04"
-local LEGACY_TUTORIAL_FUNNEL_KEYS = {"Tutor_22_04", "TutorialFTUE"}
+local TUTORIAL_VERSION = "tutor_24_04"
+local TUTORIAL_FUNNEL_KEY = "Tutor_24_04"
+local TUTORIAL_FUNNEL_NAME = "Tutor_24/04"
+local LEGACY_TUTORIAL_FUNNEL_KEYS = {"Tutor_23_04", "Tutor_22_04", "TutorialFTUE"}
 local TUTORIAL_ENTERED_MARKER_KEY = "tutorial_entered"
 local TUTORIAL_COMPLETED_MARKER_KEY = "tutorial_completed"
 local TUTORIAL_SKIPPED_MARKER_KEY = "tutorial_skipped"
@@ -58,7 +58,8 @@ local OneTimeFunnels = {
 			[7] = "CollectCash",
 			[8] = "OpenBombShop",
 			[9] = "BuyBomb2",
-			[10] = "TutorialComplete",
+			[10] = "OpenUpgrades",
+			[11] = "BuyCharacterUpgrade",
 		},
 	},
 	EarlyProgressionToFirstRebirth = {
