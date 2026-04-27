@@ -149,10 +149,10 @@ local LUCKY_BLOCK_VISUAL_VERTICAL_OFFSET = 0
 -- [ STATE ]
 local lastUpgradeTime = {}
 
-local function findAutoPlaceTargetSlot(player: Player): (string, string, Model)?
+local function findAutoPlaceTargetSlot(player: Player): (string?, string?, Model?)
 	local plot = Workspace:FindFirstChild("Plot_" .. player.Name)
 	if not plot then
-		return nil
+		return nil, nil, nil
 	end
 
 	local rootPart = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
@@ -189,18 +189,18 @@ local function findAutoPlaceTargetSlot(player: Player): (string, string, Model)?
 		return bestFloorName, bestSlotName, bestSlotModel
 	end
 
-	return nil
+	return nil, nil, nil
 end
 
-local function findAutoCollectTargetSlot(player: Player): (string, string, Model)?
+local function findAutoCollectTargetSlot(player: Player): (string?, string?, Model?)
 	local profile = PlayerController:GetProfile(player)
 	if not profile then
-		return nil
+		return nil, nil, nil
 	end
 
 	local plot = Workspace:FindFirstChild("Plot_" .. player.Name)
 	if not plot then
-		return nil
+		return nil, nil, nil
 	end
 
 	local rootPart = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
@@ -242,7 +242,7 @@ local function findAutoCollectTargetSlot(player: Player): (string, string, Model
 		return bestFloorName, bestSlotName, bestSlotModel
 	end
 
-	return nil
+	return nil, nil, nil
 end
 
 local function findTutorialBrainrotTool(player: Player): Tool?
