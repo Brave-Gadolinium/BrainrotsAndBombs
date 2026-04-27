@@ -254,6 +254,17 @@ local function getActivePostTutorialCompletion(canStartQueued: boolean): ActiveP
 	return activePostTutorialCompletion
 end
 
+local function getGuaranteedTutorialTailText(step: number): string?
+	if step == (TutorialConfiguration.FinalStep - 1) then
+		local baseUpgradeText = PostTutorialConfiguration.CompletionTexts.BaseUpgrade
+		if type(baseUpgradeText) == "string" and baseUpgradeText ~= "" then
+			return baseUpgradeText
+		end
+	end
+
+	return nil
+end
+
 local function reportAction(actionId: string)
 	local now = tick()
 	local lastReportedAt = reportDebounce[actionId] or 0
@@ -2098,6 +2109,14 @@ local function applyStepPresentation()
 			local postTutorialCompletion = getActivePostTutorialCompletion(true)
 			if postTutorialCompletion then
 				instructionsLabel.Text = postTutorialCompletion.Text
+				instructionsLabel.Visible = true
+				clearAllTargets(true)
+				return
+			end
+
+			local guaranteedTailText = getGuaranteedTutorialTailText(currentStep)
+			if guaranteedTailText then
+				instructionsLabel.Text = guaranteedTailText
 				instructionsLabel.Visible = true
 				clearAllTargets(true)
 				return

@@ -16,6 +16,8 @@ PostTutorialConfiguration.PromptTexts = {
 }
 
 PostTutorialConfiguration.CompletionTexts = {
+	CharacterUpgrade = "Character upgrade complete!",
+	BaseUpgrade = "Base upgrade complete!",
 }
 
 function PostTutorialConfiguration.ClampStage(stage: number): number
