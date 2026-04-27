@@ -746,7 +746,7 @@ end
 
 local function shouldShowSkipTutorial(): boolean
 	return currentStep > 0
-		and currentStep < TutorialConfiguration.FinalStep
+		and currentStep < (TutorialConfiguration.FinalStep - 1)
 		and player:GetAttribute("TutorialSkipped") ~= true
 end
 
