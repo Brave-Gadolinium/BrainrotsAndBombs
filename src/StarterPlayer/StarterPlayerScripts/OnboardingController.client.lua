@@ -1454,16 +1454,13 @@ local function syncTutorialFrames(presentation)
 		allowedFrameName == "Upgrades" or transitionalFrameName == "Upgrades"
 	)
 
-	if currentFrameName
-		and currentFrameName ~= allowedFrameName
-		and currentFrameName ~= transitionalFrameName then
-		FrameManager.closeCurrent()
-	end
-
-	if presentation.ShowUpgradesFrame and not upgradesFrame.Visible then
+	if presentation.ShowUpgradesFrame and not upgradesFrame.Visible and currentFrameName == nil then
 		requestTutorialFrameOpen("Upgrades", function()
 			local currentPresentation = getCurrentStepPresentation()
-			return currentStep == 10 and currentPresentation.ShowUpgradesFrame and not upgradesFrame.Visible
+			return currentStep == 10
+				and currentPresentation.ShowUpgradesFrame
+				and not upgradesFrame.Visible
+				and FrameManager.getCurrentFrameName() == nil
 		end)
 	end
 end
