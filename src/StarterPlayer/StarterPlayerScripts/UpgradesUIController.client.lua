@@ -23,6 +23,10 @@ local CLICK_SCALE = 0.95
 local TWEEN_INFO = TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 local MAX_CARRY_CAPACITY = 4
 local FRAME_OPEN_REFRESH_COOLDOWN = 0.75
+local TUTORIAL_FOCUS_UPGRADE_ID = TutorialConfiguration.TutorialCharacterUpgradeId
+local TUTORIAL_FOCUS_Z_INDEX = 55
+local TUTORIAL_FOCUS_BUTTON_BACKGROUND_Z_INDEX = 56
+local TUTORIAL_FOCUS_BUTTON_TEXT_Z_INDEX = 57
 
 local uiReferences = {}
 local lastUpgradeUiData = {}
@@ -32,6 +36,50 @@ local uiInitialized = false
 local lastVisibleOpenHandledAt = 0
 local upgradeTemplateCache: Frame? = nil
 local hasWarnedAboutMissingUpgradeTemplate = false
+
+local function applyGuiTreeZIndex(root: Instance?, zIndex: number)
+	if not root then
+		return
+	end
+
+	local function apply(instance: Instance)
+		if instance:IsA("GuiObject") then
+			instance.ZIndex = zIndex
+		end
+	end
+
+	apply(root)
+	for _, descendant in ipairs(root:GetDescendants()) do
+		apply(descendant)
+	end
+end
+
+local function setGuiObjectZIndex(instance: Instance?, zIndex: number)
+	if instance and instance:IsA("GuiObject") then
+		instance.ZIndex = zIndex
+	end
+end
+
+local function applyTutorialFocusButtonZIndex(button: Instance?)
+	if not button then
+		return
+	end
+
+	setGuiObjectZIndex(button:FindFirstChild("Background"), TUTORIAL_FOCUS_BUTTON_BACKGROUND_Z_INDEX)
+	setGuiObjectZIndex(button:FindFirstChild("Text"), TUTORIAL_FOCUS_BUTTON_TEXT_Z_INDEX)
+end
+
+local function applyTutorialFocusUpgradeZIndex(upgradeFrame: Instance)
+	applyGuiTreeZIndex(upgradeFrame, TUTORIAL_FOCUS_Z_INDEX)
+
+	local buttonsFrame = upgradeFrame:FindFirstChild("Buttons")
+	if not buttonsFrame then
+		return
+	end
+
+	applyTutorialFocusButtonZIndex(buttonsFrame:FindFirstChild("Money"))
+	applyTutorialFocusButtonZIndex(buttonsFrame:FindFirstChild("Robux"))
+end
 
 local function getUpgradeConfig(upgradeId: string): any?
 	for _, upgrade in ipairs(UpgradesConfig.Upgrades) do
@@ -407,6 +455,10 @@ local function initializeUI(forceRebuild: boolean?)
 		stripScripts(newUpgrade)
 		newUpgrade.Name = upgrade.Id
 		newUpgrade.Visible = true
+
+		if upgrade.Id == TUTORIAL_FOCUS_UPGRADE_ID then
+			applyTutorialFocusUpgradeZIndex(newUpgrade)
+		end
 
 		local titleLabel = newUpgrade:FindFirstChild("Text") :: TextLabel
 		if titleLabel then

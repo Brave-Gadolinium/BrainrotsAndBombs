@@ -47,6 +47,13 @@ type ActivePostTutorialCompletion = {
 	HideAt: number,
 }
 
+type TutorialHudBlackoutController = {
+	Hide: () -> (),
+	Sync: () -> (),
+	ClearDismissal: () -> (),
+	GetFlowForStep: (number) -> string?,
+}
+
 local currentStep = 0
 local currentPostTutorialStage = PostTutorialConfiguration.Stages.WaitingForCharacterMoney
 local activeBeam: Beam? = nil
@@ -111,6 +118,14 @@ local TUTORIAL_BOMB_PULSE_TWEEN_INFO = TweenInfo.new(0.38, Enum.EasingStyle.Sine
 local FRAME_MANAGER_NON_BLOCKING_ATTRIBUTE = "IgnoreFrameManagerBlocking"
 local tutorialFrameOpenDebounce: {[string]: number} = {}
 local tutorialFrameOpenPending: {[string]: boolean} = {}
+local TutorialHudBlackout: TutorialHudBlackoutController = {
+	Hide = function() end,
+	Sync = function() end,
+	ClearDismissal = function() end,
+	GetFlowForStep = function()
+		return nil
+	end,
+}
 
 local function debugTutorialLog(message: string)
 	if DEBUG_TUTORIAL then
@@ -1292,6 +1307,238 @@ findCharacterUpgradeButton = function(): GuiButton?
 	return nil
 end
 
+do
+	local TUTORIAL_HUD_BLACKOUT_Z_INDEX = 50
+	local tutorialHudBlackout: GuiObject? = nil
+	local tutorialHudBlackoutDismissedFlow: string? = nil
+	local tutorialHudBlackoutOriginalState: {
+		Visible: boolean,
+		Active: boolean,
+		ZIndex: number,
+		BackgroundColor3: Color3,
+		BackgroundTransparency: number,
+		BorderSizePixel: number,
+		Size: UDim2,
+		Position: UDim2,
+		AnchorPoint: Vector2,
+	}? = nil
+
+	local function findTutorialBombEntryBuyButton(): GuiButton?
+		local scrollingFrame = pickaxesFrame:FindFirstChild("ScrollingFrame") or pickaxesFrame:FindFirstChild("Scrolling")
+		if not scrollingFrame then
+			return nil
+		end
+
+		local bombEntry = scrollingFrame:FindFirstChild("Bomb 2")
+		if not bombEntry then
+			return nil
+		end
+
+		local buyButton = bombEntry:FindFirstChild("Buy", true)
+		if buyButton and buyButton:IsA("GuiButton") then
+			return buyButton
+		end
+
+		return nil
+	end
+
+	local function isBombShopBlackoutStep(step: number): boolean
+		return step == 7 or step == 8
+	end
+
+	local function isCharacterUpgradeBlackoutStep(step: number): boolean
+		return step == 9 or step == 10
+	end
+
+	TutorialHudBlackout.GetFlowForStep = function(step: number): string?
+		if isBombShopBlackoutStep(step) then
+			return "BombShop"
+		end
+
+		if isCharacterUpgradeBlackoutStep(step) then
+			return "CharacterUpgrade"
+		end
+
+		return nil
+	end
+
+	TutorialHudBlackout.ClearDismissal = function()
+		tutorialHudBlackoutDismissedFlow = nil
+	end
+
+	local function getTutorialHudBlackout(): GuiObject
+		if tutorialHudBlackout and tutorialHudBlackout.Parent then
+			return tutorialHudBlackout
+		end
+
+		local existingBlackout = hud:FindFirstChild("Blackout")
+		if existingBlackout and existingBlackout:IsA("GuiObject") then
+			tutorialHudBlackout = existingBlackout
+			return existingBlackout
+		end
+
+		local blackout = Instance.new("Frame")
+		blackout.Name = "Blackout"
+		blackout.Size = UDim2.fromScale(1, 1)
+		blackout.Position = UDim2.fromScale(0, 0)
+		blackout.AnchorPoint = Vector2.zero
+		blackout.BackgroundColor3 = Color3.new(0, 0, 0)
+		blackout.BackgroundTransparency = 0.45
+		blackout.BorderSizePixel = 0
+		blackout.Active = false
+		blackout.Visible = false
+		blackout.ZIndex = TUTORIAL_HUD_BLACKOUT_Z_INDEX
+		blackout.Parent = hud
+
+		tutorialHudBlackout = blackout
+		return blackout
+	end
+
+	local function showTutorialHudBlackout()
+		local blackout = getTutorialHudBlackout()
+		if not tutorialHudBlackoutOriginalState then
+			tutorialHudBlackoutOriginalState = {
+				Visible = blackout.Visible,
+				Active = blackout.Active,
+				ZIndex = blackout.ZIndex,
+				BackgroundColor3 = blackout.BackgroundColor3,
+				BackgroundTransparency = blackout.BackgroundTransparency,
+				BorderSizePixel = blackout.BorderSizePixel,
+				Size = blackout.Size,
+				Position = blackout.Position,
+				AnchorPoint = blackout.AnchorPoint,
+			}
+		end
+
+		blackout.Size = UDim2.fromScale(1, 1)
+		blackout.Position = UDim2.fromScale(0, 0)
+		blackout.AnchorPoint = Vector2.zero
+		blackout.BackgroundColor3 = Color3.new(0, 0, 0)
+		blackout.BackgroundTransparency = 0.45
+		blackout.BorderSizePixel = 0
+		blackout.ZIndex = TUTORIAL_HUD_BLACKOUT_Z_INDEX
+		blackout.Active = true
+		blackout.Visible = true
+	end
+
+	TutorialHudBlackout.Hide = function()
+		local blackout = tutorialHudBlackout
+		local originalState = tutorialHudBlackoutOriginalState
+		if not blackout or not originalState then
+			return
+		end
+
+		tutorialHudBlackoutOriginalState = nil
+		if not blackout.Parent then
+			return
+		end
+
+		blackout.Visible = originalState.Visible
+		blackout.Active = originalState.Active
+		blackout.ZIndex = originalState.ZIndex
+		blackout.BackgroundColor3 = originalState.BackgroundColor3
+		blackout.BackgroundTransparency = originalState.BackgroundTransparency
+		blackout.BorderSizePixel = originalState.BorderSizePixel
+		blackout.Size = originalState.Size
+		blackout.Position = originalState.Position
+		blackout.AnchorPoint = originalState.AnchorPoint
+	end
+
+	local function getTutorialHudBlackoutTargetButton(): GuiButton?
+		if isBombShopBlackoutStep(currentStep) then
+			return findBombBuyButton()
+		end
+
+		if isCharacterUpgradeBlackoutStep(currentStep) then
+			return findCharacterUpgradeButton()
+		end
+
+		return nil
+	end
+
+	local function isTutorialHudBlackoutTargetButton(button: GuiButton): boolean
+		if button == getTutorialHudBlackoutTargetButton() then
+			return true
+		end
+
+		return isBombShopBlackoutStep(currentStep) and button == findTutorialBombEntryBuyButton()
+	end
+
+	local function dismissTutorialHudBlackoutForCurrentStep()
+		local flow = TutorialHudBlackout.GetFlowForStep(currentStep)
+		tutorialHudBlackoutDismissedFlow = flow
+		TutorialHudBlackout.Hide()
+
+		if flow == "BombShop" then
+			task.defer(function()
+				if pickaxesFrame.Visible then
+					FrameManager.close("Pickaxes")
+				end
+			end)
+		elseif flow == "CharacterUpgrade" then
+			task.defer(function()
+				if upgradesFrame.Visible then
+					FrameManager.close("Upgrades")
+				end
+			end)
+		end
+	end
+
+	local function bindTutorialHudBlackoutDismissButton(button: GuiButton?)
+		if not button or button:GetAttribute("TutorialHudBlackoutDismissBound") == true then
+			return
+		end
+
+		button:SetAttribute("TutorialHudBlackoutDismissBound", true)
+		button.Activated:Connect(function()
+			if isTutorialHudBlackoutTargetButton(button) then
+				dismissTutorialHudBlackoutForCurrentStep()
+			end
+		end)
+	end
+
+	local function hasVisibleTutorialHudBlackoutTargetButton(): boolean
+		local targetButton = getTutorialHudBlackoutTargetButton()
+		if targetButton and targetButton.Visible then
+			return true
+		end
+
+		local bombEntryButton = if isBombShopBlackoutStep(currentStep) then findTutorialBombEntryBuyButton() else nil
+		return bombEntryButton ~= nil and bombEntryButton.Visible
+	end
+
+	local function shouldShowTutorialHudBlackout(): boolean
+		local currentFlow = TutorialHudBlackout.GetFlowForStep(currentStep)
+		if not currentFlow or tutorialHudBlackoutDismissedFlow == currentFlow then
+			return false
+		end
+
+		if isBombShopBlackoutStep(currentStep) and not pickaxesFrame.Visible then
+			return false
+		end
+
+		if isCharacterUpgradeBlackoutStep(currentStep) and not upgradesFrame.Visible then
+			return false
+		end
+
+		return hasVisibleTutorialHudBlackoutTargetButton()
+	end
+
+	TutorialHudBlackout.Sync = function()
+		local targetButton = getTutorialHudBlackoutTargetButton()
+		bindTutorialHudBlackoutDismissButton(targetButton)
+		if isBombShopBlackoutStep(currentStep) then
+			bindTutorialHudBlackoutDismissButton(findTutorialBombEntryBuyButton())
+		end
+
+		if shouldShowTutorialHudBlackout() then
+			showTutorialHudBlackout()
+		else
+			TutorialHudBlackout.Hide()
+		end
+	end
+end
+
 local function findBaseUpgradeSurfaceGui(): SurfaceGui?
 	local plot = Workspace:FindFirstChild("Plot_" .. player.Name)
 	if not plot then
@@ -2197,6 +2444,7 @@ local function refreshCurrentStep()
 
 	local savedStep = player:GetAttribute("OnboardingStep")
 	if type(savedStep) ~= "number" then
+		TutorialHudBlackout.Hide()
 		isRefreshingStep = false
 		return
 	end
@@ -2204,7 +2452,11 @@ local function refreshCurrentStep()
 	local clampedStep = math.clamp(savedStep, 1, TutorialConfiguration.FinalStep)
 	if currentStep ~= clampedStep then
 		local previousStep = currentStep
+		local previousBlackoutFlow = TutorialHudBlackout.GetFlowForStep(previousStep)
 		currentStep = clampedStep
+		if TutorialHudBlackout.GetFlowForStep(currentStep) ~= previousBlackoutFlow then
+			TutorialHudBlackout.ClearDismissal()
+		end
 		debugTutorialLog(("StepChanged %d -> %d"):format(previousStep, currentStep))
 
 		if currentStep == 7 and pickaxesFrame.Visible then
@@ -2231,6 +2483,7 @@ local function refreshCurrentStep()
 
 	applyStepPresentation()
 	syncTutorialActionPulse()
+	TutorialHudBlackout.Sync()
 	isRefreshingStep = false
 end
 
@@ -2281,7 +2534,13 @@ local function connectUiReporting()
 				if currentStep == 7 or currentStep == 8 then
 					reportAction("ShopOpened")
 				end
-				task.defer(refreshCurrentStep)
+			end
+			TutorialHudBlackout.Sync()
+			task.defer(refreshCurrentStep)
+		end)
+		pickaxesFrame.DescendantAdded:Connect(function(descendant)
+			if descendant:IsA("GuiButton") then
+				task.defer(TutorialHudBlackout.Sync)
 			end
 		end)
 	end
@@ -2293,7 +2552,13 @@ local function connectUiReporting()
 				debugTutorialLog("UpgradesFrame Visible")
 				reportAction("UpgradesOpened")
 			end
+			TutorialHudBlackout.Sync()
 			task.defer(refreshCurrentStep)
+		end)
+		upgradesFrame.DescendantAdded:Connect(function(descendant)
+			if descendant:IsA("GuiButton") then
+				task.defer(TutorialHudBlackout.Sync)
+			end
 		end)
 	end
 
@@ -2354,8 +2619,10 @@ player.CharacterAdded:Connect(function(character)
 	hasAppliedTutorialCompletionCleanup = false
 	restoreTutorialUiMask()
 	hideTutorialGuiOverlay()
+	TutorialHudBlackout.Hide()
 	clearAllTargets(true)
 	guiOverlaySuppressedUntil = 0
+	TutorialHudBlackout.ClearDismissal()
 	connectUiReporting()
 	refreshCurrentStep()
 end)

@@ -67,4 +67,4 @@ Purpose:
 Notes:
 - `RequestGroupReward` is a `RemoteFunction` in `ReplicatedStorage.Events` used by join/group reward surfaces such as `JoinLikeStand`
 - `ShowCashPopUp` and `ShowCandyPopUp` are lightweight one-way UI feedback events consumed by the shared `PopUpController`
-- FTUE analytics funnel steps are reported under the `Tutor_17/04` funnel name while player save data keeps the existing `TutorialFTUE` progress key for compatibility
+- FTUE analytics funnel steps are reported under the `Tutor_28/04` funnel name while player save data keeps the existing `TutorialFTUE` progress key for compatibility

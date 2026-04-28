@@ -37,6 +37,9 @@ local LOCKED_PICKAXE_ENTRY_BACKGROUND = Color3.fromRGB(0, 0, 0)
 local DEFAULT_PICKAXE_ENTRY_BACKGROUND = Color3.fromRGB(255, 255, 255)
 local PICKAXE_PANEL_BACKGROUND_TRANSPARENCY = 0.2
 local SELECTED_PICKAXE_BACKGROUND = Color3.fromRGB(255, 170, 0)
+local TUTORIAL_FOCUS_PICKAXE_ID = "Bomb 2"
+local TUTORIAL_FOCUS_Z_INDEX = 55
+local TUTORIAL_FOCUS_Z_INDEX_ATTRIBUTE = "TutorialFocusOriginalZIndex"
 
 type TextVisualSnapshot = {
 	TextColor3: Color3,
@@ -52,6 +55,51 @@ type ButtonVisualSnapshot = {
 }
 
 local buttonVisualSnapshots: {[GuiButton]: ButtonVisualSnapshot} = {}
+
+local function applyGuiTreeZIndex(root: Instance?, zIndex: number)
+	if not root then
+		return
+	end
+
+	local function apply(instance: Instance)
+		if not instance:IsA("GuiObject") then
+			return
+		end
+
+		if instance:GetAttribute(TUTORIAL_FOCUS_Z_INDEX_ATTRIBUTE) == nil then
+			instance:SetAttribute(TUTORIAL_FOCUS_Z_INDEX_ATTRIBUTE, instance.ZIndex)
+		end
+		instance.ZIndex = zIndex
+	end
+
+	apply(root)
+	for _, descendant in ipairs(root:GetDescendants()) do
+		apply(descendant)
+	end
+end
+
+local function restoreGuiTreeZIndex(root: Instance?)
+	if not root then
+		return
+	end
+
+	local function restore(instance: Instance)
+		if not instance:IsA("GuiObject") then
+			return
+		end
+
+		local originalZIndex = instance:GetAttribute(TUTORIAL_FOCUS_Z_INDEX_ATTRIBUTE)
+		if type(originalZIndex) == "number" then
+			instance.ZIndex = originalZIndex
+			instance:SetAttribute(TUTORIAL_FOCUS_Z_INDEX_ATTRIBUTE, nil)
+		end
+	end
+
+	restore(root)
+	for _, descendant in ipairs(root:GetDescendants()) do
+		restore(descendant)
+	end
+end
 
 local function setupButtonAnimation(button: GuiButton)
 	local uiScale = button:FindFirstChildOfClass("UIScale")
@@ -530,6 +578,12 @@ local function updateShowcase(pickaxesFrame: Frame, pickaxeId: string, shouldRep
 		return
 	end
 
+	if pickaxeId == TUTORIAL_FOCUS_PICKAXE_ID then
+		applyGuiTreeZIndex(showcaseFrame, TUTORIAL_FOCUS_Z_INDEX)
+	else
+		restoreGuiTreeZIndex(showcaseFrame)
+	end
+
 	local isOwned = currentOwnedPickaxes[pickaxeId] == true
 	local isEquipped = currentEquippedPickaxe == pickaxeId
 	local isLockedForSoftPurchase = not isOwned and currentNextAvailableId ~= nil and pickaxeId ~= currentNextAvailableId
@@ -831,6 +885,10 @@ local function initializeUI(preferHighestOwned: boolean?, focusNextAvailable: bo
 
 				requestEvent:FireServer(pickaxe.Id)
 			end)
+		end
+
+		if pickaxe.Id == TUTORIAL_FOCUS_PICKAXE_ID then
+			applyGuiTreeZIndex(newTemplate, TUTORIAL_FOCUS_Z_INDEX)
 		end
 
 		bindTemplateSelection(newTemplate, function()
