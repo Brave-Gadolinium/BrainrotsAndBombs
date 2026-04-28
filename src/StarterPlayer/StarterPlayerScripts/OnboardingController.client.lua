@@ -108,6 +108,7 @@ local DEFAULT_CAMERA_FOV = 70
 local TUTORIAL_FRAME_OPEN_COOLDOWN = 0.75
 local TUTORIAL_BOMB_PULSE_SCALE = 1.4
 local TUTORIAL_BOMB_PULSE_TWEEN_INFO = TweenInfo.new(0.38, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true)
+local FRAME_MANAGER_NON_BLOCKING_ATTRIBUTE = "IgnoreFrameManagerBlocking"
 local tutorialFrameOpenDebounce: {[string]: number} = {}
 local tutorialFrameOpenPending: {[string]: boolean} = {}
 
@@ -959,8 +960,8 @@ local function shouldBackpackBeVisibleOutsideTutorial(): boolean
 end
 
 local function restoreTutorialUiMask()
-	pickaxesFrame:SetAttribute("IgnoreFrameManagerBlocking", false)
-	upgradesFrame:SetAttribute("IgnoreFrameManagerBlocking", false)
+	pickaxesFrame:SetAttribute(FRAME_MANAGER_NON_BLOCKING_ATTRIBUTE, false)
+	upgradesFrame:SetAttribute(FRAME_MANAGER_NON_BLOCKING_ATTRIBUTE, false)
 	hideTutorialBombGuidance()
 	hideTutorialActionPulse()
 
@@ -1429,9 +1430,6 @@ local function applyMaskToRoot(root: Instance, allowedLineage: {[Instance]: bool
 end
 
 local function syncTutorialFrames(presentation)
-	pickaxesFrame:SetAttribute("IgnoreFrameManagerBlocking", false)
-	upgradesFrame:SetAttribute("IgnoreFrameManagerBlocking", false)
-
 	local allowedFrameName: string? = nil
 	if presentation.ShowPickaxesFrame then
 		allowedFrameName = "Pickaxes"
@@ -1446,6 +1444,15 @@ local function syncTutorialFrames(presentation)
 	elseif currentStep == 9 then
 		transitionalFrameName = "Upgrades"
 	end
+
+	pickaxesFrame:SetAttribute(
+		FRAME_MANAGER_NON_BLOCKING_ATTRIBUTE,
+		allowedFrameName == "Pickaxes" or transitionalFrameName == "Pickaxes"
+	)
+	upgradesFrame:SetAttribute(
+		FRAME_MANAGER_NON_BLOCKING_ATTRIBUTE,
+		allowedFrameName == "Upgrades" or transitionalFrameName == "Upgrades"
+	)
 
 	if currentFrameName
 		and currentFrameName ~= allowedFrameName

@@ -604,6 +604,25 @@ local function reconcileStepWithCurrentState(player: Player, profile: any): numb
 		return 3
 	end
 
+	if currentStep <= BUY_BOMB_TWO_STEP and hasPurchasedAdditionalBomb(player, profile) then
+		setCurrentStep(player, profile, CHARACTER_UPGRADE_OPEN_STEP)
+		return CHARACTER_UPGRADE_OPEN_STEP
+	end
+
+	if currentStep <= CHARACTER_UPGRADE_PURCHASE_STEP
+		and hasSpecificCharacterUpgrade(profile, TutorialConfiguration.TutorialCharacterUpgradeId)
+	then
+		consumeTutorialCharacterUpgrade(profile)
+		setCurrentStep(player, profile, BASE_UPGRADE_STEP)
+		return BASE_UPGRADE_STEP
+	end
+
+	if currentStep <= BASE_UPGRADE_STEP and hasBaseSlotUpgrade(profile) then
+		consumeTutorialBaseUpgrade(profile)
+		setCurrentStep(player, profile, TutorialConfiguration.FinalStep)
+		return TutorialConfiguration.FinalStep
+	end
+
 	return currentStep
 end
 
