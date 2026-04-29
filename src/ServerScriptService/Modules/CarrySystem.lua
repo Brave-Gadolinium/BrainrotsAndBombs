@@ -37,8 +37,9 @@ local pendingInitialZoneEnter: {[Player]: boolean} = {}
 local lastLimitNotif: {[Player]: number} = {}
 local lastBombRepairAttempt: {[Player]: number} = {}
 local mineIdleState: {[Player]: {LastPosition: Vector3, LastMovedAt: number}} = {}
-local ALLOW_MANUAL_CARRY_DROP = false
+local ALLOW_MANUAL_CARRY_DROP = true
 local DEBUG_BRAINROT_TRACE = false
+local CARRIED_ITEM_COUNT_ATTRIBUTE = "CarriedItemCount"
 
 -- [ CONFIG ]
 local CHECK_INTERVAL = 0.2 
@@ -190,6 +191,11 @@ local function traceDestroyCall(label: string, instance: Instance?)
 
 	print(("[DESTROY CALL][CarrySystem][%s] %s"):format(label, summarizeTraceInstance(instance)))
 	warn(debug.traceback())
+end
+
+local function syncCarriedItemCount(player: Player)
+	local items = carryingData[player]
+	player:SetAttribute(CARRIED_ITEM_COUNT_ATTRIBUTE, if items then #items else 0)
 end
 
 local function getFallbackDropPosition(): (Vector3, Vector3)
@@ -460,6 +466,7 @@ function CarrySystem.AddItemToCarry(player: Player, name: string, mutation: stri
 			EventAttributes = eventAttributes,
 			VisualModel = visualModel
 		})
+		syncCarriedItemCount(player)
 
 		local token = type(eventAttributes) == "table" and eventAttributes.EventBrainrotToken or nil
 		local roundBrainrotEventManager = getRoundBrainrotEventManager()
@@ -484,6 +491,7 @@ function CarrySystem.AddItemToCarry(player: Player, name: string, mutation: stri
 	end
 
 	logCarryTrace(player, ("AddItemToCarry rejected carryLimit=%s"):format(tostring(PlayerController:GetProfile(player) and PlayerController:GetProfile(player).Data.CarryCapacity or "nil")))
+	syncCarriedItemCount(player)
 
 	return false
 end
@@ -493,6 +501,7 @@ function CarrySystem.ClearAllItems(player: Player)
 	logCarryTrace(player, ("ClearAllItems begin items=%s"):format(summarizeCarryEntries(previousItems)))
 	clearVisualStack(player)
 	carryingData[player] = {}
+	syncCarriedItemCount(player)
 	logCarryTrace(player, "ClearAllItems end")
 end
 
@@ -541,8 +550,10 @@ function CarrySystem.DropOneItemAtFeet(player: Player): boolean
 	local itemData = table.remove(items, #items)
 	if not itemData then
 		logCarryTrace(player, "DropOneItemAtFeet aborted noItemAfterRemove")
+		syncCarriedItemCount(player)
 		return false
 	end
+	syncCarriedItemCount(player)
 
 	if itemData.VisualModel and itemData.VisualModel.Parent then
 		traceDestroyCall("DropOneItemAtFeet.visualModel", itemData.VisualModel)
@@ -748,6 +759,7 @@ end
 
 local function processZoneEnter(player: Player, isInitialZoneEnter: boolean?)
 	if not carryingData[player] then carryingData[player] = {} end
+	syncCarriedItemCount(player)
 	logCarryTrace(player, "processZoneEnter begin")
 	TutorialService:HandleMineZoneEntered(player)
 	AnalyticsFunnelsService:HandleMineZoneEntered(player)

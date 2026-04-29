@@ -1,7 +1,9 @@
 --!strict
 
+local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
 
@@ -14,6 +16,19 @@ local FADE_OUT_INFO = TweenInfo.new(FADE_OUT_DURATION, Enum.EasingStyle.Quad, En
 local MAX_VISIBLE_TIME = 5
 local READINESS_POLL_INTERVAL = 0.05
 local LOG_PREFIX = "[LoadingScreenController]"
+local ROTATE_TAG = "RotateGui"
+local SIZE_TAG = "SizeGui"
+local LOADING_ROTATE_ATTRIBUTE = "LoadingRotate"
+local LOADING_PULSE_ATTRIBUTE = "LoadingPulse"
+local LOADING_DOTS_ATTRIBUTE = "LoadingDots"
+local LOADING_ANIMATION_SCALE_NAME = "LoadingAnimationScale"
+local LOADING_ROTATION_DEGREES_PER_SECOND = 180
+local LOADING_PULSE_FREQUENCY = 2.4
+local LOADING_PULSE_AMPLITUDE = 0.045
+local LOADING_DOTS_INTERVAL = 0.35
+local ROTATING_NAME_TOKENS = { "spinner", "loadingicon", "loadingimage", "loader", "rotator", "circle", "ring", "spin", "animation" }
+local PULSE_NAME_TOKENS = { "loadinglogo", "logo", "loadingicon", "loadingimage", "icon" }
+local DOTS_TEXT_NAME_TOKENS = { "loadingtext", "loadinglabel", "statuslabel", "progresslabel" }
 
 local function log(message: string, ...: any)
 	print(LOG_PREFIX, message, ...)
@@ -102,6 +117,136 @@ local function setSliderProgress(fill: GuiObject?, progress: number)
 	fill.Size = UDim2.new(progress, 0, currentSize.Y.Scale, currentSize.Y.Offset)
 end
 
+local function hasAttributeFlag(instance: Instance, attributeName: string): boolean
+	return instance:GetAttribute(attributeName) == true
+end
+
+local function hasNameToken(instance: Instance, tokens: {string}): boolean
+	local normalizedName = string.lower(instance.Name):gsub("%W", "")
+	for _, token in ipairs(tokens) do
+		if string.find(normalizedName, token, 1, true) ~= nil then
+			return true
+		end
+	end
+
+	return false
+end
+
+local function findAnimationTarget(
+	root: Instance,
+	attributeName: string,
+	tagName: string,
+	fallbackNameTokens: {string}
+): GuiObject?
+	for _, descendant in ipairs(root:GetDescendants()) do
+		if
+			descendant:IsA("GuiObject")
+			and (hasAttributeFlag(descendant, attributeName) or CollectionService:HasTag(descendant, tagName))
+		then
+			return descendant
+		end
+	end
+
+	for _, descendant in ipairs(root:GetDescendants()) do
+		if descendant:IsA("GuiObject") and hasNameToken(descendant, fallbackNameTokens) then
+			return descendant
+		end
+	end
+
+	return nil
+end
+
+local function findDotsText(root: Instance): TextLabel?
+	for _, descendant in ipairs(root:GetDescendants()) do
+		if
+			descendant:IsA("TextLabel")
+			and (hasAttributeFlag(descendant, LOADING_DOTS_ATTRIBUTE) or hasNameToken(descendant, DOTS_TEXT_NAME_TOKENS))
+		then
+			return descendant
+		end
+	end
+
+	return nil
+end
+
+local function ensureLoadingScale(guiObject: GuiObject): UIScale
+	local existing = guiObject:FindFirstChild(LOADING_ANIMATION_SCALE_NAME)
+	if existing and existing:IsA("UIScale") then
+		return existing
+	end
+
+	local scale = Instance.new("UIScale")
+	scale.Name = LOADING_ANIMATION_SCALE_NAME
+	scale.Scale = 1
+	scale.Parent = guiObject
+	return scale
+end
+
+local function startLoadingAnimations(root: Instance)
+	local rotateTarget = findAnimationTarget(root, LOADING_ROTATE_ATTRIBUTE, ROTATE_TAG, ROTATING_NAME_TOKENS)
+	local pulseTarget = findAnimationTarget(root, LOADING_PULSE_ATTRIBUTE, SIZE_TAG, PULSE_NAME_TOKENS)
+	local dotsText = findDotsText(root)
+
+	if not rotateTarget and not pulseTarget and not dotsText then
+		log("No loading animation targets found")
+		return function() end
+	end
+
+	log(
+		"Starting loading animations",
+		("rotateTarget=%s pulseTarget=%s dotsText=%s"):format(
+			if rotateTarget then rotateTarget:GetFullName() else "nil",
+			if pulseTarget then pulseTarget:GetFullName() else "nil",
+			if dotsText then dotsText:GetFullName() else "nil"
+		)
+	)
+
+	local baseRotation = if rotateTarget then rotateTarget.Rotation else 0
+	local rotationOffset = 0
+	local pulseElapsed = 0
+	local pulseScale = if pulseTarget then ensureLoadingScale(pulseTarget) else nil
+	local dotsElapsed = 0
+	local dotsCount = 0
+	local baseDotsText = if dotsText then (dotsText.Text:gsub("%.*$", "")) else ""
+
+	local connection = RunService.RenderStepped:Connect(function(dt: number)
+		if rotateTarget and rotateTarget.Parent and rotateTarget:IsDescendantOf(root) then
+			rotationOffset = (rotationOffset + LOADING_ROTATION_DEGREES_PER_SECOND * dt) % 360
+			rotateTarget.Rotation = baseRotation + rotationOffset
+		end
+
+		if pulseScale and pulseScale.Parent then
+			pulseElapsed += dt
+			pulseScale.Scale = 1 + math.sin(pulseElapsed * LOADING_PULSE_FREQUENCY * math.pi * 2) * LOADING_PULSE_AMPLITUDE
+		end
+
+		if dotsText and dotsText.Parent and dotsText:IsDescendantOf(root) then
+			dotsElapsed += dt
+			if dotsElapsed >= LOADING_DOTS_INTERVAL then
+				dotsElapsed = 0
+				dotsCount = (dotsCount % 3) + 1
+				dotsText.Text = baseDotsText .. string.rep(".", dotsCount)
+			end
+		end
+	end)
+
+	return function()
+		connection:Disconnect()
+
+		if rotateTarget and rotateTarget.Parent then
+			rotateTarget.Rotation = baseRotation
+		end
+
+		if pulseScale and pulseScale.Parent then
+			pulseScale.Scale = 1
+		end
+
+		if dotsText and dotsText.Parent then
+			dotsText.Text = baseDotsText
+		end
+	end
+end
+
 local function isClientReady(): boolean
 	local serverSystemsReady = Workspace:GetAttribute("ServerSystemsReady") == true
 	local mineStartupPlayable = Workspace:GetAttribute("MineStartupPlayable") == true
@@ -181,6 +326,7 @@ local function playLoadingScreen()
 		slider.Visible = true
 	end
 	log("Initialized loading screen visuals")
+	local stopLoadingAnimations = startLoadingAnimations(loadingScreen)
 
 	local initialProgress = getStartupProgress()
 	log("Initial startup progress", initialProgress)
@@ -231,6 +377,7 @@ local function playLoadingScreen()
 	fadeOutTween:Destroy()
 	log("Fade-out completed, destroying loading screen")
 
+	stopLoadingAnimations()
 	loadingScreen:Destroy()
 	log("Lifecycle complete")
 end

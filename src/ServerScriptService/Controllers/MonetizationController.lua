@@ -78,6 +78,10 @@ local function logStorePurchaseSuccess(player: Player, purchaseKind: string, pur
 	})
 end
 
+local function isRewardedAdReceipt(receiptInfo): boolean
+	return receiptInfo.ProductPurchaseChannel == Enum.ProductPurchaseChannel.AdReward
+end
+
 local function getTutorialService()
 	if not TutorialService then
 		local tutorialModule = ServerScriptService.Modules:FindFirstChild("TutorialService")
@@ -328,9 +332,17 @@ function MonetizationController.ProcessReceipt(receiptInfo)
 
 		local endsAt = BoosterService:ActivateTimedBooster(player, productName)
 		if endsAt > 0 then
-			logStorePurchaseSuccess(player, "product", productId, productName, "robux")
+			local fromRewardedAd = isRewardedAdReceipt(receiptInfo)
+			local paymentType = if fromRewardedAd then "rewarded_ad" else "robux"
+			local boosterConfig = ProductConfigurations.Boosters[productName]
+			local displayName = if type(boosterConfig) == "table" and type(boosterConfig.DisplayName) == "string"
+				then boosterConfig.DisplayName
+				else productName
+
+			logStorePurchaseSuccess(player, "product", productId, productName, paymentType, if fromRewardedAd then "rewarded_ad" else nil)
 			if notif then
-				notif:FireClient(player, productName .. " activated for 10 minutes!", "Success")
+				local sourceText = if fromRewardedAd then " from ad" else ""
+				notif:FireClient(player, displayName .. " activated" .. sourceText .. " for 10 minutes!", "Success")
 			end
 			playPurchaseEffects(player)
 			return Enum.ProductPurchaseDecision.PurchaseGranted

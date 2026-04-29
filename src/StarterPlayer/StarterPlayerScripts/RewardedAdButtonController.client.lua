@@ -29,8 +29,13 @@ local subtitleLabel: TextLabel? = nil
 local buttonStroke: UIStroke? = nil
 local requestSerial = 0
 local requestPending = false
+local rewardedAdUnavailable = false
 
 local function isRewardedAdConfigured(): boolean
+	if rewardedAdUnavailable then
+		return false
+	end
+
 	local rewardKey = ProductConfigurations.PrimaryRewardedAdKey
 	if type(rewardKey) ~= "string" or rewardKey == "" then
 		return false
@@ -307,12 +312,19 @@ local function ensureButton(): TextButton?
 	return newButton
 end
 
-rewardedAdResultEvent.OnClientEvent:Connect(function(status: string, message: string?)
+rewardedAdResultEvent.OnClientEvent:Connect(function(status: string, message: string?, rewardKey: string?)
+	if type(rewardKey) == "string" and rewardKey ~= ProductConfigurations.PrimaryRewardedAdKey then
+		return
+	end
+
 	requestPending = false
+	if status == "Unavailable" then
+		rewardedAdUnavailable = true
+	end
 	if buttonScale then
 		TweenService:Create(buttonScale, TWEEN_INFO, {Scale = 1}):Play()
 	end
-	updateButtonVisuals()
+	ensureButton()
 
 	if status ~= "Success" and type(message) == "string" and message ~= "" then
 		NotificationManager.show(message, "Error")

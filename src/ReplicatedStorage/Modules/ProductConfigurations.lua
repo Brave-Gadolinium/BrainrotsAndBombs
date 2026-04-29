@@ -161,6 +161,15 @@ ProductConfigurations.RewardedAdRewards = {
 	}
 }
 
+ProductConfigurations.RewardedAdBoosters = {
+	["MegaExplosion"] = {
+		PlacementId = nil,
+	},
+	["Shield"] = {
+		PlacementId = nil,
+	},
+}
+
 function ProductConfigurations.GetProductById(id: number)
 	for name, productId in pairs(ProductConfigurations.Products) do
 		if productId == id then return name end
