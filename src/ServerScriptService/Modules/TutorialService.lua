@@ -25,7 +25,8 @@ local postTutorialCompletionEvent: RemoteEvent? = nil
 local Templates = ReplicatedStorage:WaitForChild("Templates")
 local ConfettiTemplate = Templates:WaitForChild("Confetti")
 local CURRENT_TUTORIAL_VERSION = 6
-local RECENT_TUTORIAL_ANALYTICS_KEY = "Tutor_27_04"
+local RECENT_TUTORIAL_ANALYTICS_KEY = "Tutor_28_04"
+local PREVIOUS_RECENT_TUTORIAL_ANALYTICS_KEY = "Tutor_27_04"
 local PREVIOUS_TUTORIAL_ANALYTICS_KEY = "Tutor_24_04"
 local LEGACY_TUTORIAL_ANALYTICS_KEY = "Tutor_23_04"
 local OLDEST_TUTORIAL_ANALYTICS_KEY = "Tutor_22_04"
@@ -567,6 +568,7 @@ local function migrateTutorialProgress(profile: any)
 	profile.Data.OnboardingStep = math.clamp(currentStep, 1, TutorialConfiguration.FinalStep)
 	if type(profile.Data.AnalyticsFunnels) == "table" and type(profile.Data.AnalyticsFunnels.OneTime) == "table" then
 		profile.Data.AnalyticsFunnels.OneTime[RECENT_TUTORIAL_ANALYTICS_KEY] = nil
+		profile.Data.AnalyticsFunnels.OneTime[PREVIOUS_RECENT_TUTORIAL_ANALYTICS_KEY] = nil
 		profile.Data.AnalyticsFunnels.OneTime[PREVIOUS_TUTORIAL_ANALYTICS_KEY] = nil
 		profile.Data.AnalyticsFunnels.OneTime[LEGACY_TUTORIAL_ANALYTICS_KEY] = nil
 		profile.Data.AnalyticsFunnels.OneTime[OLDEST_TUTORIAL_ANALYTICS_KEY] = nil

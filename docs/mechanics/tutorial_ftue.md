@@ -28,7 +28,7 @@ Core flow:
 UI nuances:
 - `TutorialConfiguration` owns step presentations and targets.
 - `TutorialUiConfiguration` owns FTUE UI-specific exceptions such as persistent money visibility, retry targets for delayed buttons, and restore policies for special controls.
-- FTUE analytics step events are sent to the `Tutor_28/04` funnel while server save data keeps the legacy `TutorialFTUE` progress key so partially completed profiles continue safely.
+- FTUE analytics step events are sent to the `Tutor_29/04` funnel while server save data keeps legacy tutorial funnel progress keys so partially completed profiles continue safely.
 - Guided GUI targets now use prebuilt `TutorialCursor` descendants inside the relevant button/proxy, toggling `Visible` on while the FTUE step is active and restoring the original hidden state afterwards.
 - The base upgrade surface button preserves its original outside-tutorial visibility snapshot so finishing the tutorial does not restore it to a hidden state.
 - Step `10` auto-opening of `Upgrades` is now debounced, and shared frame opening uses a cooldown so the tutorial cannot pile up repeated open requests while the UI is still transitioning.

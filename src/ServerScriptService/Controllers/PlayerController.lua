@@ -39,8 +39,9 @@ local LIMITED_TIME_COLLECT_ALL_DURATION = math.max(0, math.floor(tonumber(Limite
 
 local GROUP_ID = 0 
 local CURRENT_TUTORIAL_VERSION = 6
-local CURRENT_TUTORIAL_FUNNEL_KEY = "Tutor_28_04"
-local RECENT_TUTORIAL_FUNNEL_KEY = "Tutor_27_04"
+local CURRENT_TUTORIAL_FUNNEL_KEY = "Tutor_29_04"
+local RECENT_TUTORIAL_FUNNEL_KEY = "Tutor_28_04"
+local PREVIOUS_RECENT_TUTORIAL_FUNNEL_KEY = "Tutor_27_04"
 local PREVIOUS_TUTORIAL_FUNNEL_KEY = "Tutor_24_04"
 local LEGACY_TUTORIAL_FUNNEL_KEY = "Tutor_23_04"
 local OLDEST_TUTORIAL_FUNNEL_KEY = "Tutor_22_04"
@@ -1406,6 +1407,11 @@ local function onPlayerAdded(player: Player)
 		0,
 		CURRENT_TUTORIAL_FUNNEL_MAX_STEP
 	)
+	local previousRecentTutorialFunnelStep = math.clamp(
+		tonumber(profile.Data.AnalyticsFunnels.OneTime[PREVIOUS_RECENT_TUTORIAL_FUNNEL_KEY]) or 0,
+		0,
+		CURRENT_TUTORIAL_FUNNEL_MAX_STEP
+	)
 	local previousTutorialFunnelStep = remapPreviousTutorialFunnelStep(
 		profile.Data.AnalyticsFunnels.OneTime[PREVIOUS_TUTORIAL_FUNNEL_KEY]
 	)
@@ -1424,6 +1430,7 @@ local function onPlayerAdded(player: Player)
 	local normalizedTutorialFunnelStep = math.max(
 		currentTutorialFunnelStep,
 		recentTutorialFunnelStep,
+		previousRecentTutorialFunnelStep,
 		previousTutorialFunnelStep,
 		legacyTutorialFunnelStep,
 		oldestTutorialFunnelStep,
@@ -1434,6 +1441,7 @@ local function onPlayerAdded(player: Player)
 	profile.Data.OnboardingFunnelStep = normalizedTutorialFunnelStep
 	profile.Data.AnalyticsFunnels.OneTime[CURRENT_TUTORIAL_FUNNEL_KEY] = normalizedTutorialFunnelStep
 	profile.Data.AnalyticsFunnels.OneTime[RECENT_TUTORIAL_FUNNEL_KEY] = nil
+	profile.Data.AnalyticsFunnels.OneTime[PREVIOUS_RECENT_TUTORIAL_FUNNEL_KEY] = nil
 	profile.Data.AnalyticsFunnels.OneTime[PREVIOUS_TUTORIAL_FUNNEL_KEY] = nil
 	profile.Data.AnalyticsFunnels.OneTime[LEGACY_TUTORIAL_FUNNEL_KEY] = nil
 	profile.Data.AnalyticsFunnels.OneTime[OLDEST_TUTORIAL_FUNNEL_KEY] = nil

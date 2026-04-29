@@ -33,10 +33,10 @@ local purchaseAttributions: {[Player]: {[string]: PurchaseAttribution}} = {}
 local autoBombToggleSurfaces: {[Player]: {Surface: string, ExpiresAt: number}} = {}
 local initialized = false
 
-local TUTORIAL_VERSION = "tutor_28_04"
-local TUTORIAL_FUNNEL_KEY = "Tutor_28_04"
-local TUTORIAL_FUNNEL_NAME = "Tutor_28/04"
-local LEGACY_TUTORIAL_FUNNEL_KEYS = {"Tutor_27_04", "Tutor_24_04", "Tutor_23_04", "Tutor_22_04", "TutorialFTUE"}
+local TUTORIAL_VERSION = "tutor_29_04"
+local TUTORIAL_FUNNEL_KEY = "Tutor_29_04"
+local TUTORIAL_FUNNEL_NAME = "Tutor_29/04"
+local LEGACY_TUTORIAL_FUNNEL_KEYS = {"Tutor_28_04", "Tutor_27_04", "Tutor_24_04", "Tutor_23_04", "Tutor_22_04", "TutorialFTUE"}
 local TUTORIAL_ENTERED_MARKER_KEY = "tutorial_entered"
 local TUTORIAL_COMPLETED_MARKER_KEY = "tutorial_completed"
 local TUTORIAL_SKIPPED_MARKER_KEY = "tutorial_skipped"
