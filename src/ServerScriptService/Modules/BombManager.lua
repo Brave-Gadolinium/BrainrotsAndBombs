@@ -1180,7 +1180,21 @@ local function resolveNukeBombData(player: Player): (any, string?)
 	return nil, nil
 end
 
+local function getNukeSpawnPosition(): Vector3?
+	local spawnPart = Workspace:FindFirstChild("NukeSpawn")
+	if spawnPart and spawnPart:IsA("BasePart") then
+		return spawnPart.Position
+	end
+
+	return nil
+end
+
 local function getNukeDropPosition(targetPosition: Vector3, zonePart: BasePart): Vector3
+	local configuredSpawnPosition = getNukeSpawnPosition()
+	if configuredSpawnPosition then
+		return configuredSpawnPosition
+	end
+
 	local relativePosition = zonePart.CFrame:PointToObjectSpace(targetPosition)
 	local halfSize = zonePart.Size * 0.5
 	local clampedLocalPosition = Vector3.new(
