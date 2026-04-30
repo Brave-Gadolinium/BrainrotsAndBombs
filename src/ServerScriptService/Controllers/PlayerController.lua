@@ -43,13 +43,14 @@ local LIMITED_TIME_COLLECT_ALL_DURATION = math.max(0, math.floor(tonumber(Limite
 
 local GROUP_ID = 0 
 local CURRENT_TUTORIAL_VERSION = 6
-local CURRENT_TUTORIAL_FUNNEL_KEY = "Tutor_29_04"
-local RECENT_TUTORIAL_FUNNEL_KEY = "Tutor_28_04"
-local PREVIOUS_RECENT_TUTORIAL_FUNNEL_KEY = "Tutor_27_04"
-local PREVIOUS_TUTORIAL_FUNNEL_KEY = "Tutor_24_04"
-local LEGACY_TUTORIAL_FUNNEL_KEY = "Tutor_23_04"
-local OLDEST_TUTORIAL_FUNNEL_KEY = "Tutor_22_04"
-local OLDEST_LEGACY_TUTORIAL_FUNNEL_KEY = "TutorialFTUE"
+local CURRENT_TUTORIAL_FUNNEL_KEY = "Tutor_30_04"
+local RECENT_TUTORIAL_FUNNEL_KEY = "Tutor_29_04"
+local PREVIOUS_RECENT_TUTORIAL_FUNNEL_KEY = "Tutor_28_04"
+local PREVIOUS_TUTORIAL_FUNNEL_KEY = "Tutor_27_04"
+local LEGACY_TUTORIAL_FUNNEL_KEY = "Tutor_24_04"
+local OLDEST_TUTORIAL_FUNNEL_KEY = "Tutor_23_04"
+local OLDEST_LEGACY_TUTORIAL_FUNNEL_KEY = "Tutor_22_04"
+local ORIGINAL_TUTORIAL_FUNNEL_KEY = "TutorialFTUE"
 local CURRENT_TUTORIAL_FUNNEL_MAX_STEP = TutorialConfiguration.FinalStep
 
 local function remapLegacyTutorialFunnelStep(step: any): number
@@ -1773,6 +1774,10 @@ local function onPlayerAdded(player: Player)
 		profile.Data.AnalyticsFunnels.OneTime[OLDEST_LEGACY_TUTORIAL_FUNNEL_KEY],
 		2
 	)
+	local originalTutorialFunnelStep = remapStoredTutorialFunnelStep(
+		profile.Data.AnalyticsFunnels.OneTime[ORIGINAL_TUTORIAL_FUNNEL_KEY],
+		1
+	)
 	local onboardingTutorialFunnelStep = remapStoredTutorialFunnelStep(profile.Data.OnboardingFunnelStep, tutorialVersion)
 	local normalizedTutorialFunnelStep = math.max(
 		currentTutorialFunnelStep,
@@ -1782,6 +1787,7 @@ local function onPlayerAdded(player: Player)
 		legacyTutorialFunnelStep,
 		oldestTutorialFunnelStep,
 		oldestLegacyTutorialFunnelStep,
+		originalTutorialFunnelStep,
 		onboardingTutorialFunnelStep
 	)
 
@@ -1793,6 +1799,7 @@ local function onPlayerAdded(player: Player)
 	profile.Data.AnalyticsFunnels.OneTime[LEGACY_TUTORIAL_FUNNEL_KEY] = nil
 	profile.Data.AnalyticsFunnels.OneTime[OLDEST_TUTORIAL_FUNNEL_KEY] = nil
 	profile.Data.AnalyticsFunnels.OneTime[OLDEST_LEGACY_TUTORIAL_FUNNEL_KEY] = nil
+	profile.Data.AnalyticsFunnels.OneTime[ORIGINAL_TUTORIAL_FUNNEL_KEY] = nil
 	if profile.Data.DiscoveredItems == nil then profile.Data.DiscoveredItems = {} end
 	if profile.Data.ClaimedPacks == nil then profile.Data.ClaimedPacks = {} end
 	if type(profile.Data.RedeemedCodes) ~= "table" then profile.Data.RedeemedCodes = {} end

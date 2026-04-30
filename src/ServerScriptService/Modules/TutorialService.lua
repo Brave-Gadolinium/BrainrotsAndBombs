@@ -25,12 +25,13 @@ local postTutorialCompletionEvent: RemoteEvent? = nil
 local Templates = ReplicatedStorage:WaitForChild("Templates")
 local ConfettiTemplate = Templates:WaitForChild("Confetti")
 local CURRENT_TUTORIAL_VERSION = 6
-local RECENT_TUTORIAL_ANALYTICS_KEY = "Tutor_28_04"
-local PREVIOUS_RECENT_TUTORIAL_ANALYTICS_KEY = "Tutor_27_04"
-local PREVIOUS_TUTORIAL_ANALYTICS_KEY = "Tutor_24_04"
-local LEGACY_TUTORIAL_ANALYTICS_KEY = "Tutor_23_04"
-local OLDEST_TUTORIAL_ANALYTICS_KEY = "Tutor_22_04"
-local OLDEST_LEGACY_TUTORIAL_ANALYTICS_KEY = "TutorialFTUE"
+local RECENT_TUTORIAL_ANALYTICS_KEY = "Tutor_29_04"
+local PREVIOUS_RECENT_TUTORIAL_ANALYTICS_KEY = "Tutor_28_04"
+local PREVIOUS_TUTORIAL_ANALYTICS_KEY = "Tutor_27_04"
+local LEGACY_TUTORIAL_ANALYTICS_KEY = "Tutor_24_04"
+local OLDEST_TUTORIAL_ANALYTICS_KEY = "Tutor_23_04"
+local OLDEST_LEGACY_TUTORIAL_ANALYTICS_KEY = "Tutor_22_04"
+local ORIGINAL_TUTORIAL_ANALYTICS_KEY = "TutorialFTUE"
 local STEP_ONE_MIN_DISPLAY_TIME = 1.5
 local AUTO_HELP_DELAY = 10
 local PLACE_BRAINROT_STEP = 5
@@ -573,6 +574,7 @@ local function migrateTutorialProgress(profile: any)
 		profile.Data.AnalyticsFunnels.OneTime[LEGACY_TUTORIAL_ANALYTICS_KEY] = nil
 		profile.Data.AnalyticsFunnels.OneTime[OLDEST_TUTORIAL_ANALYTICS_KEY] = nil
 		profile.Data.AnalyticsFunnels.OneTime[OLDEST_LEGACY_TUTORIAL_ANALYTICS_KEY] = nil
+		profile.Data.AnalyticsFunnels.OneTime[ORIGINAL_TUTORIAL_ANALYTICS_KEY] = nil
 	end
 
 	if hasSpecificCharacterUpgrade(profile, TutorialConfiguration.TutorialCharacterUpgradeId) then
