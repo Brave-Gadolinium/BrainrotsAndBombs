@@ -41,6 +41,7 @@ ItemConfigurations.Items = {
 	["burbaloni_luliloli"] = { Rarity = "Legendary", Income = 400, ImageId = "rbxassetid://84791223223147", DisplayName = "Burbaloni Luliloli" },
 	["cavallo_virtuoso"] = { Rarity = "Legendary", Income = 450, ImageId = "rbxassetid://132024020072422", DisplayName = "Cavallo Virtuoso" },
 	["chimpanzini_bananini"] = { Rarity = "Legendary", Income = 500, ImageId = "rbxassetid://100324087260160", DisplayName = "Chimpanzini Bananini" },
+	["strawberry_elephant"] = { Rarity = "Legendary", Income = 25736, ImageId = "rbxassetid://96612948211381", DisplayName = "Strawberry Elephant" },
 
 	["bombardiro_crocodilo"] = { Rarity = "Mythic", Income = 1000, ImageId = "rbxassetid://118911944523229", DisplayName = "Bombardiro Crocodilo" },
 	["cocofanto_elefanto"] = { Rarity = "Mythic", Income = 2000, ImageId = "rbxassetid://120394923537076", DisplayName = "Cocofanto Elefanto" },

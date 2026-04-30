@@ -15,6 +15,7 @@ local PlayerController
 local BombManager
 local showContextualOfferEvent: RemoteEvent?
 local requestAutoBombStateEvent: RemoteEvent?
+local requestUseBoosterChargeEvent: RemoteEvent?
 local autoBombHeartbeatStarted = false
 
 local depthBlockedTimestamps: {[Player]: {number}} = {}
@@ -27,6 +28,7 @@ local MANUAL_COLLECT_THRESHOLD = 3
 local AUTO_BOMB_CHECK_INTERVAL = 0.2
 local GLOBAL_OFFER_COOLDOWN = 60
 local PER_OFFER_COOLDOWN = 180
+local SHIELD_FORCE_FIELD_NAME = "ShieldBoosterForceField"
 
 local BOOSTER_ATTRIBUTE_BY_NAME = {
 	MegaExplosion = "MegaExplosionEndsAt",
@@ -36,6 +38,12 @@ local BOOSTER_ATTRIBUTE_BY_NAME = {
 local BOOSTER_PROFILE_KEY_BY_NAME = {
 	MegaExplosion = "MegaExplosionEndsAt",
 	Shield = "ShieldEndsAt",
+}
+
+local BOOSTER_CHARGE_ATTRIBUTE_BY_NAME = {
+	MegaExplosion = "MegaExplosionCharges",
+	Shield = "ShieldCharges",
+	NukeBooster = "NukeBoosterCharges",
 }
 
 local oneTimeSessionOfferKeys = {
@@ -50,6 +58,7 @@ type OfferState = {
 }
 
 local offerStateByPlayer: {[Player]: OfferState} = {}
+local shieldCharacterConnections: {[Player]: RBXScriptConnection} = {}
 
 local function resolveOfferKey(offerKey: string): string
 	if offerKey == "EarlyGame" then
@@ -123,6 +132,15 @@ local function getRequestAutoBombStateEvent(): RemoteEvent
 	return requestAutoBombStateEvent
 end
 
+local function getRequestUseBoosterChargeEvent(): RemoteEvent
+	if requestUseBoosterChargeEvent and requestUseBoosterChargeEvent.Parent then
+		return requestUseBoosterChargeEvent
+	end
+
+	requestUseBoosterChargeEvent = ensureRemoteEvent("RequestUseBoosterCharge")
+	return requestUseBoosterChargeEvent
+end
+
 local function getBoosterConfig(boosterName: string)
 	return ProductConfigurations.Boosters[boosterName]
 end
@@ -150,6 +168,26 @@ local function ensureBoosterData(profile): {[string]: number}?
 	return boosters
 end
 
+local function ensureBoosterChargeData(profile): {[string]: number}?
+	if not profile or type(profile.Data) ~= "table" then
+		return nil
+	end
+
+	if type(profile.Data.BoosterCharges) ~= "table" then
+		profile.Data.BoosterCharges = {
+			MegaExplosion = 0,
+			Shield = 0,
+			NukeBooster = 0,
+		}
+	end
+
+	local charges = profile.Data.BoosterCharges
+	for boosterName in pairs(BOOSTER_CHARGE_ATTRIBUTE_BY_NAME) do
+		charges[boosterName] = math.max(0, math.floor(tonumber(charges[boosterName]) or 0))
+	end
+	return charges
+end
+
 local function getBoosterEndsAt(player: Player, boosterName: string): number
 	local profile = getProfile(player)
 	local boosters = profile and ensureBoosterData(profile)
@@ -173,6 +211,98 @@ local function syncBoosterAttribute(player: Player, boosterName: string)
 	end
 
 	player:SetAttribute(attributeName, getBoosterEndsAt(player, boosterName))
+end
+
+local function getBoosterChargeCount(player: Player, boosterName: string): number
+	if not BOOSTER_CHARGE_ATTRIBUTE_BY_NAME[boosterName] then
+		return 0
+	end
+
+	local profile = getProfile(player)
+	local charges = profile and ensureBoosterChargeData(profile)
+	if not charges then
+		return 0
+	end
+
+	return math.max(0, math.floor(tonumber(charges[boosterName]) or 0))
+end
+
+local function syncBoosterChargeAttribute(player: Player, boosterName: string)
+	local attributeName = BOOSTER_CHARGE_ATTRIBUTE_BY_NAME[boosterName]
+	if not attributeName then
+		return
+	end
+
+	player:SetAttribute(attributeName, getBoosterChargeCount(player, boosterName))
+end
+
+local function consumeBoosterCharge(player: Player, boosterName: string): boolean
+	local profile = getProfile(player)
+	local charges = profile and ensureBoosterChargeData(profile)
+	if not charges or getBoosterChargeCount(player, boosterName) <= 0 then
+		return false
+	end
+
+	charges[boosterName] = math.max(0, math.floor(tonumber(charges[boosterName]) or 0) - 1)
+	syncBoosterChargeAttribute(player, boosterName)
+	return true
+end
+
+local function fireNotification(player: Player, message: string, notificationType: string)
+	local eventsFolder = ReplicatedStorage:FindFirstChild("Events")
+	local notificationEvent = eventsFolder and eventsFolder:FindFirstChild("ShowNotification")
+	if notificationEvent and notificationEvent:IsA("RemoteEvent") then
+		notificationEvent:FireClient(player, message, notificationType)
+	end
+end
+
+local function removeShieldForceField(character: Model?)
+	if not character then
+		return
+	end
+
+	local existing = character:FindFirstChild(SHIELD_FORCE_FIELD_NAME)
+	if existing and existing:IsA("ForceField") then
+		existing:Destroy()
+	end
+end
+
+local function syncShieldForceField(player: Player)
+	local character = player.Character
+	if not character then
+		return
+	end
+
+	local shieldActive = getBoosterEndsAt(player, "Shield") > 0
+	if not shieldActive then
+		removeShieldForceField(character)
+		return
+	end
+
+	local existing = character:FindFirstChild(SHIELD_FORCE_FIELD_NAME)
+	if existing and existing:IsA("ForceField") then
+		existing.Visible = true
+		return
+	end
+
+	local forceField = Instance.new("ForceField")
+	forceField.Name = SHIELD_FORCE_FIELD_NAME
+	forceField.Visible = true
+	forceField.Parent = character
+end
+
+local function bindShieldCharacterSync(player: Player)
+	if shieldCharacterConnections[player] then
+		return
+	end
+
+	shieldCharacterConnections[player] = player.CharacterAdded:Connect(function()
+		task.defer(function()
+			if player.Parent then
+				syncShieldForceField(player)
+			end
+		end)
+	end)
 end
 
 local function pruneTimestamps(list: {number}, cutoff: number)
@@ -295,6 +425,36 @@ function BoosterService:GetTimedBoosterEndsAt(player: Player, boosterName: strin
 	return getBoosterEndsAt(player, boosterName)
 end
 
+function BoosterService:GetBoosterChargeCount(player: Player, boosterName: string): number
+	return getBoosterChargeCount(player, boosterName)
+end
+
+function BoosterService:AddBoosterCharges(player: Player, chargesByName: {[string]: any}, _source: string?): boolean
+	if type(chargesByName) ~= "table" then
+		return false
+	end
+
+	local profile = getProfile(player)
+	local charges = profile and ensureBoosterChargeData(profile)
+	if not charges then
+		return false
+	end
+
+	local changed = false
+	for boosterName, amount in pairs(chargesByName) do
+		if BOOSTER_CHARGE_ATTRIBUTE_BY_NAME[boosterName] then
+			local increment = math.max(0, math.floor(tonumber(amount) or 0))
+			if increment > 0 then
+				charges[boosterName] = math.max(0, math.floor(tonumber(charges[boosterName]) or 0)) + increment
+				syncBoosterChargeAttribute(player, boosterName)
+				changed = true
+			end
+		end
+	end
+
+	return changed
+end
+
 function BoosterService:ActivateTimedBooster(player: Player, boosterName: string): number
 	local config = getBoosterConfig(boosterName)
 	local profile = getProfile(player)
@@ -307,7 +467,61 @@ function BoosterService:ActivateTimedBooster(player: Player, boosterName: string
 	local endsAt = os.time() + math.max(0, tonumber(config.Duration) or 0)
 	boosters[profileKey] = endsAt
 	syncBoosterAttribute(player, boosterName)
+	if boosterName == "Shield" then
+		syncShieldForceField(player)
+	end
 	return endsAt
+end
+
+function BoosterService:UseBoosterCharge(player: Player, boosterName: string): boolean
+	if not BOOSTER_CHARGE_ATTRIBUTE_BY_NAME[boosterName] then
+		return false
+	end
+
+	if getBoosterChargeCount(player, boosterName) <= 0 then
+		fireNotification(player, "No booster charges available.", "Error")
+		return false
+	end
+
+	local config = getBoosterConfig(boosterName)
+	local displayName = if type(config) == "table" and type(config.DisplayName) == "string" then config.DisplayName else boosterName
+
+	if boosterName == "MegaExplosion" or boosterName == "Shield" then
+		if getBoosterEndsAt(player, boosterName) > 0 then
+			fireNotification(player, displayName .. " is already active.", "Error")
+			return false
+		end
+
+		local endsAt = self:ActivateTimedBooster(player, boosterName)
+		if endsAt <= 0 then
+			fireNotification(player, "Failed to activate " .. displayName .. ".", "Error")
+			return false
+		end
+
+		if not consumeBoosterCharge(player, boosterName) then
+			return false
+		end
+
+		fireNotification(player, displayName .. " activated for 10 minutes!", "Success")
+		return true
+	end
+
+	if boosterName == "NukeBooster" then
+		local didDetonate = self:TriggerNukeBooster(player)
+		if not didDetonate then
+			fireNotification(player, "Nuke failed: enter mining zone", "Error")
+			return false
+		end
+
+		if not consumeBoosterCharge(player, boosterName) then
+			return false
+		end
+
+		fireNotification(player, "Nuke detonated!", "Success")
+		return true
+	end
+
+	return false
 end
 
 function BoosterService:HasActiveMegaExplosion(player: Player): boolean
@@ -336,6 +550,10 @@ end
 function BoosterService:SyncPlayer(player: Player)
 	syncBoosterAttribute(player, "MegaExplosion")
 	syncBoosterAttribute(player, "Shield")
+	syncShieldForceField(player)
+	syncBoosterChargeAttribute(player, "MegaExplosion")
+	syncBoosterChargeAttribute(player, "Shield")
+	syncBoosterChargeAttribute(player, "NukeBooster")
 	player:SetAttribute("HasAutoBomb", player:GetAttribute("HasAutoBomb") == true)
 	player:SetAttribute("AutoBombEnabled", player:GetAttribute("AutoBombEnabled") == true and player:GetAttribute("HasAutoBomb") == true)
 	enforceAutoBombZoneState(player)
@@ -410,6 +628,8 @@ local function startAutoBombHeartbeat()
 		while true do
 			local sessionBlocked = isAutoBombBlockedBySession()
 			for _, player in ipairs(Players:GetPlayers()) do
+				syncShieldForceField(player)
+
 				if sessionBlocked and player:GetAttribute("AutoBombEnabled") == true then
 					player:SetAttribute("AutoBombEnabled", false)
 				end
@@ -442,16 +662,27 @@ function BoosterService:Init(controllers)
 		setAutoBombEnabled(player, active)
 		AnalyticsFunnelsService:HandleAutoBombToggleSuccess(player, nil, player:GetAttribute("AutoBombEnabled") == true)
 	end)
+
+	local useBoosterChargeEvent = getRequestUseBoosterChargeEvent()
+	useBoosterChargeEvent.OnServerEvent:Connect(function(player, boosterName)
+		if type(boosterName) ~= "string" then
+			return
+		end
+
+		BoosterService:UseBoosterCharge(player, boosterName)
+	end)
 end
 
 function BoosterService:Start()
 	startAutoBombHeartbeat()
 
 	for _, player in ipairs(Players:GetPlayers()) do
+		bindShieldCharacterSync(player)
 		self:SyncPlayer(player)
 	end
 
 	Players.PlayerAdded:Connect(function(player)
+		bindShieldCharacterSync(player)
 		task.defer(function()
 			if player.Parent then
 				BoosterService:SyncPlayer(player)
@@ -463,6 +694,10 @@ function BoosterService:Start()
 		depthBlockedTimestamps[player] = nil
 		manualCollectTimestamps[player] = nil
 		offerStateByPlayer[player] = nil
+		if shieldCharacterConnections[player] then
+			shieldCharacterConnections[player]:Disconnect()
+			shieldCharacterConnections[player] = nil
+		end
 	end)
 end
 

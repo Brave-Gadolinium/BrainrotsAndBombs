@@ -46,7 +46,17 @@ local BOMB_TERRAIN_STICK_PADDING = 0.05
 local BOMB_TERRAIN_MONITOR_MIN_TRAVEL = 0.05
 local BOMB_TERRAIN_DOWNWARD_PROBE_PADDING = 0.35
 local BOMB_REPAIR_ATTEMPT_COOLDOWN = 0.75
+local ZONE_DETECTION_HORIZONTAL_PADDING = 2
+local ZONE_DETECTION_VERTICAL_PADDING = 10
 local NUKE_BLAST_RADIUS_MULTIPLIER = 2
+local NUKE_MIN_BLAST_RADIUS = 28
+local NUKE_MIN_KNOCKBACK_FORCE = 75
+local NUKE_DROP_HEIGHT = 140
+local NUKE_DROP_SPEED = 155
+local NUKE_MAX_FLIGHT_TIME = 8
+local NUKE_PROJECTILE_SIZE = 5
+local NUKE_TERRAIN_RADIUS_SCALE = 0.45
+local NUKE_MIN_TERRAIN_RADIUS = 18
 local notifyPlayer: (player: Player, message: string) -> ()
 
 local function isFiniteNumber(value: number): boolean
@@ -132,17 +142,31 @@ end
 
 local FinishTime = ensureTimerFinishEvent()
 
+local function isPositionInsidePartBounds(
+	position: Vector3,
+	part: BasePart,
+	horizontalPadding: number?,
+	verticalPadding: number?
+): boolean
+	local relativePos = part.CFrame:PointToObjectSpace(position)
+	local halfSize = part.Size * 0.5
+	local xzPadding = horizontalPadding or 0
+	local yPadding = verticalPadding or 0
+
+	return math.abs(relativePos.X) <= halfSize.X + xzPadding
+		and math.abs(relativePos.Y) <= halfSize.Y + yPadding
+		and math.abs(relativePos.Z) <= halfSize.Z + xzPadding
+end
+
 local function getBombZonePart(position: Vector3): BasePart?
 	for _, zonePart in ipairs(zonesFolder:GetChildren()) do
 		if zonePart:IsA("BasePart") and zonePart.Name == "ZonePart" then
-			local relativePos = zonePart.CFrame:PointToObjectSpace(position)
-			local size = zonePart.Size
-
-			local inside = math.abs(relativePos.X) <= size.X / 2
-				and math.abs(relativePos.Y) <= size.Y / 2
-				and math.abs(relativePos.Z) <= size.Z / 2
-
-			if inside then
+			if isPositionInsidePartBounds(
+				position,
+				zonePart,
+				ZONE_DETECTION_HORIZONTAL_PADDING,
+				ZONE_DETECTION_VERTICAL_PADDING
+			) then
 				return zonePart
 			end
 		end

@@ -12,6 +12,7 @@ local ClientZoneService = require(ReplicatedStorage.Modules.ClientZoneService)
 local player = Players.LocalPlayer
 local events = ReplicatedStorage:WaitForChild("Events")
 local requestAutoBombState = events:WaitForChild("RequestAutoBombState") :: RemoteEvent
+local requestUseBoosterCharge = events:WaitForChild("RequestUseBoosterCharge") :: RemoteEvent
 local reportAnalyticsIntent = events:WaitForChild("ReportAnalyticsIntent") :: RemoteEvent
 
 type HudBoosterDefinition = {
@@ -37,6 +38,8 @@ local WATCHED_HUD_DESCENDANTS = {
 	NukeBooster = true,
 	["Nuke Booster"] = true,
 }
+
+local HUD_CHARGE_BADGE_NAME = "ChargeCount"
 
 local function formatRemainingTime(endsAt: number): string
 	local remaining = math.max(0, math.floor(endsAt - os.time()))
@@ -67,6 +70,56 @@ local function setButtonText(button: GuiButton?, text: string)
 	local label = button:FindFirstChildWhichIsA("TextLabel", true)
 	if label then
 		label.Text = text
+	end
+end
+
+local function ensureHudChargeBadge(parent: GuiObject): TextLabel
+	local existing = parent:FindFirstChild(HUD_CHARGE_BADGE_NAME)
+	if existing and existing:IsA("TextLabel") then
+		return existing
+	end
+
+	local badge = Instance.new("TextLabel")
+	badge.Name = HUD_CHARGE_BADGE_NAME
+	badge.AnchorPoint = Vector2.new(1, 0)
+	badge.Position = UDim2.new(1, -2, 0, 2)
+	badge.Size = UDim2.fromOffset(34, 20)
+	badge.BackgroundColor3 = Color3.fromRGB(255, 196, 64)
+	badge.BorderSizePixel = 0
+	badge.Font = Enum.Font.GothamBold
+	badge.TextColor3 = Color3.fromRGB(25, 25, 25)
+	badge.TextScaled = true
+	badge.Visible = false
+	badge.ZIndex = parent.ZIndex + 10
+	badge.Parent = parent
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(1, 0)
+	corner.Parent = badge
+
+	return badge
+end
+
+local function setHudChargeBadge(parent: GuiObject?, productName: string)
+	if not parent then
+		return
+	end
+
+	local badge = ensureHudChargeBadge(parent)
+	local attributeName: string? = nil
+	if productName == "MegaExplosion" then
+		attributeName = "MegaExplosionCharges"
+	elseif productName == "Shield" then
+		attributeName = "ShieldCharges"
+	elseif productName == "NukeBooster" then
+		attributeName = "NukeBoosterCharges"
+	end
+	local count = if attributeName then math.max(0, math.floor(tonumber(player:GetAttribute(attributeName)) or 0)) else 0
+	if count > 0 then
+		badge.Text = "x" .. tostring(count)
+		badge.Visible = true
+	else
+		badge.Visible = false
 	end
 end
 
@@ -244,6 +297,51 @@ local function promptBoosterGamePass(surface: string, section: string, entrypoin
 	end
 end
 
+local function getBoosterChargeAttribute(productName: string): string?
+	if productName == "MegaExplosion" then
+		return "MegaExplosionCharges"
+	end
+	if productName == "Shield" then
+		return "ShieldCharges"
+	end
+	if productName == "NukeBooster" then
+		return "NukeBoosterCharges"
+	end
+	return nil
+end
+
+local function getBoosterChargeCount(productName: string): number
+	local attributeName = getBoosterChargeAttribute(productName)
+	if not attributeName then
+		return 0
+	end
+
+	return math.max(0, math.floor(tonumber(player:GetAttribute(attributeName)) or 0))
+end
+
+local function isTimedBoosterActive(productName: string): boolean
+	if productName == "MegaExplosion" then
+		return math.max(0, tonumber(player:GetAttribute("MegaExplosionEndsAt")) or 0) > os.time()
+	end
+	if productName == "Shield" then
+		return math.max(0, tonumber(player:GetAttribute("ShieldEndsAt")) or 0) > os.time()
+	end
+	return false
+end
+
+local function useBoosterChargeOrPrompt(surface: string, section: string, entrypoint: string, productName: string)
+	if isTimedBoosterActive(productName) then
+		return
+	end
+
+	if getBoosterChargeCount(productName) > 0 then
+		requestUseBoosterCharge:FireServer(productName)
+		return
+	end
+
+	promptBoosterProduct(surface, section, entrypoint, productName)
+end
+
 local function shouldShowHudBoosterButtons(): boolean
 	return ClientZoneService.IsInMineZone() and not FrameManager.isAnyFrameOpen()
 end
@@ -255,7 +353,7 @@ local function syncHudBoosterButtons()
 		local visibilityTarget, actionButton = resolveHudBooster(definition)
 		if actionButton then
 			bindButtonOnce(actionButton, "BoostersHudBound", function()
-				promptBoosterProduct("boosters_hud", "boosters_hud", "button", definition.ProductName)
+				useBoosterChargeOrPrompt("boosters_hud", "boosters_hud", "button", definition.ProductName)
 			end)
 			actionButton.Active = shouldShow
 			actionButton.AutoButtonColor = shouldShow
@@ -263,6 +361,9 @@ local function syncHudBoosterButtons()
 
 		if visibilityTarget then
 			visibilityTarget.Visible = shouldShow
+			setHudChargeBadge(visibilityTarget, definition.ProductName)
+		elseif actionButton then
+			setHudChargeBadge(actionButton, definition.ProductName)
 		end
 	end
 end
@@ -284,7 +385,7 @@ local function setupCardActions(boostersFrame: Frame)
 		end
 
 		bindButtonOnce(buyButton, "BoostersCardBound", function()
-			promptBoosterProduct("boosters", "boosters", "button", productName)
+			useBoosterChargeOrPrompt("boosters", "boosters", "button", productName)
 		end)
 	end
 
@@ -320,13 +421,24 @@ local function updateBoostersUI(boostersFrame: Frame)
 
 	local megaEndsAt = math.max(0, tonumber(player:GetAttribute("MegaExplosionEndsAt")) or 0)
 	local shieldEndsAt = math.max(0, tonumber(player:GetAttribute("ShieldEndsAt")) or 0)
+	local megaCharges = getBoosterChargeCount("MegaExplosion")
+	local shieldCharges = getBoosterChargeCount("Shield")
+	local nukeCharges = getBoosterChargeCount("NukeBooster")
 	local hasAutoBomb = player:GetAttribute("HasAutoBomb") == true
 	local autoBombEnabled = player:GetAttribute("AutoBombEnabled") == true
+
+	if nukeCard and nukeCharges > 0 then
+		local button = nukeCard:FindFirstChild("Buy") :: GuiButton?
+		setButtonText(button, "Use x" .. tostring(nukeCharges))
+		nukeCard = nil
+	end
 
 	if megaCard then
 		local button = megaCard:FindFirstChild("Buy") :: GuiButton?
 		if megaEndsAt > os.time() then
 			setButtonText(button, "Active " .. formatRemainingTime(megaEndsAt))
+		elseif megaCharges > 0 then
+			setButtonText(button, "Use x" .. tostring(megaCharges))
 		else
 			setButtonText(button, "Buy  39")
 		end
@@ -336,6 +448,8 @@ local function updateBoostersUI(boostersFrame: Frame)
 		local button = shieldCard:FindFirstChild("Buy") :: GuiButton?
 		if shieldEndsAt > os.time() then
 			setButtonText(button, "Active " .. formatRemainingTime(shieldEndsAt))
+		elseif shieldCharges > 0 then
+			setButtonText(button, "Use x" .. tostring(shieldCharges))
 		else
 			setButtonText(button, "Buy  39")
 		end
@@ -391,6 +505,9 @@ local function init()
 
 	player:GetAttributeChangedSignal("MegaExplosionEndsAt"):Connect(refresh)
 	player:GetAttributeChangedSignal("ShieldEndsAt"):Connect(refresh)
+	player:GetAttributeChangedSignal("MegaExplosionCharges"):Connect(refresh)
+	player:GetAttributeChangedSignal("ShieldCharges"):Connect(refresh)
+	player:GetAttributeChangedSignal("NukeBoosterCharges"):Connect(refresh)
 	player:GetAttributeChangedSignal("HasAutoBomb"):Connect(refresh)
 	player:GetAttributeChangedSignal("AutoBombEnabled"):Connect(refresh)
 

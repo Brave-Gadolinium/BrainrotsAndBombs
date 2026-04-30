@@ -27,6 +27,8 @@ local EVENT_DESCRIPTORS: {RemoteDescriptor} = {
 	{Name = "RequestRewardedAd", ClassName = "RemoteEvent"},
 	{Name = "RewardedAdResult", ClassName = "RemoteEvent"},
 	{Name = "RequestAutoBombState", ClassName = "RemoteEvent"},
+	{Name = "RequestUseBoosterCharge", ClassName = "RemoteEvent"},
+	{Name = "RequestVipSubscriptionStudioGrant", ClassName = "RemoteEvent"},
 	{Name = "ShowContextualOffer", ClassName = "RemoteEvent"},
 	{Name = "RequestDropItem", ClassName = "RemoteEvent"},
 	{Name = "RequestClearCarry", ClassName = "RemoteEvent"},

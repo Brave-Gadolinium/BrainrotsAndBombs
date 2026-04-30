@@ -40,6 +40,24 @@ local LEGACY_TUTORIAL_FUNNEL_KEYS = {"Tutor_28_04", "Tutor_27_04", "Tutor_24_04"
 local TUTORIAL_ENTERED_MARKER_KEY = "tutorial_entered"
 local TUTORIAL_COMPLETED_MARKER_KEY = "tutorial_completed"
 local TUTORIAL_SKIPPED_MARKER_KEY = "tutorial_skipped"
+local BRAINROT_COLLECTION_FUNNEL_KEY = "BrainrotCollectionMilestones"
+local BRAINROT_COLLECTION_STEP_THRESHOLDS = {
+	[1] = 0,
+	[2] = 1,
+	[3] = 2,
+	[4] = 3,
+	[5] = 4,
+	[6] = 5,
+	[7] = 6,
+	[8] = 7,
+	[9] = 8,
+	[10] = 9,
+	[11] = 10,
+	[12] = 20,
+	[13] = 30,
+	[14] = 50,
+	[15] = 100,
+}
 local SECONDS_PER_DAY = 86400
 local FREE_SPIN_COOLDOWN_SECONDS = math.max(0, tonumber(DailySpinConfiguration.FreeSpinCooldownSeconds) or (15 * 60))
 local PURCHASE_ATTRIBUTION_TTL = 120
@@ -83,6 +101,27 @@ local OneTimeFunnels = {
 			[2] = "FirstStoredCashPositive",
 			[3] = "FirstManualCollect",
 			[4] = "FirstSlotUpgradeAfterCollect",
+		},
+	},
+	[BRAINROT_COLLECTION_FUNNEL_KEY] = {
+		Kind = "Standard",
+		FunnelName = "BrainrotCollectionMilestones",
+		Steps = {
+			[1] = "JoinGame",
+			[2] = "PickupBrainrot1",
+			[3] = "PickupBrainrot2",
+			[4] = "PickupBrainrot3",
+			[5] = "PickupBrainrot4",
+			[6] = "PickupBrainrot5",
+			[7] = "PickupBrainrot6",
+			[8] = "PickupBrainrot7",
+			[9] = "PickupBrainrot8",
+			[10] = "PickupBrainrot9",
+			[11] = "PickupBrainrot10",
+			[12] = "PickupBrainrot20",
+			[13] = "PickupBrainrot30",
+			[14] = "PickupBrainrot50",
+			[15] = "PickupBrainrot100",
 		},
 	},
 }
@@ -316,19 +355,23 @@ local function getPurchaseAttributionBucket(player: Player): {[string]: Purchase
 	return bucket
 end
 
-local function buildPurchaseAttributionKey(purchaseKind: string, purchaseId: number): string
-	return `{toSnakeCase(purchaseKind)}:{math.floor(purchaseId)}`
+local function buildPurchaseAttributionKey(purchaseKind: string, purchaseId: any): string
+	return `{toSnakeCase(purchaseKind)}:{tostring(purchaseId)}`
 end
 
 local function getPurchaseIdFieldName(purchaseKind: string): string
-	if toSnakeCase(purchaseKind) == "gamepass" then
+	local normalizedKind = toSnakeCase(purchaseKind)
+	if normalizedKind == "gamepass" then
 		return "pass_id"
+	end
+	if normalizedKind == "subscription" then
+		return "subscription_id"
 	end
 
 	return "product_id"
 end
 
-local function resolvePurchaseName(purchaseKind: string, purchaseId: number): string?
+local function resolvePurchaseName(purchaseKind: string, purchaseId: any): string?
 	local normalizedKind = toSnakeCase(purchaseKind)
 	if normalizedKind == "gamepass" then
 		return ProductConfigurations.GetGamePassById(purchaseId)
@@ -338,6 +381,36 @@ local function resolvePurchaseName(purchaseKind: string, purchaseId: number): st
 		return ProductConfigurations.GetProductById(purchaseId)
 	end
 
+	if normalizedKind == "subscription" and ProductConfigurations.GetSubscriptionById then
+		return ProductConfigurations.GetSubscriptionById(purchaseId)
+	end
+
+	return nil
+end
+
+local function getPayloadPurchaseId(fields: {[string]: any}?, purchaseKind: string): any?
+	if not fields then
+		return nil
+	end
+
+	local normalizedKind = toSnakeCase(purchaseKind)
+	local purchaseIdField = getPurchaseIdFieldName(normalizedKind)
+	local rawId = fields[purchaseIdField]
+	if normalizedKind == "subscription" then
+		if type(rawId) == "string" and rawId ~= "" then
+			return rawId
+		end
+		local numericId = tonumber(rawId)
+		if type(numericId) == "number" and numericId > 0 then
+			return tostring(math.floor(numericId))
+		end
+		return nil
+	end
+
+	local numericId = tonumber(rawId)
+	if type(numericId) == "number" and numericId > 0 then
+		return math.floor(numericId)
+	end
 	return nil
 end
 
@@ -355,8 +428,8 @@ local function pruneExpiredPurchaseAttributions(player: Player)
 	end
 end
 
-local function cachePurchaseAttribution(player: Player, purchaseKind: string, purchaseId: number, fields: {[string]: any}?)
-	if type(purchaseId) ~= "number" or purchaseId <= 0 then
+local function cachePurchaseAttribution(player: Player, purchaseKind: string, purchaseId: any, fields: {[string]: any}?)
+	if purchaseId == nil or tostring(purchaseId) == "" then
 		return
 	end
 
@@ -367,8 +440,8 @@ local function cachePurchaseAttribution(player: Player, purchaseKind: string, pu
 	}
 end
 
-local function getPurchaseAttribution(player: Player, purchaseKind: string, purchaseId: number, consume: boolean): {[string]: any}?
-	if type(purchaseId) ~= "number" or purchaseId <= 0 then
+local function getPurchaseAttribution(player: Player, purchaseKind: string, purchaseId: any, consume: boolean): {[string]: any}?
+	if purchaseId == nil or tostring(purchaseId) == "" then
 		return nil
 	end
 
@@ -410,8 +483,8 @@ local function clearRecurringSession(player: Player, funnelKey: string)
 	end
 end
 
-local function clearPurchaseAttribution(player: Player, purchaseKind: string, purchaseId: number)
-	if type(purchaseId) ~= "number" or purchaseId <= 0 then
+local function clearPurchaseAttribution(player: Player, purchaseKind: string, purchaseId: any)
+	if purchaseId == nil or tostring(purchaseId) == "" then
 		return
 	end
 
@@ -737,6 +810,21 @@ local function getGuidSessionId(player: Player, prefix: string): string
 	return buildSessionId(player, prefix, getShortGuidToken())
 end
 
+local function getBrainrotCollectionFunnelStep(totalCollected: number): number
+	local collectedCount = math.max(0, math.floor(tonumber(totalCollected) or 0))
+	local targetStep = 1
+
+	for step, threshold in ipairs(BRAINROT_COLLECTION_STEP_THRESHOLDS) do
+		if collectedCount >= threshold then
+			targetStep = step
+		else
+			break
+		end
+	end
+
+	return targetStep
+end
+
 local function canAdvanceOneTime(player: Player, funnelKey: string, requiredStep: number): boolean
 	local profile = getProfile(player)
 	if not profile then
@@ -805,13 +893,20 @@ local function buildStoreFields(player: Player, payload: {[string]: any}?): {[st
 	fields.productId = nil
 	local passId = tonumber(fields.pass_id or fields.passId)
 	fields.passId = nil
+	local subscriptionId = fields.subscription_id or fields.subscriptionId
+	fields.subscriptionId = nil
+	fields.subscription_id = nil
 
 	if type(fields.id) == "number" then
 		if fields.purchase_kind == "gamepass" then
 			passId = passId or fields.id
+		elseif fields.purchase_kind == "subscription" then
+			subscriptionId = subscriptionId or fields.id
 		else
 			productId = productId or fields.id
 		end
+	elseif type(fields.id) == "string" and fields.purchase_kind == "subscription" then
+		subscriptionId = subscriptionId or fields.id
 	end
 	fields.id = nil
 
@@ -819,6 +914,12 @@ local function buildStoreFields(player: Player, payload: {[string]: any}?): {[st
 		fields.product_id = math.floor(productId)
 	elseif type(passId) == "number" and passId > 0 then
 		fields.pass_id = math.floor(passId)
+	else
+		if type(subscriptionId) == "number" and subscriptionId > 0 then
+			fields.subscription_id = tostring(math.floor(subscriptionId))
+		elseif type(subscriptionId) == "string" and subscriptionId ~= "" then
+			fields.subscription_id = subscriptionId
+		end
 	end
 
 	local resolvedName = productName
@@ -827,6 +928,8 @@ local function buildStoreFields(player: Player, payload: {[string]: any}?): {[st
 			resolvedName = resolvePurchaseName("gamepass", fields.pass_id)
 		elseif type(fields.product_id) == "number" then
 			resolvedName = resolvePurchaseName("product", fields.product_id)
+		elseif type(fields.subscription_id) == "string" then
+			resolvedName = resolvePurchaseName("subscription", fields.subscription_id)
 		end
 	end
 
@@ -837,12 +940,16 @@ local function buildStoreFields(player: Player, payload: {[string]: any}?): {[st
 			fields.purchase_kind = "gamepass"
 		elseif type(fields.product_id) == "number" then
 			fields.purchase_kind = "product"
+		elseif type(fields.subscription_id) == "string" then
+			fields.purchase_kind = "subscription"
 		end
 	end
 
 	if type(fields.payment_type) ~= "string" or fields.payment_type == "" then
 		if fields.purchase_kind == "product" or fields.purchase_kind == "gamepass" then
 			fields.payment_type = "robux"
+		elseif fields.purchase_kind == "subscription" then
+			fields.payment_type = "subscription"
 		end
 	end
 
@@ -907,6 +1014,14 @@ function AnalyticsFunnelsService:HandleTutorialSkipped(player: Player, skippedSt
 	logOneTimeMarkerEvent(player, TUTORIAL_SKIPPED_MARKER_KEY, "tutorial_skipped", {
 		zone = "tutorial",
 		skip_step = math.max(1, math.floor(tonumber(skippedStep) or 1)),
+	})
+end
+
+function AnalyticsFunnelsService:HandleBrainrotsCollectedChanged(player: Player, totalCollected: number)
+	local collectedCount = math.max(0, math.floor(tonumber(totalCollected) or 0))
+	advanceOneTimeFunnel(player, BRAINROT_COLLECTION_FUNNEL_KEY, getBrainrotCollectionFunnelStep(collectedCount), {
+		zone = "game",
+		brainrots_collected = collectedCount,
 	})
 end
 
@@ -1420,9 +1535,8 @@ function AnalyticsFunnelsService:HandleStoreOfferPrompted(player: Player, payloa
 	safeLogCustomEvent(player, "store_offer_prompted", 1, buildFirstStepFields(player, fields))
 
 	local purchaseKind = fields and fields.purchase_kind
-	local purchaseIdField = purchaseKind and getPurchaseIdFieldName(purchaseKind) or nil
-	local purchaseId = purchaseIdField and fields and tonumber(fields[purchaseIdField]) or nil
-	if type(purchaseKind) == "string" and type(purchaseId) == "number" and purchaseId > 0 then
+	local purchaseId = if type(purchaseKind) == "string" then getPayloadPurchaseId(fields, purchaseKind) else nil
+	if type(purchaseKind) == "string" and purchaseId ~= nil then
 		cachePurchaseAttribution(player, purchaseKind, purchaseId, fields)
 	end
 
@@ -1438,9 +1552,8 @@ function AnalyticsFunnelsService:HandleStorePromptFailed(player: Player, payload
 		fields.section = fields.section or "unknown"
 		fields.entrypoint = fields.entrypoint or "unknown"
 		local purchaseKind = fields.purchase_kind
-		local purchaseIdField = purchaseKind and getPurchaseIdFieldName(purchaseKind) or nil
-		local purchaseId = purchaseIdField and tonumber(fields[purchaseIdField]) or nil
-		if type(purchaseKind) == "string" and type(purchaseId) == "number" and purchaseId > 0 then
+		local purchaseId = if type(purchaseKind) == "string" then getPayloadPurchaseId(fields, purchaseKind) else nil
+		if type(purchaseKind) == "string" and purchaseId ~= nil then
 			clearPurchaseAttribution(player, purchaseKind, purchaseId)
 		end
 	end
@@ -1450,9 +1563,8 @@ end
 function AnalyticsFunnelsService:HandleStorePurchaseSuccess(player: Player, payload: {[string]: any}?)
 	local baseFields = buildStoreFields(player, payload)
 	local purchaseKind = baseFields and baseFields.purchase_kind or "product"
-	local purchaseIdField = getPurchaseIdFieldName(purchaseKind)
-	local purchaseId = baseFields and tonumber(baseFields[purchaseIdField]) or nil
-	local attributedFields = if type(purchaseId) == "number" and purchaseId > 0 then getPurchaseAttribution(player, purchaseKind, purchaseId, true) else nil
+	local purchaseId = getPayloadPurchaseId(baseFields, purchaseKind)
+	local attributedFields = if purchaseId ~= nil then getPurchaseAttribution(player, purchaseKind, purchaseId, true) else nil
 	local mergedFields = shallowCopyFields(attributedFields)
 
 	for key, value in pairs(baseFields or {}) do

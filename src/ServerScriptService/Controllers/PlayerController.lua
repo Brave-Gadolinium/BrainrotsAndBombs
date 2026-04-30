@@ -9,6 +9,7 @@ local MarketplaceService = game:GetService("MarketplaceService")
 local CollectionService = game:GetService("CollectionService")
 local Debris = game:GetService("Debris") 
 local Workspace = game:GetService("Workspace")
+local RunService = game:GetService("RunService")
 
 -- Modules
 local ProfileStoreModule = require(ServerScriptService.Modules.ProfileStore)
@@ -29,12 +30,15 @@ local TutorialService
 local AnalyticsFunnelsService
 local AnalyticsEconomyService
 local OfflineIncomeController
+local BoosterService
 
 -- [ CONFIGURATION ]
 local DATA_VERSION = "ProjectData_v90" 
 
 local VIP_TAG = "V.I.P"
 local COLLECT_ALL_GAMEPASS = ProductConfigurations.GamePasses.CollectAll or 1783037385
+local VIP_SUBSCRIPTION_NAME = "VipSubscription"
+local VIP_SUBSCRIPTION_ID = ProductConfigurations.Subscriptions and ProductConfigurations.Subscriptions[VIP_SUBSCRIPTION_NAME] or ""
 local LIMITED_TIME_COLLECT_ALL_DURATION = math.max(0, math.floor(tonumber(LimitedTimeOfferConfiguration.OfferDurationSeconds) or 0))
 
 local GROUP_ID = 0 
@@ -142,6 +146,8 @@ type PlayerData = {
 		MegaExplosionEndsAt: number,
 		ShieldEndsAt: number,
 	},
+	BoosterCharges: {[string]: number},
+	Subscriptions: {[string]: any},
 	OfflineIncome: {
 		PendingBaseAmount: number,
 		PendingSeconds: number,
@@ -188,6 +194,17 @@ local Template: PlayerData = {
 		MegaExplosionEndsAt = 0,
 		ShieldEndsAt = 0,
 	},
+	BoosterCharges = {
+		MegaExplosion = 0,
+		Shield = 0,
+		NukeBooster = 0,
+	},
+	Subscriptions = {
+		VipSubscription = {
+			BrainrotGranted = false,
+			ClaimedPaidCycles = {},
+		},
+	},
 	OfflineIncome = {
 		PendingBaseAmount = 0,
 		PendingSeconds = 0,
@@ -209,6 +226,7 @@ local GameProfileStore = ProfileStoreModule.New(DATA_VERSION, Template)
 local PlayerController = {}
 local profiles: {[Player]: any} = {}
 local vipCache: {[Player]: boolean} = {}
+local vipSubscriptionSyncQueued: {[Player]: boolean} = {}
 local deadPlayers: {[Player]: boolean} = {} 
 local loadingInventory: {[Player]: boolean} = {}
 local DEBUG_BRAINROT_TRACE = false
@@ -497,6 +515,51 @@ local function getAnalyticsEconomyService()
 	return AnalyticsEconomyService
 end
 
+local function getBoosterService()
+	if not BoosterService then
+		local boosterModule = ServerScriptService.Modules:FindFirstChild("BoosterService")
+		if boosterModule and boosterModule:IsA("ModuleScript") then
+			BoosterService = require(boosterModule)
+		end
+	end
+
+	return BoosterService
+end
+
+local function ensureBoosterChargesData(data: {[string]: any}): {[string]: number}
+	if type(data.BoosterCharges) ~= "table" then
+		data.BoosterCharges = {
+			MegaExplosion = 0,
+			Shield = 0,
+			NukeBooster = 0,
+		}
+	end
+
+	for _, boosterName in ipairs({"MegaExplosion", "Shield", "NukeBooster"}) do
+		data.BoosterCharges[boosterName] = math.max(0, math.floor(tonumber(data.BoosterCharges[boosterName]) or 0))
+	end
+
+	return data.BoosterCharges
+end
+
+local function ensureVipSubscriptionData(data: {[string]: any}): {[string]: any}
+	if type(data.Subscriptions) ~= "table" then
+		data.Subscriptions = {}
+	end
+
+	if type(data.Subscriptions[VIP_SUBSCRIPTION_NAME]) ~= "table" then
+		data.Subscriptions[VIP_SUBSCRIPTION_NAME] = {}
+	end
+
+	local subscriptionData = data.Subscriptions[VIP_SUBSCRIPTION_NAME]
+	subscriptionData.BrainrotGranted = subscriptionData.BrainrotGranted == true
+	if type(subscriptionData.ClaimedPaidCycles) ~= "table" then
+		subscriptionData.ClaimedPaidCycles = {}
+	end
+
+	return subscriptionData
+end
+
 local function getHighestOwnedPickaxe(data): string?
 	local ownedPickaxes = data.OwnedPickaxes
 	if type(ownedPickaxes) ~= "table" then
@@ -626,13 +689,14 @@ local function grantPackRewards(player: Player, packName: string)
 end
 
 function PlayerController:IsVIP(player: Player)
-	return vipCache[player] == true
+	return player:GetAttribute("IsVIP") == true or vipCache[player] == true
 end
 
 local function checkVIP(player: Player)
 	local passId = ProductConfigurations.GamePasses.VIP
 	if not passId or passId <= 0 then
-		player:SetAttribute("IsVIP", false)
+		vipCache[player] = false
+		player:SetAttribute("IsVIP", player:GetAttribute("HasVipSubscription") == true)
 		return
 	end
 
@@ -640,15 +704,19 @@ local function checkVIP(player: Player)
 		return MarketplaceService:UserOwnsGamePassAsync(player.UserId, passId)
 	end)
 
-	if success and hasPass then
-		vipCache[player] = true
-		player:SetAttribute("IsVIP", true) -- Set attribute for client HUD
+	if success then
+		vipCache[player] = hasPass == true
 	end
+
+	player:SetAttribute("IsVIP", vipCache[player] == true or player:GetAttribute("HasVipSubscription") == true)
 end
 
 local function syncEntitlementAttribute(player: Player, attributeName: string, passId: number?)
+	local subscriptionGrantsAttribute = player:GetAttribute("HasVipSubscription") == true
+		and (attributeName == "HasAutoBomb" or attributeName == "HasCollectAll")
+
 	if type(passId) ~= "number" or passId <= 0 then
-		player:SetAttribute(attributeName, false)
+		player:SetAttribute(attributeName, subscriptionGrantsAttribute)
 		return
 	end
 
@@ -656,7 +724,261 @@ local function syncEntitlementAttribute(player: Player, attributeName: string, p
 		return MarketplaceService:UserOwnsGamePassAsync(player.UserId, passId)
 	end)
 
-	player:SetAttribute(attributeName, success and hasPass or false)
+	player:SetAttribute(attributeName, (success and hasPass) == true or subscriptionGrantsAttribute)
+end
+
+local function getDateTimeCycleToken(value: any): string?
+	if typeof(value) == "DateTime" then
+		return tostring(value.UnixTimestamp)
+	end
+
+	local numericValue = tonumber(value)
+	if numericValue then
+		return tostring(math.floor(numericValue))
+	end
+
+	if value ~= nil then
+		return tostring(value)
+	end
+
+	return nil
+end
+
+local function getPaidCycleKey(entry: any): string?
+	if type(entry) ~= "table" then
+		return nil
+	end
+
+	local paymentStatus = tostring(entry.PaymentStatus)
+	if string.find(paymentStatus, "Paid", 1, true) == nil or string.find(paymentStatus, "Refunded", 1, true) ~= nil then
+		return nil
+	end
+
+	local startToken = getDateTimeCycleToken(entry.CycleStartTime)
+	local endToken = getDateTimeCycleToken(entry.CycleEndTime)
+	if not startToken and not endToken then
+		return nil
+	end
+
+	return tostring(startToken or "unknown") .. ":" .. tostring(endToken or "unknown")
+end
+
+local function getLatestPaidVipSubscriptionCycleKey(player: Player): string?
+	if type(VIP_SUBSCRIPTION_ID) ~= "string" or VIP_SUBSCRIPTION_ID == "" then
+		return nil
+	end
+
+	local success, history = pcall(function()
+		return MarketplaceService:GetUserSubscriptionPaymentHistoryAsync(player, VIP_SUBSCRIPTION_ID)
+	end)
+
+	if not success then
+		warn("[PlayerController] Failed to fetch VipSubscription payment history:", player.Name, history)
+		return nil
+	end
+
+	if type(history) ~= "table" then
+		return nil
+	end
+
+	return getPaidCycleKey(history[1])
+end
+
+local function grantVipSubscriptionBrainrot(player: Player, profile: any, subscriptionData: {[string]: any}, rewardConfig: {[string]: any}): boolean
+	if subscriptionData.BrainrotGranted == true then
+		return false
+	end
+
+	local brainrotReward = rewardConfig.Brainrot
+	if type(brainrotReward) ~= "table" then
+		return false
+	end
+
+	if not ItemManager then
+		ItemManager = require(ServerScriptService.Modules.ItemManager)
+	end
+
+	local itemName = brainrotReward.Name
+	if type(itemName) ~= "string" or itemName == "" then
+		return false
+	end
+
+	local mutation = if type(brainrotReward.Mutation) == "string" and brainrotReward.Mutation ~= "" then brainrotReward.Mutation else "Neon"
+	local level = math.max(1, math.floor(tonumber(brainrotReward.Level) or 1))
+	local itemConfig = ItemConfigurations.GetItemData(itemName)
+	local rarity = itemConfig and itemConfig.Rarity or "Legendary"
+	local displayName = itemConfig and itemConfig.DisplayName or itemName
+	local tool = ItemManager.GiveItemToPlayer(player, itemName, mutation, rarity, level)
+	if not tool then
+		warn("[PlayerController] Failed to grant VipSubscription brainrot:", player.Name, itemName)
+		return false
+	end
+
+	subscriptionData.BrainrotGranted = true
+	local totalCollected = PlayerController:IncrementBrainrotsCollected(player, 1)
+	BadgeManager:EvaluateBrainrotMilestones(player, rarity, totalCollected)
+
+	local analyticsEconomyService = getAnalyticsEconomyService()
+	local transactionTypes = analyticsEconomyService and analyticsEconomyService:GetTransactionTypes() or nil
+	if analyticsEconomyService and transactionTypes then
+		analyticsEconomyService:LogItemValueSourceForItem(
+			player,
+			itemName,
+			mutation,
+			level,
+			transactionTypes.IAP,
+			"Subscription:VipSubscriptionBrainrot",
+			{
+				feature = "subscription_item",
+				content_id = itemName,
+				context = "vip_subscription",
+				rarity = rarity,
+				mutation = mutation,
+			}
+		)
+	end
+
+	local Events = ReplicatedStorage:FindFirstChild("Events")
+	local notif = Events and Events:FindFirstChild("ShowNotification")
+	if notif and notif:IsA("RemoteEvent") then
+		notif:FireClient(player, displayName .. " claimed from VIP Subscription!", "Success")
+	end
+
+	return true
+end
+
+local function grantVipSubscriptionPaidCycleRewards(player: Player, profile: any, paidCycleKeyOverride: string?): boolean
+	if not profile or type(profile.Data) ~= "table" then
+		return false
+	end
+
+	local rewardConfig = ProductConfigurations.SubscriptionRewards and ProductConfigurations.SubscriptionRewards[VIP_SUBSCRIPTION_NAME]
+	if type(rewardConfig) ~= "table" then
+		return false
+	end
+
+	local paidCycleKey = paidCycleKeyOverride or getLatestPaidVipSubscriptionCycleKey(player)
+	if not paidCycleKey then
+		return false
+	end
+
+	local subscriptionData = ensureVipSubscriptionData(profile.Data)
+	local grantedAnything = grantVipSubscriptionBrainrot(player, profile, subscriptionData, rewardConfig)
+
+	if subscriptionData.ClaimedPaidCycles[paidCycleKey] ~= true then
+		local boosterService = getBoosterService()
+		local monthlyBoosters = rewardConfig.MonthlyBoosters
+		if boosterService and boosterService.AddBoosterCharges and type(monthlyBoosters) == "table" then
+			if boosterService:AddBoosterCharges(player, monthlyBoosters, VIP_SUBSCRIPTION_NAME) then
+				subscriptionData.ClaimedPaidCycles[paidCycleKey] = true
+				grantedAnything = true
+
+				local analyticsEconomyService = getAnalyticsEconomyService()
+				if analyticsEconomyService then
+					analyticsEconomyService:LogEntitlementGranted(player, "VipSubscriptionMonthlyBoostPack", paidCycleKey, nil, {
+						feature = "vip_subscription",
+						content_id = VIP_SUBSCRIPTION_NAME,
+						context = "subscription_cycle",
+					})
+				end
+
+				local analyticsFunnelsService = getAnalyticsFunnelsService()
+				if analyticsFunnelsService then
+					analyticsFunnelsService:HandleStorePurchaseSuccess(player, {
+						purchaseKind = "subscription",
+						id = VIP_SUBSCRIPTION_ID,
+						productName = VIP_SUBSCRIPTION_NAME,
+						paymentType = "subscription",
+						surface = "shop_frame",
+					})
+				end
+
+				local Events = ReplicatedStorage:FindFirstChild("Events")
+				local notif = Events and Events:FindFirstChild("ShowNotification")
+				if notif and notif:IsA("RemoteEvent") then
+					notif:FireClient(player, "VIP monthly boost pack claimed!", "Success")
+				end
+			end
+		end
+	end
+
+	if grantedAnything then
+		playPurchaseEffects(player)
+	end
+
+	return grantedAnything
+end
+
+local function applyVipSubscriptionEntitlements(player: Player, isActive: boolean)
+	player:SetAttribute("HasVipSubscription", isActive)
+
+	if isActive then
+		player:SetAttribute("IsVIP", true)
+		player:SetAttribute("HasCollectAll", true)
+		player:SetAttribute("HasAutoBomb", true)
+	else
+		checkVIP(player)
+		syncEntitlementAttribute(player, "HasCollectAll", ProductConfigurations.GamePasses.CollectAll)
+		syncEntitlementAttribute(player, "HasAutoBomb", ProductConfigurations.GamePasses.AutoBomb)
+		if player:GetAttribute("HasAutoBomb") ~= true then
+			player:SetAttribute("AutoBombEnabled", false)
+		end
+	end
+
+	if SlotManager and SlotManager.RefreshAllSlots then
+		SlotManager.RefreshAllSlots(player)
+	end
+end
+
+local function syncVipSubscriptionStatus(player: Player, reason: string?)
+	if player.Parent ~= Players or type(VIP_SUBSCRIPTION_ID) ~= "string" or VIP_SUBSCRIPTION_ID == "" then
+		return
+	end
+
+	local success, status = pcall(function()
+		return MarketplaceService:GetUserSubscriptionStatusAsync(player, VIP_SUBSCRIPTION_ID)
+	end)
+
+	if not success then
+		warn("[PlayerController] Failed to fetch VipSubscription status:", player.Name, reason, status)
+		return
+	end
+
+	local isActive = type(status) == "table" and status.IsSubscribed == true
+	applyVipSubscriptionEntitlements(player, isActive)
+
+	if isActive then
+		local profile = profiles[player]
+		if profile then
+			grantVipSubscriptionPaidCycleRewards(player, profile)
+		end
+	end
+end
+
+local function queueVipSubscriptionSync(player: Player, reason: string?)
+	if vipSubscriptionSyncQueued[player] == true then
+		return
+	end
+
+	vipSubscriptionSyncQueued[player] = true
+	task.spawn(function()
+		vipSubscriptionSyncQueued[player] = nil
+		syncVipSubscriptionStatus(player, reason)
+	end)
+end
+
+local function grantVipSubscriptionStudioButtonRewards(player: Player)
+	if not RunService:IsStudio() then
+		return
+	end
+
+	local profile = profiles[player]
+	if not profile then
+		return
+	end
+
+	applyVipSubscriptionEntitlements(player, true)
+	grantVipSubscriptionPaidCycleRewards(player, profile, "StudioButton:" .. tostring(os.time()))
 end
 
 local function setupVIPTouch(part: BasePart)
@@ -665,7 +987,7 @@ local function setupVIPTouch(part: BasePart)
 
 	part.Touched:Connect(function(hit)
 		local player = Players:GetPlayerFromCharacter(hit.Parent)
-		if player and not vipCache[player] then
+		if player and not PlayerController:IsVIP(player) then
 			if not player.Character:GetAttribute("PromptDebounce") then
 				player.Character:SetAttribute("PromptDebounce", true)
 				local passId = ProductConfigurations.GamePasses.VIP
@@ -681,6 +1003,22 @@ local function calculateOfflineEarnings(player: Player, profile: any)
 	if OfflineIncomeController and OfflineIncomeController.QueueOfflineIncomeForJoin then
 		OfflineIncomeController:QueueOfflineIncomeForJoin(player, profile)
 		OfflineIncomeController:PushStatus(player)
+	end
+end
+
+local function clearStoredSlotIncomeForJoin(profile: any)
+	if not profile or not profile.Data or type(profile.Data.Plots) ~= "table" then
+		return
+	end
+
+	for _, floorData in pairs(profile.Data.Plots) do
+		if type(floorData) == "table" then
+			for _, slotData in pairs(floorData) do
+				if type(slotData) == "table" then
+					slotData.Stored = 0
+				end
+			end
+		end
 	end
 end
 
@@ -800,6 +1138,10 @@ function PlayerController:IncrementBrainrotsCollected(player: Player, amount: nu
 	local increment = math.max(0, math.floor(tonumber(amount) or 1))
 	profile.Data.TotalBrainrotsCollected = math.max(0, tonumber(profile.Data.TotalBrainrotsCollected) or 0) + increment
 	player:SetAttribute("TotalBrainrotsCollected", profile.Data.TotalBrainrotsCollected)
+	local analyticsFunnelsService = getAnalyticsFunnelsService()
+	if analyticsFunnelsService and analyticsFunnelsService.HandleBrainrotsCollectedChanged then
+		analyticsFunnelsService:HandleBrainrotsCollectedChanged(player, profile.Data.TotalBrainrotsCollected)
+	end
 	return profile.Data.TotalBrainrotsCollected
 end
 
@@ -1297,6 +1639,11 @@ local function createLeaderstats(player: Player, data: PlayerData)
 	local boosters = if type(data.Boosters) == "table" then data.Boosters else {}
 	player:SetAttribute("MegaExplosionEndsAt", math.max(0, tonumber(boosters.MegaExplosionEndsAt) or 0))
 	player:SetAttribute("ShieldEndsAt", math.max(0, tonumber(boosters.ShieldEndsAt) or 0))
+	local boosterCharges = ensureBoosterChargesData(data)
+	player:SetAttribute("MegaExplosionCharges", math.max(0, tonumber(boosterCharges.MegaExplosion) or 0))
+	player:SetAttribute("ShieldCharges", math.max(0, tonumber(boosterCharges.Shield) or 0))
+	player:SetAttribute("NukeBoosterCharges", math.max(0, tonumber(boosterCharges.NukeBooster) or 0))
+	player:SetAttribute("HasVipSubscription", player:GetAttribute("HasVipSubscription") == true)
 	player:SetAttribute("HasAutoBomb", player:GetAttribute("HasAutoBomb") == true)
 	player:SetAttribute("HasCollectAll", player:GetAttribute("HasCollectAll") == true)
 	player:SetAttribute("AutoBombEnabled", false)
@@ -1468,6 +1815,8 @@ local function onPlayerAdded(player: Player)
 	if type(profile.Data.Boosters.ShieldEndsAt) ~= "number" then
 		profile.Data.Boosters.ShieldEndsAt = 0
 	end
+	ensureBoosterChargesData(profile.Data)
+	ensureVipSubscriptionData(profile.Data)
 
 	profile.OnSessionEnd:Connect(function() 
 		profiles[player] = nil
@@ -1478,6 +1827,7 @@ local function onPlayerAdded(player: Player)
 		profiles[player] = profile
 		createLeaderstats(player, profile.Data)
 		calculateOfflineEarnings(player, profile)
+		clearStoredSlotIncomeForJoin(profile)
 		evaluateExistingBadgeProgress(player, profile)
 		local tutorialService = getTutorialService()
 		if tutorialService then
@@ -1487,6 +1837,9 @@ local function onPlayerAdded(player: Player)
 
 		local analyticsFunnelsService = getAnalyticsFunnelsService()
 		if analyticsFunnelsService then
+			if analyticsFunnelsService.HandleBrainrotsCollectedChanged then
+				analyticsFunnelsService:HandleBrainrotsCollectedChanged(player, profile.Data.TotalBrainrotsCollected or 0)
+			end
 			analyticsFunnelsService:HandleMoneyBalanceChanged(player)
 		end
 
@@ -1603,6 +1956,7 @@ local function onPlayerAdded(player: Player)
 			end
 		end)
 
+		queueVipSubscriptionSync(player, "player_join")
 		checkAndGrantGroupReward(player, profile)
 	else
 		profile:EndSession()
@@ -1611,6 +1965,7 @@ end
 
 local function onPlayerRemoving(player: Player)
 	vipCache[player] = nil
+	vipSubscriptionSyncQueued[player] = nil
 	deadPlayers[player] = nil 
 	loadingInventory[player] = nil 
 
@@ -1887,6 +2242,12 @@ function PlayerController:Init(controllers)
 		return profile and profile.Data.DiscoveredItems or {}
 	end
 
+	local studioGrantEvent = Events:FindFirstChild("RequestVipSubscriptionStudioGrant") or Instance.new("RemoteEvent", Events)
+	studioGrantEvent.Name = "RequestVipSubscriptionStudioGrant"
+	studioGrantEvent.OnServerEvent:Connect(function(player)
+		grantVipSubscriptionStudioButtonRewards(player)
+	end)
+
 	MarketplaceService.PromptGamePassPurchaseFinished:Connect(function(player, passId, wasPurchased)
 		if wasPurchased then
 			local analyticsEconomyService = getAnalyticsEconomyService()
@@ -1941,6 +2302,18 @@ function PlayerController:Init(controllers)
 				})
 			end
 			playPurchaseEffects(player) 
+		end
+	end)
+
+	MarketplaceService.PromptSubscriptionPurchaseFinished:Connect(function(player, subscriptionId, _didTryPurchasing)
+		if tostring(subscriptionId) == VIP_SUBSCRIPTION_ID then
+			queueVipSubscriptionSync(player, "subscription_prompt_finished")
+		end
+	end)
+
+	Players.UserSubscriptionStatusChanged:Connect(function(player, subscriptionId)
+		if tostring(subscriptionId) == VIP_SUBSCRIPTION_ID then
+			queueVipSubscriptionSync(player, "subscription_status_changed")
 		end
 	end)
 

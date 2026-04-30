@@ -678,6 +678,7 @@ local function processZoneExit(player: Player)
 			if profile then
 				profile.Data.TotalBrainrotsCollected = totalCollected
 				player:SetAttribute("TotalBrainrotsCollected", totalCollected)
+				AnalyticsFunnelsService:HandleBrainrotsCollectedChanged(player, totalCollected)
 			end
 
 			-- Auto-Equip the newly received item

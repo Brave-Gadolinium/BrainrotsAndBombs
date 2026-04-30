@@ -10,7 +10,7 @@ PostTutorialConfiguration.Stages = {
 	Completed = 4,
 }
 
-PostTutorialConfiguration.CompletionMessageDuration = 10
+PostTutorialConfiguration.CompletionMessageDuration = 5
 
 PostTutorialConfiguration.PromptTexts = {
 }

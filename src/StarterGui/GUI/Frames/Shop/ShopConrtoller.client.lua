@@ -2,6 +2,7 @@ local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local MarketplaceService = game:GetService("MarketplaceService")
+local RunService = game:GetService("RunService")
 
 local ProductConfigurations = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("ProductConfigurations"))
 local LuckyBlockConfiguration = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("LuckyBlockConfiguration"))
@@ -11,6 +12,8 @@ local NumberFormatter = require(ReplicatedStorage:WaitForChild("Modules"):WaitFo
 local player = Players.LocalPlayer
 local events = ReplicatedStorage:WaitForChild("Events")
 local requestAutoBombState = events:WaitForChild("RequestAutoBombState")
+local requestUseBoosterCharge = events:WaitForChild("RequestUseBoosterCharge")
+local requestVipSubscriptionStudioGrant = events:WaitForChild("RequestVipSubscriptionStudioGrant")
 local reportAnalyticsIntent = events:WaitForChild("ReportAnalyticsIntent")
 
 local ShopFrame = script.Parent
@@ -23,6 +26,7 @@ local Content = MainFrame:WaitForChild("Content")
 local initialized = false
 local infoCache = {}
 local trackedPackFrames = {}
+local trackedSubscriptionCards = {}
 local trackedBoosterCards = {}
 local pendingPriceRequests = {}
 local shopPricingActivated = false
@@ -171,6 +175,26 @@ local function getCachedProductInfo(productId, infoType)
 	return info
 end
 
+local function getCachedSubscriptionInfo(subscriptionId)
+	local cacheKey = "subscription:" .. tostring(subscriptionId)
+	if infoCache[cacheKey] ~= nil then
+		return infoCache[cacheKey]
+	end
+
+	local ok, info = pcall(function()
+		return MarketplaceService:GetSubscriptionProductInfoAsync(subscriptionId)
+	end)
+
+	if not ok then
+		warn("[ShopController] Failed to load subscription info:", subscriptionId, info)
+		infoCache[cacheKey] = false
+		return nil
+	end
+
+	infoCache[cacheKey] = info
+	return info
+end
+
 local function applyBasePriceText(label, text)
 	if not label then
 		return
@@ -223,6 +247,15 @@ local function restoreBasePriceText(label)
 	end
 end
 
+local function applyRawBasePriceText(label, text)
+	if not label then
+		return
+	end
+
+	label:SetAttribute("BasePriceText", text)
+	setText(label, text)
+end
+
 local function applyResolvedRobuxPrice(label, productId, infoType, onResolved)
 	if not label or type(productId) ~= "number" or productId <= 0 then
 		return
@@ -257,6 +290,48 @@ end
 local function setRobuxPriceAsync(label, productId, infoType, onResolved)
 	local function resolvePrice()
 		applyResolvedRobuxPrice(label, productId, infoType, onResolved)
+	end
+
+	if shopPricingActivated or ShopFrame.Visible then
+		resolvePrice()
+		return
+	end
+
+	table.insert(pendingPriceRequests, resolvePrice)
+end
+
+local function getSubscriptionPriceText(info)
+	if type(info) == "table" then
+		if type(info.DisplayPrice) == "string" and info.DisplayPrice ~= "" then
+			return info.DisplayPrice
+		end
+		if type(info.Price) == "string" and info.Price ~= "" then
+			return info.Price
+		end
+		if type(info.PriceInRobux) == "number" then
+			return formatRobux(info.PriceInRobux)
+		end
+		if type(info.Price) == "number" then
+			return tostring(info.Price)
+		end
+	end
+
+	return "Subscribe"
+end
+
+local function setSubscriptionPriceAsync(label, subscriptionId, onResolved)
+	local function resolvePrice()
+		if not label then
+			return
+		end
+
+		task.spawn(function()
+			local info = getCachedSubscriptionInfo(subscriptionId)
+			applyRawBasePriceText(label, getSubscriptionPriceText(info))
+			if onResolved then
+				onResolved()
+			end
+		end)
 	end
 
 	if shopPricingActivated or ShopFrame.Visible then
@@ -331,12 +406,14 @@ local function reportStorePromptFailed(section, entrypoint, productName, purchas
 		entrypoint = entrypoint,
 		productName = productName,
 		purchaseKind = purchaseKind,
-		paymentType = "robux",
+		paymentType = if purchaseKind == "subscription" then "subscription" else "robux",
 		reason = reason,
 	}
 
 	if purchaseKind == "gamepass" then
 		payload.passId = purchaseId
+	elseif purchaseKind == "subscription" then
+		payload.subscriptionId = purchaseId
 	else
 		payload.productId = purchaseId
 	end
@@ -389,6 +466,30 @@ local function promptGamePassPurchaseWithAnalytics(section, entrypoint, productN
 	if not success then
 		warn("[ShopController] Failed to prompt gamepass:", productName, err)
 		reportStorePromptFailed(section, entrypoint, productName, "gamepass", passId, "prompt_failed")
+	end
+end
+
+local function promptSubscriptionPurchaseWithAnalytics(section, entrypoint, productName, subscriptionId)
+	if type(subscriptionId) ~= "string" or subscriptionId == "" then
+		reportStorePromptFailed(section, entrypoint, productName, "subscription", subscriptionId, "missing_subscription_id")
+		return
+	end
+
+	reportAnalyticsIntent:FireServer("StoreOfferPrompted", {
+		surface = "shop_frame",
+		section = section,
+		entrypoint = entrypoint,
+		productName = productName,
+		subscriptionId = subscriptionId,
+		purchaseKind = "subscription",
+		paymentType = "subscription",
+	})
+	local success, err = pcall(function()
+		MarketplaceService:PromptSubscriptionPurchase(player, subscriptionId)
+	end)
+	if not success then
+		warn("[ShopController] Failed to prompt subscription:", productName, err)
+		reportStorePromptFailed(section, entrypoint, productName, "subscription", subscriptionId, "prompt_failed")
 	end
 end
 
@@ -467,6 +568,23 @@ local function refreshPackVisibility()
 	end
 end
 
+local function refreshSubscriptionCards()
+	for _, entry in ipairs(trackedSubscriptionCards) do
+		local isActive = player:GetAttribute(entry.Attribute) == true
+		if entry.Button then
+			entry.Button.Active = not isActive
+			entry.Button.AutoButtonColor = not isActive
+		end
+		if entry.PriceLabel then
+			if isActive then
+				setText(entry.PriceLabel, "Subscribed")
+			else
+				restoreBasePriceText(entry.PriceLabel)
+			end
+		end
+	end
+end
+
 local function setupPackSection(frameNames, packName, title)
 	local frame = findAnyChild(Content, frameNames)
 	if not frame then
@@ -492,6 +610,78 @@ local function setupPackSection(frameNames, packName, title)
 		Frame = frame,
 		Attribute = packName,
 	})
+end
+
+local function configureVipSubscriptionVisuals(contentFrame)
+	local rewards = ProductConfigurations.SubscriptionRewards and ProductConfigurations.SubscriptionRewards.VipSubscription
+	if type(rewards) ~= "table" then
+		return
+	end
+
+	setText(findNamedDescendant(contentFrame, {"Name"}, "TextLabel"), "VIP Subscription")
+
+	local cashLabel = findNamedDescendant(contentFrame, {"Cash"}, "TextLabel")
+	if cashLabel then
+		cashLabel.Text = "+50% INCOME"
+	end
+
+	local brainrotReward = rewards.Brainrot
+	if type(brainrotReward) == "table" and type(brainrotReward.Name) == "string" then
+		setText(findNamedDescendant(contentFrame, {"BrainrotName"}, "TextLabel"), getItemDisplayName(brainrotReward.Name))
+		local itemConfig = ItemConfigurations.GetItemData(brainrotReward.Name)
+		if itemConfig then
+			setImage(findAnyChild(contentFrame, {"BrainrotImage"}), itemConfig.ImageId)
+		end
+	end
+
+	setText(findNamedDescendant(contentFrame, {"LavaCoil", "SecondItemName"}, "TextLabel"), "Monthly Boost Pack")
+end
+
+local function setupVipSubscriptionSection()
+	local frame = findAnyChild(Content, {"VipSubscription"})
+	if not frame then
+		return
+	end
+
+	local contentFrame = findAnyChild(frame, {"Content"}) or frame
+	local buttonsFrame = findAnyChild(contentFrame, {"Buttons"}) or contentFrame
+	local buyButton = findGuiButton(buttonsFrame, {"Buy", "Buy39Robux", "Buy149Robux"})
+	local subscriptionId = ProductConfigurations.Subscriptions and ProductConfigurations.Subscriptions.VipSubscription
+
+	configureVipSubscriptionVisuals(contentFrame)
+
+	if buyButton and type(subscriptionId) == "string" and subscriptionId ~= "" then
+		setupButtonEffects(buyButton, false)
+		local priceLabel = findPriceLabel(buyButton)
+		setSubscriptionPriceAsync(priceLabel, subscriptionId, refreshSubscriptionCards)
+		bindButtonOnce(buyButton, function()
+			if player:GetAttribute("HasVipSubscription") == true then
+				return
+			end
+
+			if RunService:IsStudio() then
+				reportAnalyticsIntent:FireServer("StoreOfferPrompted", {
+					surface = "shop_frame",
+					section = "packs",
+					entrypoint = "vip_subscription",
+					productName = "VipSubscription",
+					subscriptionId = subscriptionId,
+					purchaseKind = "subscription",
+					paymentType = "studio",
+				})
+				requestVipSubscriptionStudioGrant:FireServer()
+				return
+			end
+
+			promptSubscriptionPurchaseWithAnalytics("packs", "vip_subscription", "VipSubscription", subscriptionId)
+		end)
+
+		table.insert(trackedSubscriptionCards, {
+			Button = buyButton,
+			PriceLabel = priceLabel,
+			Attribute = "HasVipSubscription",
+		})
+	end
 end
 
 local function setupMoneySection()
@@ -621,6 +811,44 @@ local function formatRemainingTime(endsAt)
 	return string.format("%02d:%02d", minutes, seconds)
 end
 
+local function getBoosterChargeAttribute(productName)
+	if productName == "MegaExplosion" then
+		return "MegaExplosionCharges"
+	end
+	if productName == "Shield" then
+		return "ShieldCharges"
+	end
+	if productName == "NukeBooster" then
+		return "NukeBoosterCharges"
+	end
+	return nil
+end
+
+local function getBoosterChargeCount(productName)
+	local attributeName = getBoosterChargeAttribute(productName)
+	if not attributeName then
+		return 0
+	end
+
+	return math.max(0, math.floor(tonumber(player:GetAttribute(attributeName)) or 0))
+end
+
+local function requestBoosterChargeOrPrompt(section, entrypoint, productName, productId)
+	local endsAtAttribute = if productName == "MegaExplosion" then "MegaExplosionEndsAt" elseif productName == "Shield" then "ShieldEndsAt" else nil
+	if endsAtAttribute and math.max(0, tonumber(player:GetAttribute(endsAtAttribute)) or 0) > os.time() then
+		return
+	end
+
+	if getBoosterChargeCount(productName) > 0 then
+		requestUseBoosterCharge:FireServer(productName)
+		return
+	end
+
+	if type(productId) == "number" and productId > 0 then
+		promptProductPurchaseWithAnalytics(section, entrypoint, productName, productId)
+	end
+end
+
 local function registerTrackedCard(key, priceLabel, infoType, id)
 	if not priceLabel then
 		return
@@ -642,6 +870,8 @@ local function refreshTrackedBoosterCards()
 		if endsAt > os.time() then
 			setText(megaData.PriceLabel, formatRemainingTime(endsAt))
 			nextCountdownRefreshDelay = 1
+		elseif getBoosterChargeCount("MegaExplosion") > 0 then
+			setText(megaData.PriceLabel, "Use x" .. tostring(getBoosterChargeCount("MegaExplosion")))
 		else
 			restoreBasePriceText(megaData.PriceLabel)
 		end
@@ -653,6 +883,8 @@ local function refreshTrackedBoosterCards()
 		if endsAt > os.time() then
 			setText(shieldData.PriceLabel, formatRemainingTime(endsAt))
 			nextCountdownRefreshDelay = 1
+		elseif getBoosterChargeCount("Shield") > 0 then
+			setText(shieldData.PriceLabel, "Use x" .. tostring(getBoosterChargeCount("Shield")))
 		else
 			restoreBasePriceText(shieldData.PriceLabel)
 		end
@@ -678,7 +910,11 @@ local function refreshTrackedBoosterCards()
 
 	local nukeData = trackedBoosterCards.NukeBooster
 	if nukeData and nukeData.PriceLabel then
-		restoreBasePriceText(nukeData.PriceLabel)
+		if getBoosterChargeCount("NukeBooster") > 0 then
+			setText(nukeData.PriceLabel, "Use x" .. tostring(getBoosterChargeCount("NukeBooster")))
+		else
+			restoreBasePriceText(nukeData.PriceLabel)
+		end
 	end
 
 	shopCountdownRefreshToken += 1
@@ -781,9 +1017,7 @@ local function setupBoosterSections()
 				Enum.InfoType.Product,
 				productId,
 				function()
-					if type(productId) == "number" and productId > 0 then
-						promptProductPurchaseWithAnalytics("boosters", toSnakeCase(definition.ProductName), definition.ProductName, productId)
-					end
+					requestBoosterChargeOrPrompt("boosters", toSnakeCase(definition.ProductName), definition.ProductName, productId)
 				end
 			)
 		end
@@ -798,6 +1032,7 @@ local function init()
 
 	setupPackSection({"StarterPack"}, "StarterPack", "Starter Pack")
 	setupPackSection({"Pro Pack", "ProPack"}, "ProPack", "Pro Pack")
+	setupVipSubscriptionSection()
 	setupHackerLuckyBlockSection()
 	setupMoneySection()
 	setupBoosterSections()
@@ -807,6 +1042,7 @@ local function init()
 			reportStoreOpened("shop_frame")
 			activateShopPricing()
 			refreshPackVisibility()
+			refreshSubscriptionCards()
 			refreshTrackedBoosterCards()
 		else
 			shopCountdownRefreshToken += 1
@@ -818,15 +1054,20 @@ local function init()
 	end
 
 	refreshPackVisibility()
+	refreshSubscriptionCards()
 	refreshTrackedBoosterCards()
 
 	player:GetAttributeChangedSignal("StarterPack"):Connect(refreshPackVisibility)
 	player:GetAttributeChangedSignal("ProPack"):Connect(refreshPackVisibility)
+	player:GetAttributeChangedSignal("HasVipSubscription"):Connect(refreshSubscriptionCards)
 	player:GetAttributeChangedSignal("HasCollectAll"):Connect(refreshTrackedBoosterCards)
 	player:GetAttributeChangedSignal("HasAutoBomb"):Connect(refreshTrackedBoosterCards)
 	player:GetAttributeChangedSignal("AutoBombEnabled"):Connect(refreshTrackedBoosterCards)
 	player:GetAttributeChangedSignal("MegaExplosionEndsAt"):Connect(refreshTrackedBoosterCards)
 	player:GetAttributeChangedSignal("ShieldEndsAt"):Connect(refreshTrackedBoosterCards)
+	player:GetAttributeChangedSignal("MegaExplosionCharges"):Connect(refreshTrackedBoosterCards)
+	player:GetAttributeChangedSignal("ShieldCharges"):Connect(refreshTrackedBoosterCards)
+	player:GetAttributeChangedSignal("NukeBoosterCharges"):Connect(refreshTrackedBoosterCards)
 end
 
 init()

@@ -2,6 +2,7 @@
 
 local Players = game:GetService("Players")
 local CollectionService = game:GetService("CollectionService")
+local Lighting = game:GetService("Lighting")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 local Workspace = game:GetService("Workspace")
@@ -24,6 +25,10 @@ local CandyEventService = {}
 local MinesFolder = Workspace:WaitForChild("Mines")
 local RandomObject = Random.new()
 local ROTATE_TAG = "Rotate"
+local SKYBOX_FOLDER_NAME = "Skybox"
+local DEFAULT_SKYBOX_NAME = "Sky"
+local CANDY_SKYBOX_NAME = "SkyCandy"
+local MANAGED_SKYBOX_ATTRIBUTE = "CandyEventManagedSkybox"
 
 local PlayerController
 local ItemManager
@@ -47,6 +52,32 @@ local forcedState: {
 	Mode: "active" | "inactive",
 	EndsAt: number,
 }? = nil
+
+local function applyCandyEventSkybox(isActive: boolean)
+	local skyboxContainer = ReplicatedStorage:FindFirstChild(SKYBOX_FOLDER_NAME)
+	if not skyboxContainer then
+		warn(`[CandyEventService] ReplicatedStorage.{SKYBOX_FOLDER_NAME} was not found.`)
+		return
+	end
+
+	local targetSkyboxName = if isActive then CANDY_SKYBOX_NAME else DEFAULT_SKYBOX_NAME
+	local skyboxTemplate = skyboxContainer:FindFirstChild(targetSkyboxName)
+	if not skyboxTemplate or not skyboxTemplate:IsA("Sky") then
+		warn(`[CandyEventService] ReplicatedStorage.{SKYBOX_FOLDER_NAME}.{targetSkyboxName} Sky was not found.`)
+		return
+	end
+
+	for _, child in ipairs(Lighting:GetChildren()) do
+		if child:IsA("Sky") then
+			child:Destroy()
+		end
+	end
+
+	local skybox = skyboxTemplate:Clone()
+	skybox.Name = targetSkyboxName
+	skybox:SetAttribute(MANAGED_SKYBOX_ATTRIBUTE, true)
+	skybox.Parent = Lighting
+end
 
 local function ensureTimerFolder(): Folder
 	local remotesFolder = ReplicatedStorage:FindFirstChild("Remotes")
@@ -543,6 +574,10 @@ local function refreshState(forcePush: boolean?)
 	local wasActive = currentState.isActive
 	currentState = nextState
 
+	if didChange or forcePush == true then
+		applyCandyEventSkybox(currentState.isActive)
+	end
+
 	if didChange then
 		if currentState.isActive and not wasActive then
 			beginRoundCandySpawn()
@@ -697,6 +732,7 @@ function CandyEventService:Start()
 
 	started = true
 	currentState = getPublicState()
+	applyCandyEventSkybox(currentState.isActive)
 
 	if currentState.isActive then
 		beginRoundCandySpawn()

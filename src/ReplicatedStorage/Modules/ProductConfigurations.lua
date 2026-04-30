@@ -58,6 +58,10 @@ ProductConfigurations.GamePasses = {
 	["AutoBomb"] = 1788824679,
 }
 
+ProductConfigurations.Subscriptions = {
+	["VipSubscription"] = "EXP-7867489600552436222",
+}
+
 ProductConfigurations.Boosters = {
 	["MegaExplosion"] = {
 		DisplayName = "Mega Explosion",
@@ -103,6 +107,22 @@ ProductConfigurations.PackRewards = {
 			{Name = "girafa_celeste", Mutation = "Normal", Level = 1},
 			{Name = "illuminato_triangolo", Mutation = "Normal", Level = 1},
 		}
+	}
+}
+
+ProductConfigurations.SubscriptionRewards = {
+	["VipSubscription"] = {
+		Brainrot = {Name = "strawberry_elephant", Mutation = "Neon", Level = 1},
+		Entitlements = {
+			VIP = true,
+			CollectAll = true,
+			AutoBomb = true,
+		},
+		MonthlyBoosters = {
+			MegaExplosion = 10,
+			Shield = 10,
+			NukeBooster = 10,
+		},
 	}
 }
 
@@ -180,6 +200,14 @@ end
 function ProductConfigurations.GetGamePassById(id: number)
 	for name, passId in pairs(ProductConfigurations.GamePasses) do
 		if passId == id then return name end
+	end
+	return nil
+end
+
+function ProductConfigurations.GetSubscriptionById(id: any)
+	local targetId = tostring(id)
+	for name, subscriptionId in pairs(ProductConfigurations.Subscriptions) do
+		if tostring(subscriptionId) == targetId then return name end
 	end
 	return nil
 end

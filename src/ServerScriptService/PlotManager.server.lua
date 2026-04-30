@@ -528,11 +528,7 @@ local function connectCollectAllButton(plotModel: Model, owner: Player)
 		end
 		collectAllDebounce[owner] = now
 
-		local success, ownsPass = pcall(function()
-			return MarketplaceService:UserOwnsGamePassAsync(owner.UserId, COLLECT_ALL_GAMEPASS)
-		end)
-
-		if success and ownsPass then
+		if owner:GetAttribute("HasCollectAll") == true then
 			collectAllFromPlot(owner, plotModel)
 		else
 			if BoosterService and BoosterService.RecordManualCollect then

@@ -336,7 +336,17 @@ local function resolveItemMetadata(productName: string): BillboardMetadata?
 end
 
 local function resolveLuckyBlockMetadata(productName: string): BillboardMetadata?
-	local blockId = ProductConfigurations.LuckyBlockProductRewards[productName]
+	local rewardData = ProductConfigurations.LuckyBlockProductRewards[productName]
+	local blockId: string? = nil
+	local quantity = 1
+
+	if type(rewardData) == "string" then
+		blockId = rewardData
+	elseif type(rewardData) == "table" then
+		blockId = rewardData.BlockId
+		quantity = math.max(1, math.floor(tonumber(rewardData.Quantity) or 1))
+	end
+
 	if type(blockId) ~= "string" or blockId == "" then
 		return nil
 	end
@@ -347,8 +357,13 @@ local function resolveLuckyBlockMetadata(productName: string): BillboardMetadata
 	end
 
 	local rarityText, rarityColor = resolveRarityDisplay(blockConfig.Rarity)
+	local displayName = blockConfig.DisplayName
+	if quantity > 1 then
+		displayName = string.format("%dx %s", quantity, displayName)
+	end
+
 	return {
-		DisplayName = blockConfig.DisplayName,
+		DisplayName = displayName,
 		RarityText = rarityText,
 		RarityColor = rarityColor,
 		NumbersText = nil,

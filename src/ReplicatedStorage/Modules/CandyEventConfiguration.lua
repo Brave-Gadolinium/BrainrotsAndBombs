@@ -51,10 +51,10 @@ local function getUpgradeImage(upgradeId: string): string?
 	return nil
 end
 
-CandyEventConfiguration.ActiveDurationSeconds = 10 * 60
+CandyEventConfiguration.ActiveDurationSeconds = 3 * 60
 CandyEventConfiguration.SpinCost = 3
 CandyEventConfiguration.SpinAnimationSeconds = 6
-CandyEventConfiguration.SchedulePeriodSeconds = 60 * 60
+CandyEventConfiguration.SchedulePeriodSeconds = 10 * 60
 CandyEventConfiguration.TemplateSearchNames = {
 	"Candy",
 	"CandyModel",
@@ -86,7 +86,7 @@ CandyEventConfiguration.PickupPopUpSoundId = "rbxassetid://136650469995272"
 CandyEventConfiguration.Text = {
 	CountdownPrefix = "CANDY EVENT IN",
 	ActivePrefix = "CANDY EVENT LIVE",
-	CountdownSubtext = "HAPPENS EVERY HOUR",
+	CountdownSubtext = "HAPPENS EVERY 10 MINUTES",
 	EventStarted = "CANDY EVENT STARTED!",
 	EventHint = "COLLECT CANDIES IN THE MINE",
 	SpinButtonFormat = "SPIN (%d CANDIES)",
