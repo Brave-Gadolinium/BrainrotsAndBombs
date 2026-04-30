@@ -29,6 +29,8 @@ local AUTO_BOMB_CHECK_INTERVAL = 0.2
 local GLOBAL_OFFER_COOLDOWN = 60
 local PER_OFFER_COOLDOWN = 180
 local SHIELD_FORCE_FIELD_NAME = "ShieldBoosterForceField"
+local ZONE_DETECTION_HORIZONTAL_PADDING = 2
+local ZONE_DETECTION_VERTICAL_PADDING = 10
 
 local BOOSTER_ATTRIBUTE_BY_NAME = {
 	MegaExplosion = "MegaExplosionEndsAt",
@@ -359,11 +361,11 @@ end
 
 local function isInsideZonePart(zonePart: BasePart, position: Vector3): boolean
 	local relativePos = zonePart.CFrame:PointToObjectSpace(position)
-	local size = zonePart.Size
+	local halfSize = zonePart.Size * 0.5
 
-	return math.abs(relativePos.X) <= size.X * 0.5
-		and math.abs(relativePos.Y) <= size.Y * 0.5
-		and math.abs(relativePos.Z) <= size.Z * 0.5
+	return math.abs(relativePos.X) <= halfSize.X + ZONE_DETECTION_HORIZONTAL_PADDING
+		and math.abs(relativePos.Y) <= halfSize.Y + ZONE_DETECTION_VERTICAL_PADDING
+		and math.abs(relativePos.Z) <= halfSize.Z + ZONE_DETECTION_HORIZONTAL_PADDING
 end
 
 local function isPlayerInMineZone(player: Player): boolean
@@ -507,9 +509,11 @@ function BoosterService:UseBoosterCharge(player: Player, boosterName: string): b
 	end
 
 	if boosterName == "NukeBooster" then
+		local wasInMineZone = isPlayerInMineZone(player)
 		local didDetonate = self:TriggerNukeBooster(player)
 		if not didDetonate then
-			fireNotification(player, "Nuke failed: enter mining zone", "Error")
+			local message = if wasInMineZone then "Nuke failed: mine layer is still loading" else "Nuke failed: enter mining zone"
+			fireNotification(player, message, "Error")
 			return false
 		end
 
@@ -517,7 +521,7 @@ function BoosterService:UseBoosterCharge(player: Player, boosterName: string): b
 			return false
 		end
 
-		fireNotification(player, "Nuke detonated!", "Success")
+		fireNotification(player, "Nuke incoming!", "Success")
 		return true
 	end
 

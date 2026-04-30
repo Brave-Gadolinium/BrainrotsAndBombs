@@ -57,6 +57,12 @@ local NUKE_MAX_FLIGHT_TIME = 8
 local NUKE_PROJECTILE_SIZE = 5
 local NUKE_TERRAIN_RADIUS_SCALE = 0.45
 local NUKE_MIN_TERRAIN_RADIUS = 18
+local NUKE_EXPLOSION_SOUND_ID = "rbxassetid://138186576"
+local NUKE_PROJECTILE_TEMPLATE_NAMES = {
+	"NukeBomb",
+	"NukeProjectile",
+	"NukeBoosterBomb",
+}
 local notifyPlayer: (player: Player, message: string) -> ()
 
 local function isFiniteNumber(value: number): boolean
@@ -173,6 +179,15 @@ local function getBombZonePart(position: Vector3): BasePart?
 	end
 
 	return nil
+end
+
+local function isPositionInsideZonePart(position: Vector3, zonePart: BasePart): boolean
+	return isPositionInsidePartBounds(
+		position,
+		zonePart,
+		ZONE_DETECTION_HORIZONTAL_PADDING,
+		ZONE_DETECTION_VERTICAL_PADDING
+	)
 end
 
 local function isBombUseBlocked(): boolean
@@ -391,19 +406,16 @@ local function dropCarriedBrainrot(player: Player): boolean
 	return false
 end
 
-local function playExplosionSound(position: Vector3)
-	if not soundsFolder then
-		return
+local function getSoundsFolder(): Instance?
+	if soundsFolder and soundsFolder.Parent then
+		return soundsFolder
 	end
 
-	local soundTemplate = soundsFolder:FindFirstChild("Explosion")
-		or soundsFolder:FindFirstChild("Explode")
-		or soundsFolder:FindFirstChild("BombExplosion")
+	soundsFolder = Workspace:FindFirstChild("Sounds")
+	return soundsFolder
+end
 
-	if not soundTemplate or not soundTemplate:IsA("Sound") then
-		return
-	end
-
+local function playExplosionSound(position: Vector3, volumeMultiplier: number?)
 	local soundPart = Instance.new("Part")
 	soundPart.Name = "BombExplosionSoundPart"
 	soundPart.Anchored = true
@@ -415,11 +427,37 @@ local function playExplosionSound(position: Vector3)
 	soundPart.Position = position
 	soundPart.Parent = Workspace
 
-	local sound = soundTemplate:Clone()
+	local resolvedSoundsFolder = getSoundsFolder()
+	local soundTemplate = resolvedSoundsFolder and (
+		resolvedSoundsFolder:FindFirstChild("Explosion")
+			or resolvedSoundsFolder:FindFirstChild("Explode")
+			or resolvedSoundsFolder:FindFirstChild("BombExplosion")
+	)
+
+	local sound: Sound
+	if soundTemplate and soundTemplate:IsA("Sound") then
+		sound = soundTemplate:Clone()
+	else
+		sound = Instance.new("Sound")
+		sound.SoundId = NUKE_EXPLOSION_SOUND_ID
+		sound.Volume = 1
+		sound.RollOffMinDistance = 12
+		sound.RollOffMaxDistance = 220
+	end
+
+	if volumeMultiplier and volumeMultiplier > 0 then
+		sound.Volume *= volumeMultiplier
+	end
+
 	sound.Parent = soundPart
 	sound:Play()
 
-	Debris:AddItem(soundPart, math.max(sound.TimeLength, 2))
+	local lifetime = sound.TimeLength
+	if lifetime <= 0 then
+		lifetime = 4
+	end
+
+	Debris:AddItem(soundPart, math.max(lifetime, 2))
 end
 
 local function disconnectTerrainMonitor(state)
@@ -1031,6 +1069,338 @@ local function createThrownBomb(
 	Debris:AddItem(bombInstance, 8)
 end
 
+local function findNukeProjectileTemplate(): Instance?
+	local templatesFolder = ReplicatedStorage:FindFirstChild("Templates")
+	local containers = { ReplicatedStorage }
+	if templatesFolder then
+		table.insert(containers, 1, templatesFolder)
+	end
+
+	for _, container in ipairs(containers) do
+		for _, templateName in ipairs(NUKE_PROJECTILE_TEMPLATE_NAMES) do
+			local template = container:FindFirstChild(templateName)
+			if template and (template:IsA("Model") or template:IsA("BasePart")) then
+				return template
+			end
+		end
+	end
+
+	return nil
+end
+
+local function configureNukeProjectilePart(part: BasePart, rootPart: BasePart)
+	part.Anchored = false
+	part.CanCollide = true
+	part.CanQuery = true
+	part.CanTouch = true
+	part.Massless = part ~= rootPart
+end
+
+local function createFallbackNukeProjectile(origin: Vector3): (BasePart, Instance)
+	local bomb = Instance.new("Part")
+	bomb.Name = "NukeProjectile"
+	bomb.Shape = Enum.PartType.Ball
+	bomb.Size = Vector3.new(NUKE_PROJECTILE_SIZE, NUKE_PROJECTILE_SIZE, NUKE_PROJECTILE_SIZE)
+	bomb.CFrame = CFrame.new(origin)
+	bomb.Color = Color3.fromRGB(20, 20, 20)
+	bomb.Material = Enum.Material.Metal
+	bomb.CanCollide = true
+	bomb.CanQuery = true
+	bomb.CanTouch = true
+	bomb.Massless = false
+	bomb.Parent = Workspace
+	return bomb, bomb
+end
+
+local function createNukeProjectile(origin: Vector3): (BasePart, Instance)
+	local template = findNukeProjectileTemplate()
+	if not template then
+		return createFallbackNukeProjectile(origin)
+	end
+
+	local projectile = template:Clone()
+	projectile.Name = "NukeProjectile"
+	stripThrownBombInstance(projectile)
+
+	if projectile:IsA("BasePart") then
+		projectile.CFrame = CFrame.new(origin)
+		configureNukeProjectilePart(projectile, projectile)
+		projectile.Parent = Workspace
+		return projectile, projectile
+	end
+
+	if not projectile:IsA("Model") then
+		projectile:Destroy()
+		return createFallbackNukeProjectile(origin)
+	end
+
+	local rootPart = projectile.PrimaryPart or projectile:FindFirstChildWhichIsA("BasePart", true)
+	if not rootPart then
+		projectile:Destroy()
+		return createFallbackNukeProjectile(origin)
+	end
+
+	projectile.PrimaryPart = rootPart
+	for _, descendant in ipairs(projectile:GetDescendants()) do
+		if descendant:IsA("BasePart") then
+			configureNukeProjectilePart(descendant, rootPart)
+			if descendant ~= rootPart then
+				local weld = Instance.new("WeldConstraint")
+				weld.Part0 = rootPart
+				weld.Part1 = descendant
+				weld.Parent = rootPart
+			end
+		end
+	end
+
+	projectile:PivotTo(CFrame.new(origin))
+	projectile.Parent = Workspace
+	return rootPart, projectile
+end
+
+local function resolveNukeBombData(player: Player): (any, string?)
+	local _, bombData, bombName = resolveAvailableBomb(player)
+	if bombData then
+		return getResolvedBombDataForPlayer(player, bombData), bombName
+	end
+
+	tryRepairMissingBomb(player)
+
+	local preferredBombName = getPreferredBombName(player)
+	local preferredBombData = BombsConfigurations.GetBombData(preferredBombName)
+	if preferredBombData then
+		return getResolvedBombDataForPlayer(player, preferredBombData), preferredBombName
+	end
+
+	local fallbackBombData = BombsConfigurations.GetBombData("Bomb 1")
+	if fallbackBombData then
+		return getResolvedBombDataForPlayer(player, fallbackBombData), "Bomb 1"
+	end
+
+	return nil, nil
+end
+
+local function getNukeDropPosition(targetPosition: Vector3, zonePart: BasePart): Vector3
+	local relativePosition = zonePart.CFrame:PointToObjectSpace(targetPosition)
+	local halfSize = zonePart.Size * 0.5
+	local clampedLocalPosition = Vector3.new(
+		math.clamp(relativePosition.X, -halfSize.X, halfSize.X),
+		halfSize.Y + NUKE_DROP_HEIGHT,
+		math.clamp(relativePosition.Z, -halfSize.Z, halfSize.Z)
+	)
+
+	return zonePart.CFrame:PointToWorldSpace(clampedLocalPosition)
+end
+
+local function getRootPartFromPlayer(player: Player): BasePart?
+	local character = player.Character
+	if not character then
+		return nil
+	end
+
+	local root = character:FindFirstChild("HumanoidRootPart")
+	if root and root:IsA("BasePart") then
+		return root
+	end
+
+	return nil
+end
+
+local function affectPlayersInNukeZone(
+	owner: Player,
+	zonePart: BasePart,
+	explosionPosition: Vector3,
+	blastRadius: number,
+	knockbackForce: number
+)
+	for _, plr in ipairs(Players:GetPlayers()) do
+		if plr ~= owner then
+			local targetRoot = getRootPartFromPlayer(plr)
+			if targetRoot and isPositionInsideZonePart(targetRoot.Position, zonePart) then
+				applyBlastToPlayer(owner, plr, explosionPosition, blastRadius, knockbackForce, {
+					AllowSelf = false,
+					ForceHit = true,
+					RequireMineZone = false,
+				})
+			end
+		end
+	end
+end
+
+local function performNukeExplosion(
+	player: Player,
+	zonePart: BasePart,
+	hitPosition: Vector3,
+	resolvedBombData,
+	blastRadius: number,
+	knockbackForce: number
+)
+	local terrainRadius = math.max(NUKE_MIN_TERRAIN_RADIUS, blastRadius * NUKE_TERRAIN_RADIUS_SCALE)
+	local visualRadius = math.max(blastRadius, terrainRadius)
+
+	firePlayerUIEffect(player, "BombCameraBlast", hitPosition, visualRadius)
+
+	if isMinePositionReady(hitPosition) then
+		Terrain:FillBall(hitPosition, terrainRadius, Enum.Material.Air)
+		TerrainGeneratorManager.MarkSphereDirty(hitPosition, terrainRadius)
+	end
+
+	local explosion = Instance.new("Explosion")
+	explosion.Position = hitPosition
+	explosion.BlastRadius = visualRadius
+	explosion.BlastPressure = 0
+	explosion.DestroyJointRadiusPercent = 0
+	explosion.Parent = Workspace
+
+	playExplosionSound(hitPosition, 2)
+	affectPlayersInNukeZone(player, zonePart, hitPosition, blastRadius, knockbackForce)
+
+	if not PlayerController then
+		PlayerController = require(game.ServerScriptService.Controllers.PlayerController)
+	end
+
+	local income = tonumber(resolvedBombData.ExplosionIncome) or 0
+	if income > 0 then
+		PlayerController:AddMoney(player, income)
+		AnalyticsEconomyService:BufferBombIncome(player, "NukeBooster", income)
+		if cashPopupEvent then
+			cashPopupEvent:FireClient(player, income)
+		end
+	end
+end
+
+local function isNukeContactInstance(instance: Instance?, projectileInstance: Instance): boolean
+	if not instance then
+		return false
+	end
+
+	if instance == Terrain then
+		return true
+	end
+
+	if instance:IsDescendantOf(projectileInstance) or instance:IsDescendantOf(zonesFolder) then
+		return false
+	end
+
+	return instance:IsA("BasePart") and (instance.CanCollide or instance.CanTouch or instance.CanQuery)
+end
+
+local function isNukeRaycastHit(result: RaycastResult?, projectileInstance: Instance): boolean
+	if not result then
+		return false
+	end
+
+	if result.Instance == Terrain then
+		return result.Material ~= Enum.Material.Air
+	end
+
+	return isNukeContactInstance(result.Instance, projectileInstance)
+end
+
+local function launchNukeProjectile(
+	player: Player,
+	zonePart: BasePart,
+	origin: Vector3,
+	resolvedBombData,
+	blastRadius: number,
+	knockbackForce: number
+)
+	local projectilePart, projectileInstance = createNukeProjectile(origin)
+	projectilePart:SetNetworkOwner(nil)
+	projectilePart.AssemblyLinearVelocity = Vector3.new(0, -NUKE_DROP_SPEED, 0)
+
+	local raycastParams = RaycastParams.new()
+	raycastParams.FilterType = Enum.RaycastFilterType.Exclude
+	raycastParams.FilterDescendantsInstances = { projectileInstance, zonesFolder }
+
+	local detonated = false
+	local lastPosition = projectilePart.Position
+	local heartbeatConnection: RBXScriptConnection? = nil
+	local touchConnections: {RBXScriptConnection} = {}
+
+	local function disconnect()
+		if heartbeatConnection then
+			heartbeatConnection:Disconnect()
+			heartbeatConnection = nil
+		end
+
+		for _, connection in ipairs(touchConnections) do
+			connection:Disconnect()
+		end
+		table.clear(touchConnections)
+	end
+
+	local function detonate(hitPosition: Vector3)
+		if detonated then
+			return
+		end
+
+		detonated = true
+		disconnect()
+
+		if projectileInstance.Parent then
+			projectileInstance:Destroy()
+		end
+
+		performNukeExplosion(player, zonePart, hitPosition, resolvedBombData, blastRadius, knockbackForce)
+	end
+
+	local function handleTouch(hitInstance: BasePart)
+		if not isNukeContactInstance(hitInstance, projectileInstance) then
+			return
+		end
+
+		detonate(projectilePart.Position)
+	end
+
+	if projectileInstance:IsA("BasePart") then
+		table.insert(touchConnections, projectileInstance.Touched:Connect(handleTouch))
+	else
+		for _, descendant in ipairs(projectileInstance:GetDescendants()) do
+			if descendant:IsA("BasePart") then
+				table.insert(touchConnections, descendant.Touched:Connect(handleTouch))
+			end
+		end
+	end
+
+	heartbeatConnection = RunService.Heartbeat:Connect(function()
+		if detonated then
+			disconnect()
+			return
+		end
+
+		if not projectilePart.Parent or not projectileInstance.Parent then
+			disconnect()
+			return
+		end
+
+		local currentPosition = projectilePart.Position
+		local travel = currentPosition - lastPosition
+		if travel.Magnitude > 0.01 then
+			local hitResult = Workspace:Raycast(lastPosition, travel, raycastParams)
+			if isNukeRaycastHit(hitResult, projectileInstance) then
+				detonate(hitResult.Position)
+				return
+			end
+		end
+
+		lastPosition = currentPosition
+	end)
+
+	firePlayerUIEffect(player, "BombCameraStart", projectilePart, zonePart, NUKE_MAX_FLIGHT_TIME)
+
+	task.delay(NUKE_MAX_FLIGHT_TIME, function()
+		if detonated then
+			return
+		end
+
+		local fallbackPosition = if projectilePart.Parent then projectilePart.Position else lastPosition
+		detonate(fallbackPosition)
+	end)
+
+	Debris:AddItem(projectileInstance, NUKE_MAX_FLIGHT_TIME + 2)
+end
+
 local function resolveThrowDirection(root: BasePart, cameraLookVector: Vector3?, bombData): (Vector3, Vector3)
 	local rootLookVector = root.CFrame.LookVector
 	local requestedDirection = if isValidDirection(cameraLookVector) then cameraLookVector.Unit else rootLookVector
@@ -1180,31 +1550,20 @@ local function triggerNukeBlast(player: Player): boolean
 		return false
 	end
 
-	local _, bombData = resolveAvailableBomb(player)
-	if not bombData then
+	local resolvedBombData = resolveNukeBombData(player)
+	if not resolvedBombData then
 		return false
 	end
 
-	local resolvedBombData = getResolvedBombDataForPlayer(player, bombData)
-	local blastRadius = math.max(6, (tonumber(resolvedBombData.ExplosionRadius) or 0) * NUKE_BLAST_RADIUS_MULTIPLIER)
-	local knockbackForce = tonumber(resolvedBombData.KnockbackForce) or 0
-	local hitAny = false
+	local blastRadius = math.max(
+		NUKE_MIN_BLAST_RADIUS,
+		(tonumber(resolvedBombData.ExplosionRadius) or 0) * NUKE_BLAST_RADIUS_MULTIPLIER
+	)
+	local knockbackForce = math.max(NUKE_MIN_KNOCKBACK_FORCE, tonumber(resolvedBombData.KnockbackForce) or 0)
+	local dropPosition = getNukeDropPosition(root.Position, zonePart)
 
-	for _, plr in ipairs(Players:GetPlayers()) do
-		if plr ~= player then
-			local hit = applyBlastToPlayer(player, plr, root.Position, blastRadius, knockbackForce, {
-				AllowSelf = false,
-				RequireMineZone = true,
-			})
-			hitAny = hitAny or hit
-		end
-	end
-
-	if hitAny then
-		playExplosionSound(root.Position)
-	end
-
-	return hitAny
+	launchNukeProjectile(player, zonePart, dropPosition, resolvedBombData, blastRadius, knockbackForce)
+	return true
 end
 
 function BombManager:Init()

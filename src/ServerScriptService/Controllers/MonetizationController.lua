@@ -358,7 +358,7 @@ function MonetizationController.ProcessReceipt(receiptInfo)
 
 		local success = BoosterService:TriggerNukeBooster(player)
 		if notif then
-			notif:FireClient(player, if success then "Nuke detonated!" else "Nuke failed: enter mining zone", if success then "Success" else "Error")
+			notif:FireClient(player, if success then "Nuke incoming!" else "Nuke failed: enter mining zone", if success then "Success" else "Error")
 		end
 		logStorePurchaseSuccess(player, "product", productId, productName, "robux")
 		if success then

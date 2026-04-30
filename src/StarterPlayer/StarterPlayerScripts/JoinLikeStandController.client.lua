@@ -22,15 +22,18 @@ local JOIN_ACTION_TEXT = "Join Group"
 local CLAIM_ACTION_TEXT = "Claim Reward"
 local LOADING_ACTION_TEXT = "Loading..."
 local DEFAULT_IDLE_ANIMATION_ID = "rbxassetid://117364235771341"
+local STAND_TOUCH_COOLDOWN = 2
 local rewardClaimedOverride = localPlayer:GetAttribute("GroupRewardClaimed") == true
 
 type AnimationPlaybackController = Humanoid | AnimationController
 
 type PlotRecord = {
-	Plot: Model,
+	Plot: Model?,
 	Stand: Instance?,
 	Prompt: ProximityPrompt?,
 	PromptConnection: RBXScriptConnection?,
+	TouchPart: BasePart?,
+	TouchConnection: RBXScriptConnection?,
 	Connections: {RBXScriptConnection},
 	OriginalProperties: {[Instance]: {[string]: any}},
 	IdleTrack: AnimationTrack?,
@@ -38,9 +41,13 @@ type PlotRecord = {
 	Busy: boolean,
 	IsHidden: boolean,
 	ManagedPromptCreated: boolean,
+	UseProximityPrompt: boolean,
+	IsStandalone: boolean,
+	LastTouchAt: number,
 }
 
 local recordsByPlot: {[Model]: PlotRecord} = {}
+local standaloneRecord: PlotRecord? = nil
 
 local function isPlotModel(instance: Instance): boolean
 	return instance:IsA("Model") and string.match(instance.Name, "^Plot_.+") ~= nil
@@ -99,17 +106,14 @@ local function queryGroupMembership(): boolean
 	return isInGroup == true
 end
 
-local function getRecord(plot: Model): PlotRecord
-	local existing = recordsByPlot[plot]
-	if existing then
-		return existing
-	end
-
-	local newRecord: PlotRecord = {
+local function createRecord(plot: Model?, stand: Instance?, isStandalone: boolean): PlotRecord
+	return {
 		Plot = plot,
-		Stand = nil,
+		Stand = stand,
 		Prompt = nil,
 		PromptConnection = nil,
+		TouchPart = nil,
+		TouchConnection = nil,
 		Connections = {},
 		OriginalProperties = {},
 		IdleTrack = nil,
@@ -117,7 +121,19 @@ local function getRecord(plot: Model): PlotRecord
 		Busy = false,
 		IsHidden = false,
 		ManagedPromptCreated = false,
+		UseProximityPrompt = not isStandalone,
+		IsStandalone = isStandalone,
+		LastTouchAt = 0,
 	}
+end
+
+local function getRecord(plot: Model): PlotRecord
+	local existing = recordsByPlot[plot]
+	if existing then
+		return existing
+	end
+
+	local newRecord = createRecord(plot, nil, false)
 	recordsByPlot[plot] = newRecord
 	return newRecord
 end
@@ -127,6 +143,12 @@ local function disconnectRecord(record: PlotRecord)
 		record.PromptConnection:Disconnect()
 		record.PromptConnection = nil
 	end
+
+	if record.TouchConnection then
+		record.TouchConnection:Disconnect()
+		record.TouchConnection = nil
+	end
+	record.TouchPart = nil
 
 	for _, connection in ipairs(record.Connections) do
 		connection:Disconnect()
@@ -187,10 +209,11 @@ local function applyVisibilityToInstance(record: PlotRecord, instance: Instance,
 		local originalCanTouch = ensureOriginalProperty(record, instance, "CanTouch")
 		local originalCanQuery = ensureOriginalProperty(record, instance, "CanQuery")
 		local keepHidden = string.lower(instance.Name) == "modelroot"
+		local forceTouchEnabled = record.IsStandalone and record.TouchPart == instance and isVisible and not keepHidden
 
 		instance.LocalTransparencyModifier = if isVisible and not keepHidden then originalLocalTransparency else 1
 		instance.CanCollide = if isVisible and not keepHidden then originalCanCollide else false
-		instance.CanTouch = if isVisible and not keepHidden then originalCanTouch else false
+		instance.CanTouch = if forceTouchEnabled then true else (if isVisible and not keepHidden then originalCanTouch else false)
 		instance.CanQuery = if isVisible and not keepHidden then originalCanQuery else false
 		return
 	end
@@ -549,6 +572,10 @@ local function getManagedPrompt(record: PlotRecord): ProximityPrompt?
 end
 
 local function configurePrompt(record: PlotRecord, actionText: string, enabled: boolean)
+	if not record.UseProximityPrompt then
+		return
+	end
+
 	local prompt = getManagedPrompt(record)
 	if not prompt then
 		return
@@ -570,7 +597,8 @@ local function refreshStandState(record: PlotRecord)
 		return
 	end
 
-	if not isOwnPlot(record.Plot) then
+	local plot = record.Plot
+	if plot and not isOwnPlot(plot) then
 		setStandVisibility(record, false)
 		configurePrompt(record, JOIN_ACTION_TEXT, false)
 		return
@@ -691,6 +719,10 @@ local function handlePromptTriggered(record: PlotRecord, triggeringPlayer: Playe
 end
 
 local function connectPrompt(record: PlotRecord)
+	if not record.UseProximityPrompt then
+		return
+	end
+
 	local prompt = getManagedPrompt(record)
 	if not prompt then
 		return
@@ -708,6 +740,143 @@ local function connectPrompt(record: PlotRecord)
 	record.PromptConnection = prompt.Triggered:Connect(function(triggeringPlayer)
 		handlePromptTriggered(record, triggeringPlayer)
 	end)
+end
+
+local function resolveStandaloneTouchPart(stand: Instance): BasePart?
+	if stand:IsA("Model") then
+		local primaryPart = stand.PrimaryPart
+		if primaryPart and primaryPart:IsA("BasePart") then
+			return primaryPart
+		end
+
+		return nil
+	end
+
+	if stand:IsA("BasePart") then
+		return stand
+	end
+
+	return nil
+end
+
+local function isLocalCharacterTouch(hit: BasePart): boolean
+	local character = localPlayer.Character
+	return character ~= nil and hit:IsDescendantOf(character)
+end
+
+local function connectStandaloneTouch(record: PlotRecord)
+	if not record.IsStandalone then
+		return
+	end
+
+	local stand = record.Stand
+	if not stand then
+		return
+	end
+
+	local touchPart = resolveStandaloneTouchPart(stand)
+	if record.TouchConnection and record.TouchPart == touchPart then
+		if touchPart and not record.IsHidden then
+			touchPart.CanTouch = true
+		end
+		return
+	end
+
+	if record.TouchConnection then
+		record.TouchConnection:Disconnect()
+		record.TouchConnection = nil
+	end
+
+	record.TouchPart = touchPart
+	if not touchPart then
+		return
+	end
+
+	if not record.IsHidden then
+		touchPart.CanTouch = true
+	end
+
+	record.TouchConnection = touchPart.Touched:Connect(function(hit)
+		if not hit:IsA("BasePart") or not isLocalCharacterTouch(hit) then
+			return
+		end
+
+		local now = os.clock()
+		if now - record.LastTouchAt < STAND_TOUCH_COOLDOWN then
+			return
+		end
+
+		record.LastTouchAt = now
+		handlePromptTriggered(record, localPlayer)
+	end)
+end
+
+local function cleanupStandaloneStand()
+	local record = standaloneRecord
+	if not record then
+		return
+	end
+
+	stopIdleTrack(record)
+	disconnectRecord(record)
+	standaloneRecord = nil
+end
+
+local function bindStandaloneStand(stand: Instance)
+	if findAncestorPlot(stand) then
+		return
+	end
+
+	if standaloneRecord and standaloneRecord.Stand == stand then
+		connectStandaloneTouch(standaloneRecord)
+		refreshStandState(standaloneRecord)
+		return
+	end
+
+	cleanupStandaloneStand()
+
+	local record = createRecord(nil, stand, true)
+	record.IsInGroup = queryGroupMembership()
+	standaloneRecord = record
+
+	connectStandaloneTouch(record)
+	refreshStandState(record)
+	ensureIdleAnimationPlaying(record)
+
+	table.insert(record.Connections, stand.AncestryChanged:Connect(function(_, parent)
+		if parent == nil then
+			cleanupStandaloneStand()
+		end
+	end))
+
+	if stand:IsA("Model") then
+		table.insert(record.Connections, stand:GetPropertyChangedSignal("PrimaryPart"):Connect(function()
+			connectStandaloneTouch(record)
+			refreshStandState(record)
+		end))
+	end
+
+	table.insert(record.Connections, stand.DescendantAdded:Connect(function(descendant)
+		if record.IsHidden then
+			applyVisibilityToInstance(record, descendant, false)
+		else
+			applyVisibilityToInstance(record, descendant, true)
+			disableForeignPrompts(record)
+		end
+
+		if descendant:IsA("BasePart") then
+			task.defer(function()
+				connectStandaloneTouch(record)
+				refreshStandState(record)
+			end)
+		end
+
+		if descendant:IsA("Animation") or descendant:IsA("Humanoid") or descendant:IsA("AnimationController") or descendant:IsA("Animator") then
+			task.defer(function()
+				ensureIdleAnimationPlaying(record)
+			end)
+		end
+	end))
 end
 
 local function bindPlot(plot: Model)
@@ -765,12 +934,16 @@ end
 for _, child in ipairs(Workspace:GetChildren()) do
 	if isPlotModel(child) then
 		bindPlot(child)
+	elseif child.Name == STAND_NAME then
+		bindStandaloneStand(child)
 	end
 end
 
 Workspace.ChildAdded:Connect(function(child)
 	if isPlotModel(child) then
 		bindPlot(child)
+	elseif child.Name == STAND_NAME then
+		bindStandaloneStand(child)
 	end
 end)
 
@@ -782,10 +955,17 @@ Workspace.DescendantAdded:Connect(function(descendant)
 	local plot = findAncestorPlot(descendant)
 	if plot then
 		bindPlot(plot)
+	elseif descendant.Parent == Workspace then
+		bindStandaloneStand(descendant)
 	end
 end)
 
 Workspace.ChildRemoved:Connect(function(child)
+	local record = standaloneRecord
+	if record and record.Stand == child then
+		cleanupStandaloneStand()
+	end
+
 	if child:IsA("Model") then
 		cleanupPlot(child)
 	end
@@ -798,5 +978,10 @@ localPlayer:GetAttributeChangedSignal("GroupRewardClaimed"):Connect(function()
 
 	for _, record in pairs(recordsByPlot) do
 		refreshStandState(record)
+	end
+
+	if standaloneRecord then
+		connectStandaloneTouch(standaloneRecord)
+		refreshStandState(standaloneRecord)
 	end
 end)
