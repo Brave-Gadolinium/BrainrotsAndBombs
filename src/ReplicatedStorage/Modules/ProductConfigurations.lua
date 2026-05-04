@@ -177,16 +177,16 @@ ProductConfigurations.RewardedAdRewards = {
 		CashAmount = 100,
 		ButtonTitle = "WATCH AD",
 		ButtonSubtitle = "+100 SOFT",
-		PlacementId = nil,
+		PlacementId = 865538633439117,
 	}
 }
 
 ProductConfigurations.RewardedAdBoosters = {
 	["MegaExplosion"] = {
-		PlacementId = nil,
+		PlacementId = 865538633439117,
 	},
 	["Shield"] = {
-		PlacementId = nil,
+		PlacementId = 865538633439117,
 	},
 }
 
