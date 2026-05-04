@@ -40,6 +40,7 @@ local mineIdleState: {[Player]: {LastPosition: Vector3, LastMovedAt: number}} = 
 local ALLOW_MANUAL_CARRY_DROP = true
 local DEBUG_BRAINROT_TRACE = false
 local CARRIED_ITEM_COUNT_ATTRIBUTE = "CarriedItemCount"
+local globalCarryCapacityOverride: number? = nil
 
 -- [ CONFIG ]
 local CHECK_INTERVAL = 0.2 
@@ -434,11 +435,29 @@ function CarrySystem.IsPlayerInZone(player: Player): boolean
 	return playersInZone[player] == true
 end
 
+local function getEffectiveCarryCapacity(player: Player): number
+	local profile = PlayerController:GetProfile(player)
+	local profileLimit = profile and math.max(1, math.floor(tonumber(profile.Data.CarryCapacity) or 1)) or 1
+	if globalCarryCapacityOverride then
+		return math.max(profileLimit, globalCarryCapacityOverride)
+	end
+
+	return profileLimit
+end
+
 function CarrySystem.CanCarryMore(player: Player): boolean
 	local current = carryingData[player] or {}
-	local profile = PlayerController:GetProfile(player)
-	local limit = profile and profile.Data.CarryCapacity or 1
+	local limit = getEffectiveCarryCapacity(player)
 	return #current < limit
+end
+
+function CarrySystem.SetGlobalCarryCapacityOverride(capacity: number?)
+	local resolvedCapacity = tonumber(capacity)
+	if resolvedCapacity and resolvedCapacity > 0 then
+		globalCarryCapacityOverride = math.max(1, math.floor(resolvedCapacity))
+	else
+		globalCarryCapacityOverride = nil
+	end
 end
 
 function CarrySystem.AddItemToCarry(player: Player, name: string, mutation: string, rarity: string, _source: BasePart?, metadata)
@@ -490,7 +509,7 @@ function CarrySystem.AddItemToCarry(player: Player, name: string, mutation: stri
 		})
 	end
 
-	logCarryTrace(player, ("AddItemToCarry rejected carryLimit=%s"):format(tostring(PlayerController:GetProfile(player) and PlayerController:GetProfile(player).Data.CarryCapacity or "nil")))
+	logCarryTrace(player, ("AddItemToCarry rejected carryLimit=%s"):format(tostring(getEffectiveCarryCapacity(player))))
 	syncCarriedItemCount(player)
 
 	return false

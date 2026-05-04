@@ -228,9 +228,9 @@ function MonetizationController.ProcessReceipt(receiptInfo)
 			})
 
 			if statId == "BonusSpeed" then
-				local char = player.Character
-				local hum = char and char:FindFirstChild("Humanoid") :: Humanoid
-				if hum then hum.WalkSpeed = 16 + profile.Data[statId] end
+				if PlayerController.ApplyWalkSpeed then
+					PlayerController:ApplyWalkSpeed(player)
+				end
 			end
 
 			if targetUpgradeConfig.HiddenInUI ~= true then

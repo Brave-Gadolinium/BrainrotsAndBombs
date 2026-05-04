@@ -51,7 +51,7 @@ local function getUpgradeImage(upgradeId: string): string?
 	return nil
 end
 
-CandyEventConfiguration.ActiveDurationSeconds = 3 * 60
+CandyEventConfiguration.ActiveDurationSeconds = 2 * 60
 CandyEventConfiguration.SpinCost = 3
 CandyEventConfiguration.SpinAnimationSeconds = 6
 CandyEventConfiguration.SchedulePeriodSeconds = 10 * 60
@@ -164,14 +164,27 @@ function CandyEventConfiguration.GetSpinButtonText(): string
 	return string.format(CandyEventConfiguration.Text.SpinButtonFormat, CandyEventConfiguration.SpinCost)
 end
 
-function CandyEventConfiguration.GetCurrentState(serverNow: number): CandyEventState
+function CandyEventConfiguration.GetCurrentState(serverNow: number, scheduleStartedAt: number?): CandyEventState
 	local now = math.max(0, tonumber(serverNow) or 0)
 	local schedulePeriod = CandyEventConfiguration.SchedulePeriodSeconds
 	local activeDuration = CandyEventConfiguration.ActiveDurationSeconds
-	local currentHourStart = now - (now % schedulePeriod)
-	local currentWindowEnd = currentHourStart + activeDuration
-	local isActive = now < currentWindowEnd
-	local nextStartAt = if isActive then currentHourStart + schedulePeriod else currentHourStart + schedulePeriod
+	local startedAt = math.max(0, tonumber(scheduleStartedAt) or 0)
+	local elapsed = now - startedAt
+
+	if elapsed < schedulePeriod then
+		return {
+			isActive = false,
+			nextStartAt = startedAt + schedulePeriod,
+			endsAt = nil,
+			serverNow = now,
+		}
+	end
+
+	local periodIndex = math.max(1, math.floor(elapsed / schedulePeriod))
+	local currentWindowStart = startedAt + (periodIndex * schedulePeriod)
+	local currentWindowEnd = currentWindowStart + activeDuration
+	local isActive = now >= currentWindowStart and now < currentWindowEnd
+	local nextStartAt = if isActive then currentWindowStart + schedulePeriod else currentWindowStart + schedulePeriod
 	local endsAt = if isActive then currentWindowEnd else nil
 
 	return {

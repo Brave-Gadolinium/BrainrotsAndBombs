@@ -9,7 +9,7 @@ Top-level source:
 Important server folders:
 - `src/ServerScriptService/Controllers` stateful gameplay systems loaded by `ServerMain.server.lua`
 - `src/ServerScriptService/Modules` reusable server-side helpers, runtime bridges, managers, and analytics services
-- `src/ServerScriptService/Modules/CandyEventService.lua` runs the hourly candy event and wheel reward flow
+- `src/ServerScriptService/Modules/CandyEventService.lua` runs the 10-minute candy event and wheel reward flow
 - `src/ServerScriptService/Modules/MineSpawnUtils.lua` centralizes mine spawn positioning shared by event and baseline item spawning
 
 Important shared folders:

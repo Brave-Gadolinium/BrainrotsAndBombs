@@ -20,6 +20,7 @@ local autoBombHeartbeatStarted = false
 
 local depthBlockedTimestamps: {[Player]: {number}} = {}
 local manualCollectTimestamps: {[Player]: {number}} = {}
+local freeNukeOverrideActive = false
 
 local DEPTH_BLOCK_WINDOW = 60
 local DEPTH_BLOCK_THRESHOLD = 2
@@ -480,7 +481,8 @@ function BoosterService:UseBoosterCharge(player: Player, boosterName: string): b
 		return false
 	end
 
-	if getBoosterChargeCount(player, boosterName) <= 0 then
+	local isFreeNukeUse = boosterName == "NukeBooster" and freeNukeOverrideActive
+	if not isFreeNukeUse and getBoosterChargeCount(player, boosterName) <= 0 then
 		fireNotification(player, "No booster charges available.", "Error")
 		return false
 	end
@@ -517,7 +519,7 @@ function BoosterService:UseBoosterCharge(player: Player, boosterName: string): b
 			return false
 		end
 
-		if not consumeBoosterCharge(player, boosterName) then
+		if not isFreeNukeUse and not consumeBoosterCharge(player, boosterName) then
 			return false
 		end
 
@@ -620,6 +622,10 @@ function BoosterService:TriggerNukeBooster(player: Player): boolean
 	end
 
 	return false
+end
+
+function BoosterService:SetFreeNukeOverride(active: boolean)
+	freeNukeOverrideActive = active == true
 end
 
 local function startAutoBombHeartbeat()

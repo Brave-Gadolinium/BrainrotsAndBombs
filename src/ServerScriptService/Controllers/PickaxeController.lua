@@ -23,6 +23,7 @@ local ActionEvent: RemoteEvent
 local NotificationEvent: RemoteEvent
 local GetDataFunction: RemoteFunction
 local equipStates: {[Player]: {InProgress: boolean, PendingPickaxe: string?}} = {}
+local runtimePickaxeOverride: string? = nil
 
 local function getSortedPickaxes()
 	local sortedPickaxes = {}
@@ -136,6 +137,10 @@ local function getEquipState(player: Player): {InProgress: boolean, PendingPicka
 end
 
 local function getPreferredPickaxeName(player: Player): string
+	if runtimePickaxeOverride and BombsConfigurations.Bombs[runtimePickaxeOverride] then
+		return runtimePickaxeOverride
+	end
+
 	local profile = PlayerController and PlayerController:GetProfile(player)
 	local equippedPickaxe = profile and profile.Data and profile.Data.EquippedPickaxe
 	if type(equippedPickaxe) == "string" and BombsConfigurations.Bombs[equippedPickaxe] then
@@ -255,7 +260,16 @@ local function resolvePreferredBombTool(player: Player, preferredPickaxeName: st
 		resolvedPreferred = getPreferredPickaxeName(player)
 	end
 
-	return deduplicatePickaxes(player, resolvedPreferred) or getCurrentBombTool(player)
+	local bombTool = deduplicatePickaxes(player, resolvedPreferred) or getCurrentBombTool(player)
+	if resolvedPreferred and BombsConfigurations.Bombs[resolvedPreferred] and (not bombTool or bombTool.Name ~= resolvedPreferred) then
+		if PickaxeController.EquipPickaxe then
+			PickaxeController.EquipPickaxe(player, resolvedPreferred)
+		end
+
+		bombTool = deduplicatePickaxes(player, resolvedPreferred) or getCurrentBombTool(player)
+	end
+
+	return bombTool
 end
 
 local function moveBombToFirstSlot(player: Player, bombTool: Tool, shouldEquipAfter: boolean): Tool?
@@ -383,13 +397,29 @@ function PickaxeController.ResolvePreferredBombTool(player: Player): Tool?
 	return resolvePreferredBombTool(player, getPreferredPickaxeName(player))
 end
 
+function PickaxeController.SetRuntimePickaxeOverride(pickaxeName: string?)
+	local nextPickaxeName: string? = nil
+	if type(pickaxeName) == "string" and BombsConfigurations.Bombs[pickaxeName] then
+		nextPickaxeName = pickaxeName
+	end
+
+	if runtimePickaxeOverride == nextPickaxeName then
+		return
+	end
+
+	runtimePickaxeOverride = nextPickaxeName
+	for _, player in ipairs(Players:GetPlayers()) do
+		PickaxeController.EquipPickaxe(player, getPreferredPickaxeName(player))
+	end
+end
+
 function PickaxeController.EquipPickaxe(player: Player, pickaxeName: string)
 	if type(pickaxeName) ~= "string" or not BombsConfigurations.Bombs[pickaxeName] then
 		return
 	end
 
 	local state = getEquipState(player)
-	state.PendingPickaxe = pickaxeName
+	state.PendingPickaxe = runtimePickaxeOverride or pickaxeName
 
 	if state.InProgress then
 		return

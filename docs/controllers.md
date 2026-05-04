@@ -46,7 +46,7 @@ Location:
 - `src/StarterPlayer/StarterPlayerScripts/CandyEventController.client.lua`
 
 Responsibility:
-- Render the hourly candy-event countdown on `Workspace.TimerWorkspace.SurfaceGui.TitleLabel` and announce the active event start
+- Render the 10-minute candy-event countdown on `Workspace.TimerWorkspace.SurfaceGui.TitleLabel` and announce the active event start
 
 Features:
 - Pulls the initial event state from `ReplicatedStorage.Remotes.CandyEvent.GetState`

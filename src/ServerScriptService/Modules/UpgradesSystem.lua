@@ -14,7 +14,7 @@ local UpgradesConfiguration = require(ReplicatedStorage.Modules.UpgradesConfigur
 local AnalyticsFunnelsService = require(ServerScriptService.Modules.AnalyticsFunnelsService)
 local AnalyticsEconomyService = require(ServerScriptService.Modules.AnalyticsEconomyService)
 local TRANSACTION_TYPES = AnalyticsEconomyService:GetTransactionTypes()
-local MAX_CARRY_UPGRADES = 3
+local MAX_CARRY_UPGRADES = UpgradesConfiguration.MaxCarryUpgrades or 3
 
 local function getUpgradeConfig(upgradeId: string)
 	for _, config in ipairs(UpgradesConfiguration.Upgrades) do
@@ -104,9 +104,9 @@ function UpgradesSystem.PurchaseUpgrade(player: Player, upgradeId: string)
 
 		-- ## FIXED: Apply Physical Stat changes immediately with a base of 20 ##
 		if statId == "BonusSpeed" then
-			local char = player.Character
-			local hum = char and char:FindFirstChild("Humanoid") :: Humanoid
-			if hum then hum.WalkSpeed = 20 + profile.Data[statId] end
+			if PlayerController.ApplyWalkSpeed then
+				PlayerController:ApplyWalkSpeed(player)
+			end
 		end
 
 		local Events = ReplicatedStorage:FindFirstChild("Events")
@@ -197,9 +197,9 @@ function UpgradesSystem:Start()
 			task.wait(1)
 			local profile = PlayerController:GetProfile(player)
 			if profile then
-				local hum = char:FindFirstChild("Humanoid") :: Humanoid
-				-- ## FIXED: Apply correct base speed upon spawning into the game ##
-				if hum then hum.WalkSpeed = 20 + (profile.Data["BonusSpeed"] or 0) end
+				if PlayerController.ApplyWalkSpeed then
+					PlayerController:ApplyWalkSpeed(player)
+				end
 			end
 		end)
 	end)

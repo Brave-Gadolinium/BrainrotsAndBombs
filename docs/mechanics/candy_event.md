@@ -2,10 +2,10 @@
 
 Description:
 - The candy event is a separate live-feature layered onto the mine round flow
-- It activates globally during the first `10` minutes of every server hour and keeps the candy wheel available at all times
+- It activates globally every `10` minutes from server start, lasts `120` seconds, and keeps the candy wheel available at all times
 
 Core flow:
-- `CandyEventService` computes the active window from `Workspace:GetServerTimeNow()` as `HH:00:00` to `HH:09:59`
+- `CandyEventService` computes the active window from the shared `TimedGlobalEventScheduleStartedAt` workspace attribute
 - When the event becomes active, the service pushes `{ isActive, nextStartAt, endsAt, serverNow }` through `ReplicatedStorage.Remotes.CandyEvent.StateUpdated`
 - `CandyEventController` writes the countdown text into `Workspace.TimerWorkspace.SurfaceGui.TitleLabel` both before start and during the active window
 - The same timer surface can show `START EVENT` and `END EVENT` buttons for testers/admins by reusing existing `ManualTestController` actions instead of a separate debug remote

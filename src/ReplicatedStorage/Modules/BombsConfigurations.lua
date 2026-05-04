@@ -311,6 +311,24 @@ function BombsConfigurations.GetMaxExplosionRadius(): number
 	return maxRadius
 end
 
+function BombsConfigurations.GetStrongestBombName(): string?
+	local strongestName: string? = nil
+	local strongestPrice = -math.huge
+	local strongestRadius = -math.huge
+
+	for bombName, bombData in pairs(BombsConfigurations.Bombs) do
+		local price = tonumber(bombData.Price) or 0
+		local radius = tonumber(bombData.ExplosionRadius) or 0
+		if price > strongestPrice or (price == strongestPrice and radius > strongestRadius) then
+			strongestName = bombName
+			strongestPrice = price
+			strongestRadius = radius
+		end
+	end
+
+	return strongestName
+end
+
 for _, bombData in pairs(BombsConfigurations.Bombs) do
 	bombData.ExplosionRadius *= 2
 end

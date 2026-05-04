@@ -112,7 +112,7 @@ Location:
 - `src/ReplicatedStorage/Modules/CandyEventConfiguration.lua`
 
 Purpose:
-- Defines the hourly candy-event schedule, mine candy density by zone, wheel rewards, UI copy, and candy spin product keys
+- Defines the 10-minute candy-event schedule, mine candy density by zone, wheel rewards, UI copy, and candy spin product keys
 
 Parameters:
 - `ActiveDurationSeconds = 600`

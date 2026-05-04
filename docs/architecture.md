@@ -9,7 +9,7 @@ Server systems:
 - `FriendBoostController` owns online-friend boost recalculation
 - `OfflineIncomeController` owns pending offline reward calculation, claim state, and reward payout
 - `MonetizationController` owns developer product receipts and paid reward fulfillment
-- `CandyEventService` owns the hourly candy-event schedule, staged mine candy spawning per ready zone, touch pickup, and candy wheel spin fulfillment
+- `CandyEventService` owns the 10-minute candy-event schedule, staged mine candy spawning per ready zone, touch pickup, and candy wheel spin fulfillment
 - `PlotManager.server.lua` owns runtime plot spawning, stamps each player plot with ownership/base identity attributes, and plays the temporary `UpgradeBase` floor effect after slot upgrades
 - `TerrainGeneratorManager` owns staged zone-by-zone mine bootstrap, startup readiness attributes/blockers, baseline chunk snapshots, and dirty-chunk round-end restores
 
@@ -29,7 +29,7 @@ Shared modules:
 - `MultiplierUtils` is the canonical rebirth multiplier formatter/source
 - `IncomeCalculationUtils` is the canonical live/offline income formula source used by server and HUD
 - `FriendBoostConfiguration` and `OfflineIncomeConfiguration` hold tunable reward rules
-- `CandyEventConfiguration` is the canonical source for hourly schedule, zone candy counts, wheel rewards, UI copy, and candy spin product keys
+- `CandyEventConfiguration` is the canonical source for the 10-minute schedule, zone candy counts, wheel rewards, UI copy, and candy spin product keys
 - `MineSpawnUtils` is the canonical mine-position helper shared by `ItemManager` and `CandyEventService`, including startup depth-band spawning
 - `FrameManager` is the canonical blocking-frame open/close coordinator and now also provides an immediate close-all path for forced UI cleanup flows
 

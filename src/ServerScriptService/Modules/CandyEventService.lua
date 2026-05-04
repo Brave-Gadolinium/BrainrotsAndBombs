@@ -2,7 +2,6 @@
 
 local Players = game:GetService("Players")
 local CollectionService = game:GetService("CollectionService")
-local Lighting = game:GetService("Lighting")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 local Workspace = game:GetService("Workspace")
@@ -14,6 +13,7 @@ local NumberFormatter = require(ReplicatedStorage.Modules.NumberFormatter)
 local UpgradesConfigurations = require(ReplicatedStorage.Modules.UpgradesConfigurations)
 
 local BadgeManager = require(ServerScriptService.Modules.BadgeManager)
+local GlobalEventLightingService = require(ServerScriptService.Modules.GlobalEventLightingService)
 local MineSpawnUtils = require(ServerScriptService.Modules.MineSpawnUtils)
 local TerrainGeneratorManager = require(ServerScriptService.Modules.TerrainGeneratorManager)
 
@@ -25,10 +25,10 @@ local CandyEventService = {}
 local MinesFolder = Workspace:WaitForChild("Mines")
 local RandomObject = Random.new()
 local ROTATE_TAG = "Rotate"
-local SKYBOX_FOLDER_NAME = "Skybox"
-local DEFAULT_SKYBOX_NAME = "Sky"
 local CANDY_SKYBOX_NAME = "SkyCandy"
-local MANAGED_SKYBOX_ATTRIBUTE = "CandyEventManagedSkybox"
+local LIGHTING_OWNER_KEY = "CandyEvent"
+local LIGHTING_PRIORITY = 100
+local SCHEDULE_STARTED_ATTRIBUTE = "TimedGlobalEventScheduleStartedAt"
 
 local PlayerController
 local ItemManager
@@ -42,6 +42,7 @@ local finishEvent: BindableEvent
 local roundStartedEvent: BindableEvent
 
 local currentState: CandyEventState
+local scheduleStartedAt = 0
 local pendingRoundSpawn = false
 local spawnedCandies: {Model} = {}
 local spawnedCandyZones: {[string]: boolean} = {}
@@ -53,30 +54,33 @@ local forcedState: {
 	EndsAt: number,
 }? = nil
 
+local function ensureScheduleStartedAt(): number
+	local existingValue = Workspace:GetAttribute(SCHEDULE_STARTED_ATTRIBUTE)
+	if type(existingValue) == "number" and existingValue > 0 then
+		scheduleStartedAt = existingValue
+		return scheduleStartedAt
+	end
+
+	scheduleStartedAt = Workspace:GetServerTimeNow()
+	Workspace:SetAttribute(SCHEDULE_STARTED_ATTRIBUTE, scheduleStartedAt)
+	return scheduleStartedAt
+end
+
 local function applyCandyEventSkybox(isActive: boolean)
-	local skyboxContainer = ReplicatedStorage:FindFirstChild(SKYBOX_FOLDER_NAME)
-	if not skyboxContainer then
-		warn(`[CandyEventService] ReplicatedStorage.{SKYBOX_FOLDER_NAME} was not found.`)
-		return
+	if isActive then
+		GlobalEventLightingService:SetEffect(LIGHTING_OWNER_KEY, {
+			Priority = LIGHTING_PRIORITY,
+			SkyboxName = CANDY_SKYBOX_NAME,
+			TintColor = Color3.fromRGB(255, 154, 214),
+		})
+	else
+		GlobalEventLightingService:ClearEffect(LIGHTING_OWNER_KEY)
 	end
+end
 
-	local targetSkyboxName = if isActive then CANDY_SKYBOX_NAME else DEFAULT_SKYBOX_NAME
-	local skyboxTemplate = skyboxContainer:FindFirstChild(targetSkyboxName)
-	if not skyboxTemplate or not skyboxTemplate:IsA("Sky") then
-		warn(`[CandyEventService] ReplicatedStorage.{SKYBOX_FOLDER_NAME}.{targetSkyboxName} Sky was not found.`)
-		return
-	end
-
-	for _, child in ipairs(Lighting:GetChildren()) do
-		if child:IsA("Sky") then
-			child:Destroy()
-		end
-	end
-
-	local skybox = skyboxTemplate:Clone()
-	skybox.Name = targetSkyboxName
-	skybox:SetAttribute(MANAGED_SKYBOX_ATTRIBUTE, true)
-	skybox.Parent = Lighting
+local function syncCandyWorkspaceAttributes()
+	Workspace:SetAttribute("CandyEventActive", currentState.isActive)
+	Workspace:SetAttribute("CandyEventEndsAt", currentState.endsAt)
 end
 
 local function ensureTimerFolder(): Folder
@@ -396,7 +400,7 @@ end
 
 local function getPublicState(nowOverride: number?): CandyEventState
 	local serverNow = math.max(0, tonumber(nowOverride) or Workspace:GetServerTimeNow())
-	local state = CandyEventConfiguration.GetCurrentState(serverNow)
+	local state = CandyEventConfiguration.GetCurrentState(serverNow, ensureScheduleStartedAt())
 
 	if forcedState and serverNow >= forcedState.EndsAt then
 		forcedState = nil
@@ -573,6 +577,7 @@ local function refreshState(forcePush: boolean?)
 	local didChange = statesDiffer(currentState, nextState)
 	local wasActive = currentState.isActive
 	currentState = nextState
+	syncCandyWorkspaceAttributes()
 
 	if didChange or forcePush == true then
 		applyCandyEventSkybox(currentState.isActive)
@@ -598,6 +603,10 @@ function CandyEventService:GetStateForPlayer(_player: Player)
 		Success = true,
 		State = getPublicState(),
 	}
+end
+
+function CandyEventService:IsActive(): boolean
+	return getPublicState().isActive
 end
 
 function CandyEventService:HandleSpin(player: Player)
@@ -675,7 +684,7 @@ end
 
 function CandyEventService:ForceStopForTesting(): (boolean, string)
 	local now = Workspace:GetServerTimeNow()
-	local scheduleState = CandyEventConfiguration.GetCurrentState(now)
+	local scheduleState = CandyEventConfiguration.GetCurrentState(now, ensureScheduleStartedAt())
 	forcedState = {
 		Mode = "inactive",
 		EndsAt = math.max(scheduleState.nextStartAt, now + 1),
@@ -723,6 +732,7 @@ function CandyEventService:Init(controllers)
 	end)
 
 	currentState = getPublicState()
+	syncCandyWorkspaceAttributes()
 end
 
 function CandyEventService:Start()
@@ -732,6 +742,7 @@ function CandyEventService:Start()
 
 	started = true
 	currentState = getPublicState()
+	syncCandyWorkspaceAttributes()
 	applyCandyEventSkybox(currentState.isActive)
 
 	if currentState.isActive then
@@ -747,6 +758,6 @@ function CandyEventService:Start()
 	end)
 end
 
-currentState = CandyEventConfiguration.GetCurrentState(Workspace:GetServerTimeNow())
+currentState = CandyEventConfiguration.GetCurrentState(Workspace:GetServerTimeNow(), Workspace:GetServerTimeNow())
 
 return CandyEventService

@@ -104,6 +104,13 @@ local REMOTE_NAMESPACES: {NamespaceDescriptor} = {
 		},
 	},
 	{
+		Name = "GlobalTimedEvents",
+		Children = {
+			{Name = "GetState", ClassName = "RemoteFunction"},
+			{Name = "StateUpdated", ClassName = "RemoteEvent"},
+		},
+	},
+	{
 		Name = "JoinGiftBrainrot",
 		Children = {
 			{Name = "GetState", ClassName = "RemoteFunction"},

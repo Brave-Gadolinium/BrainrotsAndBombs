@@ -1,6 +1,7 @@
 --!strict
 -- LOCATION: ReplicatedStorage/Modules/UpgradesConfigurations
 local UpgradesConfigurations = {}
+UpgradesConfigurations.MaxCarryUpgrades = 3
 UpgradesConfigurations.Upgrades = {
 	{
 		Id = "Range1",
@@ -47,4 +48,17 @@ UpgradesConfigurations.Upgrades = {
 		ImageId = "rbxassetid://92215347682288"
 	}
 }
+
+function UpgradesConfigurations.GetMaxCarryCapacity(): number
+	for _, config in ipairs(UpgradesConfigurations.Upgrades) do
+		if config.StatId == "CarryCapacity" then
+			local defaultValue = math.max(0, tonumber(config.DefaultValue) or 0)
+			local amount = math.max(1, tonumber(config.Amount) or 1)
+			return defaultValue + (UpgradesConfigurations.MaxCarryUpgrades * amount)
+		end
+	end
+
+	return 4
+end
+
 return UpgradesConfigurations

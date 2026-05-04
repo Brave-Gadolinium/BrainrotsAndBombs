@@ -238,10 +238,8 @@ local function executeRebirth(player: Player, profile: any, suppressAnalytics: b
 	profile.Data.Rebirths += 1
 	player:SetAttribute("Rebirths", profile.Data.Rebirths)
 
-	local char = player.Character
-	local hum = char and char:FindFirstChild("Humanoid") :: Humanoid?
-	if hum then
-		hum.WalkSpeed = 20 + math.max(0, tonumber(profile.Data.BonusSpeed) or 0)
+	if PlayerController and PlayerController.ApplyWalkSpeed then
+		PlayerController:ApplyWalkSpeed(player)
 	end
 
 	filterSavedInventory(profile)

@@ -49,7 +49,7 @@ Members:
 - `StateUpdated` (`RemoteEvent`)
 
 Purpose:
-- Sync the hourly candy-event schedule and handle server-authoritative candy wheel spins
+- Sync the 10-minute candy-event schedule and handle server-authoritative candy wheel spins
 
 Notes:
 - Clients bootstrap countdown state through `GetState` and then keep the countdown local using server time

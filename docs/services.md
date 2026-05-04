@@ -106,10 +106,10 @@ Location:
 - `src/ServerScriptService/Modules/CandyEventService.lua`
 
 Responsibility:
-- Run the hourly candy event, spawn touch-collectible candies in mine zones, keep candy wheel remotes in sync, and grant wheel rewards
+- Run the 10-minute candy event, spawn touch-collectible candies in mine zones, keep candy wheel remotes in sync, and grant wheel rewards
 
 Main Features:
-- Spawns live mine candies only during the active hourly window, fills only terrain-ready zones during startup, and clears them again on round/event end
+- Spawns live mine candies only during the active 10-minute schedule window, fills only terrain-ready zones during startup, and clears them again on round/event end
 - Awards `CandyCount` immediately on touch pickup and fires the shared `ShowCandyPopUp` UI event for `+1` feedback
 - Applies a `90` degree yaw to spawned candy models and tags them with the existing `Rotate` world-animation flow for hover/rotation feedback
 - Keeps candy-wheel reward fulfillment authoritative on the server after the client spin animation delay

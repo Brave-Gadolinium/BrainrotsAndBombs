@@ -4,6 +4,7 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local MarketplaceService = game:GetService("MarketplaceService")
+local Workspace = game:GetService("Workspace")
 
 local ProductConfigurations = require(ReplicatedStorage.Modules.ProductConfigurations)
 local FrameManager = require(ReplicatedStorage.Modules.FrameManager)
@@ -319,6 +320,10 @@ local function getBoosterChargeCount(productName: string): number
 	return math.max(0, math.floor(tonumber(player:GetAttribute(attributeName)) or 0))
 end
 
+local function isFreeNukeActive(): boolean
+	return Workspace:GetAttribute("TimedGlobalEventId") == "NukeAll"
+end
+
 local function isTimedBoosterActive(productName: string): boolean
 	if productName == "MegaExplosion" then
 		return math.max(0, tonumber(player:GetAttribute("MegaExplosionEndsAt")) or 0) > os.time()
@@ -331,6 +336,11 @@ end
 
 local function useBoosterChargeOrPrompt(surface: string, section: string, entrypoint: string, productName: string)
 	if isTimedBoosterActive(productName) then
+		return
+	end
+
+	if productName == "NukeBooster" and isFreeNukeActive() then
+		requestUseBoosterCharge:FireServer(productName)
 		return
 	end
 
@@ -427,6 +437,12 @@ local function updateBoostersUI(boostersFrame: Frame)
 	local hasAutoBomb = player:GetAttribute("HasAutoBomb") == true
 	local autoBombEnabled = player:GetAttribute("AutoBombEnabled") == true
 
+	if nukeCard and isFreeNukeActive() then
+		local button = nukeCard:FindFirstChild("Buy") :: GuiButton?
+		setButtonText(button, "Use")
+		nukeCard = nil
+	end
+
 	if nukeCard and nukeCharges > 0 then
 		local button = nukeCard:FindFirstChild("Buy") :: GuiButton?
 		setButtonText(button, "Use x" .. tostring(nukeCharges))
@@ -510,6 +526,7 @@ local function init()
 	player:GetAttributeChangedSignal("NukeBoosterCharges"):Connect(refresh)
 	player:GetAttributeChangedSignal("HasAutoBomb"):Connect(refresh)
 	player:GetAttributeChangedSignal("AutoBombEnabled"):Connect(refresh)
+	Workspace:GetAttributeChangedSignal("TimedGlobalEventId"):Connect(refresh)
 
 	FrameManager.Changed:Connect(function()
 		syncHudBoosterButtons()

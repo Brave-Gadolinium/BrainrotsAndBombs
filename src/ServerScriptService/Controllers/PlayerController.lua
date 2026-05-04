@@ -231,8 +231,29 @@ local vipSubscriptionSyncQueued: {[Player]: boolean} = {}
 local deadPlayers: {[Player]: boolean} = {} 
 local loadingInventory: {[Player]: boolean} = {}
 local DEBUG_BRAINROT_TRACE = false
+local BASE_WALK_SPEED = 20
+local timedWalkSpeedOverride: number? = nil
 
 PlayerController.isShuttingDown = false
+
+local function getProfileWalkSpeed(profile): number
+	local data = profile and profile.Data
+	local bonusSpeed = data and math.max(0, tonumber(data.BonusSpeed) or 0) or 0
+	return BASE_WALK_SPEED + bonusSpeed
+end
+
+local function applyWalkSpeed(player: Player): number
+	local profile = profiles[player]
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	local walkSpeed = if timedWalkSpeedOverride then timedWalkSpeedOverride else getProfileWalkSpeed(profile)
+
+	if humanoid then
+		humanoid.WalkSpeed = walkSpeed
+	end
+
+	return walkSpeed
+end
 
 local function isTrackedTool(tool: Tool): boolean
 	local originalName = tool:GetAttribute("OriginalName")
@@ -1217,11 +1238,7 @@ function PlayerController:AddUpgradeStat(player: Player, statId: string, amount:
 	player:SetAttribute(statId, profile.Data[statId])
 
 	if statId == "BonusSpeed" then
-		local character = player.Character
-		local hum = character and character:FindFirstChild("Humanoid")
-		if hum and hum:IsA("Humanoid") then
-			hum.WalkSpeed = 20 + profile.Data[statId]
-		end
+		applyWalkSpeed(player)
 	end
 
 	return profile.Data[statId]
@@ -1886,6 +1903,7 @@ local function onPlayerAdded(player: Player)
 
 			local hum = char:WaitForChild("Humanoid", 10)
 			if hum then
+				applyWalkSpeed(player)
 				hum.Died:Connect(function()
 					logHumanoidDeathTrace(player)
 					deadPlayers[player] = true
@@ -1921,6 +1939,7 @@ local function onPlayerAdded(player: Player)
 
 			local hum = player.Character:FindFirstChild("Humanoid")
 			if hum then
+				applyWalkSpeed(player)
 				hum.Died:Connect(function()
 					logHumanoidDeathTrace(player)
 					deadPlayers[player] = true
@@ -2028,6 +2047,23 @@ function PlayerController:ReloadInventoryFromProfile(player: Player): boolean
 	logBrainrotTrace(player, "ReloadInventoryFromProfile")
 	loadInventory(player, profile)
 	return true
+end
+
+function PlayerController:ApplyWalkSpeed(player: Player): number
+	return applyWalkSpeed(player)
+end
+
+function PlayerController:SetTimedWalkSpeedOverride(walkSpeed: number?)
+	local resolvedWalkSpeed = tonumber(walkSpeed)
+	if resolvedWalkSpeed and resolvedWalkSpeed > 0 then
+		timedWalkSpeedOverride = resolvedWalkSpeed
+	else
+		timedWalkSpeedOverride = nil
+	end
+
+	for _, player in ipairs(Players:GetPlayers()) do
+		applyWalkSpeed(player)
+	end
 end
 
 function PlayerController:ClearInventoryForTesting(player: Player): boolean
@@ -2174,11 +2210,7 @@ function PlayerController:SetUpgradeStatForTesting(player: Player, statId: strin
 	player:SetAttribute(statId, profile.Data[statId])
 
 	if statId == "BonusSpeed" then
-		local character = player.Character
-		local hum = character and character:FindFirstChild("Humanoid")
-		if hum and hum:IsA("Humanoid") then
-			hum.WalkSpeed = 20 + profile.Data[statId]
-		end
+		applyWalkSpeed(player)
 	end
 
 	return true
