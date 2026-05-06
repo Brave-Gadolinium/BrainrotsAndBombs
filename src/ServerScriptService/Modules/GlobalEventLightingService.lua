@@ -8,7 +8,6 @@ local GlobalEventLightingService = {}
 type LightingEffect = {
 	Priority: number,
 	SkyboxName: string?,
-	TintColor: Color3?,
 }
 
 local SKYBOX_FOLDER_NAME = "Skybox"
@@ -57,28 +56,11 @@ local function applySkybox(skyboxName: string)
 	skybox.Parent = Lighting
 end
 
-local function applyTint(tintColor: Color3?)
+local function clearEventTint()
 	local existing = Lighting:FindFirstChild(COLOR_CORRECTION_NAME)
-	if not tintColor then
-		if existing then
-			existing:Destroy()
-		end
-		return
+	if existing then
+		existing:Destroy()
 	end
-
-	local colorCorrection: ColorCorrectionEffect? = if existing and existing:IsA("ColorCorrectionEffect") then existing else nil
-	if not colorCorrection then
-		if existing then
-			existing:Destroy()
-		end
-		colorCorrection = Instance.new("ColorCorrectionEffect")
-		colorCorrection.Name = COLOR_CORRECTION_NAME
-		colorCorrection.Parent = Lighting
-	end
-
-	colorCorrection.TintColor = tintColor
-	colorCorrection.Brightness = 0.04
-	colorCorrection.Saturation = 0.12
 end
 
 local function getHighestPriorityEffect(): LightingEffect?
@@ -94,15 +76,15 @@ local function getHighestPriorityEffect(): LightingEffect?
 end
 
 local function reapply()
+	clearEventTint()
+
 	local effect = getHighestPriorityEffect()
 	if effect then
 		applySkybox(effect.SkyboxName or DEFAULT_SKYBOX_NAME)
-		applyTint(effect.TintColor)
 		return
 	end
 
 	applySkybox(DEFAULT_SKYBOX_NAME)
-	applyTint(nil)
 end
 
 function GlobalEventLightingService:SetEffect(ownerKey: string, effect: LightingEffect)
@@ -113,7 +95,6 @@ function GlobalEventLightingService:SetEffect(ownerKey: string, effect: Lighting
 	effectsByOwner[ownerKey] = {
 		Priority = math.floor(tonumber(effect.Priority) or 0),
 		SkyboxName = effect.SkyboxName,
-		TintColor = effect.TintColor,
 	}
 	reapply()
 end

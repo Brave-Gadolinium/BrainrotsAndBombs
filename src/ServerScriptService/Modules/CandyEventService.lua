@@ -71,7 +71,6 @@ local function applyCandyEventSkybox(isActive: boolean)
 		GlobalEventLightingService:SetEffect(LIGHTING_OWNER_KEY, {
 			Priority = LIGHTING_PRIORITY,
 			SkyboxName = CANDY_SKYBOX_NAME,
-			TintColor = Color3.fromRGB(255, 154, 214),
 		})
 	else
 		GlobalEventLightingService:ClearEffect(LIGHTING_OWNER_KEY)

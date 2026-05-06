@@ -120,8 +120,7 @@ local function applyLighting(eventDefinition: EventDefinition?)
 	if eventDefinition then
 		GlobalEventLightingService:SetEffect(LIGHTING_OWNER_KEY, {
 			Priority = LIGHTING_PRIORITY,
-			SkyboxName = "Sky",
-			TintColor = eventDefinition.Color,
+			SkyboxName = eventDefinition.SkyboxName,
 		})
 	else
 		GlobalEventLightingService:ClearEffect(LIGHTING_OWNER_KEY)
