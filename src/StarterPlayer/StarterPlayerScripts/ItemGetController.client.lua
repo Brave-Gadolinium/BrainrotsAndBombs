@@ -61,7 +61,7 @@ local function applyDefaultLayout()
 
 	itemGetFrame.AnchorPoint = Vector2.new(0.5, 0.5)
 	itemGetFrame.Position = UDim2.fromScale(0.5, 0.5)
-	itemGetFrame.Size = UDim2.fromScale(0.32, 0.42)
+	--itemGetFrame.Size = UDim2.fromScale(0.32, 0.42)
 	itemGetFrame.BackgroundColor3 = Color3.fromRGB(30, 32, 42)
 	itemGetFrame.BorderSizePixel = 0
 	ensureCorner(itemGetFrame, UDim.new(0, 8))

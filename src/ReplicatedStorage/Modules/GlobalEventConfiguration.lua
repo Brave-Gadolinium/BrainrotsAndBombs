@@ -26,7 +26,7 @@ export type PublicState = {
 	endedEventId: string?,
 }
 
-GlobalEventConfiguration.SchedulePeriodSeconds = 60
+GlobalEventConfiguration.SchedulePeriodSeconds = 60 * 5
 GlobalEventConfiguration.EventDurationSeconds = 60
 GlobalEventConfiguration.SuperRunWalkSpeed = 60
 
