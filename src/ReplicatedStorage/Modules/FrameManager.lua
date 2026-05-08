@@ -11,7 +11,8 @@ local Lighting = game:GetService("Lighting")
 local FrameManager = {}
 
 local playerGui: PlayerGui = Players.LocalPlayer:WaitForChild("PlayerGui")
-local framesContainer: Folder = playerGui:WaitForChild("GUI"):WaitForChild("Frames")
+local gameGui: ScreenGui = playerGui:WaitForChild("GUI") :: ScreenGui
+local framesContainer: Instance = gameGui:WaitForChild("Frames")
 
 local TWEEN_INFO: TweenInfo = TweenInfo.new(0.4, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
 local BLUR_TWEEN_INFO: TweenInfo = TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
@@ -19,6 +20,9 @@ local BLUR_EFFECT_NAME = "FrameManagerBlur"
 local BLUR_VISIBLE_SIZE = 18
 local NON_BLOCKING_ATTRIBUTE = "IgnoreFrameManagerBlocking"
 local FRAME_OPEN_COOLDOWN = 0.5
+local ROOT_MANAGED_FRAME_NAMES = {
+	ItemGet = true,
+}
 
 local currentlyOpenFrame: GuiObject? = nil
 local framePositions: {[GuiObject]: UDim2} = {}
@@ -37,6 +41,42 @@ local function isBlockingFrame(frame: Instance): boolean
 	return frame:IsA("GuiObject")
 		and frame.Name ~= "Notifications"
 		and frame:GetAttribute(NON_BLOCKING_ATTRIBUTE) ~= true
+end
+
+local function isRootManagedFrame(frame: Instance): boolean
+	return frame:IsA("GuiObject") and ROOT_MANAGED_FRAME_NAMES[frame.Name] == true
+end
+
+local function findManagedFrame(frameName: string): GuiObject?
+	local frame = framesContainer:FindFirstChild(frameName)
+	if frame and frame:IsA("GuiObject") then
+		return frame
+	end
+
+	local rootFrame = gameGui:FindFirstChild(frameName)
+	if rootFrame and isRootManagedFrame(rootFrame) then
+		return rootFrame :: GuiObject
+	end
+
+	return nil
+end
+
+local function getManagedFrames(): {GuiObject}
+	local frames: {GuiObject} = {}
+
+	for _, child in ipairs(framesContainer:GetChildren()) do
+		if child:IsA("GuiObject") then
+			table.insert(frames, child)
+		end
+	end
+
+	for _, child in ipairs(gameGui:GetChildren()) do
+		if isRootManagedFrame(child) then
+			table.insert(frames, child :: GuiObject)
+		end
+	end
+
+	return frames
 end
 
 local function ensureBlurEffect(): BlurEffect
@@ -72,9 +112,9 @@ local function getVisibleBlockingFrame(): GuiObject?
 		return currentlyOpenFrame
 	end
 
-	for _, child in ipairs(framesContainer:GetChildren()) do
-		if child:IsA("GuiObject") and isBlockingFrame(child) and child.Visible then
-			return child
+	for _, frame in ipairs(getManagedFrames()) do
+		if isBlockingFrame(frame) and frame.Visible then
+			return frame
 		end
 	end
 
@@ -164,6 +204,12 @@ for _, child in ipairs(framesContainer:GetChildren()) do
 	trackFrame(child)
 end
 
+for _, child in ipairs(gameGui:GetChildren()) do
+	if isRootManagedFrame(child) then
+		trackFrame(child)
+	end
+end
+
 framesContainer.ChildAdded:Connect(function(child)
 	trackFrame(child)
 	task.defer(syncFrameState)
@@ -172,6 +218,20 @@ end)
 framesContainer.ChildRemoved:Connect(function(child)
 	untrackFrame(child)
 	task.defer(syncFrameState)
+end)
+
+gameGui.ChildAdded:Connect(function(child)
+	if isRootManagedFrame(child) then
+		trackFrame(child)
+		task.defer(syncFrameState)
+	end
+end)
+
+gameGui.ChildRemoved:Connect(function(child)
+	if isRootManagedFrame(child) then
+		untrackFrame(child)
+		task.defer(syncFrameState)
+	end
 end)
 
 function FrameManager.closeCurrent()
@@ -186,8 +246,8 @@ function FrameManager.closeAll(immediate: boolean?)
 	clearQueuedFrameOpen()
 	local visibleFrames = {}
 
-	for _, child in ipairs(framesContainer:GetChildren()) do
-		if child:IsA("GuiObject") and child.Name ~= "Notifications" and child.Visible then
+	for _, child in ipairs(getManagedFrames()) do
+		if child.Name ~= "Notifications" and child.Visible then
 			initializeFrame(child)
 			table.insert(visibleFrames, child)
 		end
@@ -219,9 +279,8 @@ end
 function FrameManager.close(frameName: string)
 	syncFrameState()
 	clearQueuedFrameOpen()
-	local targetFrame = framesContainer:FindFirstChild(frameName)
+	local targetFrame = findManagedFrame(frameName)
 	if not targetFrame or not targetFrame.Visible then return end
-	if not targetFrame:IsA("GuiObject") then return end
 
 	initializeFrame(targetFrame)
 	local hiddenPosition: UDim2 = UDim2.new(framePositions[targetFrame].X.Scale, framePositions[targetFrame].X.Offset, 1.5, 0)
@@ -241,9 +300,8 @@ end
 
 function FrameManager.open(frameName: string)
 	syncFrameState()
-	local targetFrame = framesContainer:FindFirstChild(frameName)
+	local targetFrame = findManagedFrame(frameName)
 	if not targetFrame then return end
-	if not targetFrame:IsA("GuiObject") then return end
 	if currentlyOpenFrame == targetFrame and targetFrame.Visible then
 		if queuedFrameOpenName == frameName then
 			clearQueuedFrameOpen()
@@ -280,9 +338,8 @@ function FrameManager.open(frameName: string)
 end
 
 function FrameManager.connect(button: TextButton | ImageButton, frameName: string, action: "Toggle" | "Open" | "Close"?)
-	local targetFrame = framesContainer:FindFirstChild(frameName)
+	local targetFrame = findManagedFrame(frameName)
 	if not button or not targetFrame then return end
-	if not targetFrame:IsA("GuiObject") then return end
 
 	action = action or "Toggle"
 	initializeFrame(targetFrame)

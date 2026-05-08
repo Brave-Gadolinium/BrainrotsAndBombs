@@ -17,6 +17,7 @@ local RandomObj = Random.new()
 local FREE_SPIN_COOLDOWN_SECONDS = math.max(0, tonumber(Config.FreeSpinCooldownSeconds) or (15 * 60))
 local isProcessingSpin = {}
 local TRANSACTION_TYPES = AnalyticsEconomyService:GetTransactionTypes()
+local dailySpinRewardGrantedRemote: RemoteEvent?
 
 -- Lazy loaded dependencies
 local PlayerController
@@ -53,6 +54,69 @@ local function resolveRandomItemReward(rewardData)
 	resolvedReward.ResolvedDisplayName = selectedItemData.DisplayName or selectedItemName
 	resolvedReward.Image = selectedItemData.ImageId
 	return resolvedReward
+end
+
+local function getRewardDisplayName(rewardData): string
+	if rewardData.Type == "Cash" and type(rewardData.Amount) == "number" then
+		return rewardData.DisplayName or (`${NumberFormatter.Format(rewardData.Amount)} cash`)
+	end
+
+	if rewardData.Type == "Spins" and type(rewardData.Amount) == "number" then
+		return rewardData.DisplayName or (`+{rewardData.Amount} spins`)
+	end
+
+	if rewardData.Type == "Item" or rewardData.Type == "RandomItemByRarity" then
+		local itemData = type(rewardData.Name) == "string" and ItemConfigurations.GetItemData(rewardData.Name) or nil
+		return (itemData and itemData.DisplayName) or rewardData.ResolvedDisplayName or rewardData.DisplayName or rewardData.Name or "Reward"
+	end
+
+	if rewardData.Type == "Pickaxe" then
+		return rewardData.DisplayName or rewardData.PickaxeName or "Bomb reward"
+	end
+
+	return rewardData.DisplayName or rewardData.Name or "Reward"
+end
+
+local function getRewardIcon(rewardData): string
+	if (rewardData.Type == "Item" or rewardData.Type == "RandomItemByRarity") and type(rewardData.Name) == "string" then
+		local itemData = ItemConfigurations.GetItemData(rewardData.Name)
+		if itemData and type(itemData.ImageId) == "string" then
+			return itemData.ImageId
+		end
+	end
+
+	return rewardData.Image or ""
+end
+
+local function getRewardChanceText(rewardData): string
+	local displayChance = (rewardData :: any).DisplayChance
+	if type(displayChance) == "string" then
+		return displayChance
+	end
+
+	local totalWeight = Config.GetTotalWeight()
+	local chance = tonumber(rewardData.Chance) or 0
+	if totalWeight <= 0 or chance <= 0 then
+		return ""
+	end
+
+	return string.format("%.0f%%", (chance / totalWeight) * 100)
+end
+
+local function fireRewardGranted(player: Player, index: number, rewardData)
+	if not dailySpinRewardGrantedRemote then
+		return
+	end
+
+	dailySpinRewardGrantedRemote:FireClient(player, {
+		sourceFrame = "Wheel",
+		index = index,
+		reward = {
+			name = getRewardDisplayName(rewardData),
+			icon = getRewardIcon(rewardData),
+		},
+		chanceText = getRewardChanceText(rewardData),
+	})
 end
 
 function DailySpinController:HandleSpin(player: Player)
@@ -214,6 +278,7 @@ function DailySpinController:HandleSpin(player: Player)
 			if showNotif then showNotif:FireClient(player, "You got " .. pickaxeName .. "!", "Success") end
 		end
 
+		fireRewardGranted(player, index, resolvedRewardData)
 		AnalyticsFunnelsService:HandleDailySpinRewardGranted(player, resolvedRewardData)
 	end)
 
@@ -228,6 +293,12 @@ function DailySpinController:Init(controllers)
 	local events = ReplicatedStorage:WaitForChild("Events")
 	local remote = events:FindFirstChild("RequestSpin") or Instance.new("RemoteFunction", events)
 	remote.Name = "RequestSpin"
+	dailySpinRewardGrantedRemote = events:FindFirstChild("DailySpinRewardGranted") :: RemoteEvent?
+	if not dailySpinRewardGrantedRemote then
+		dailySpinRewardGrantedRemote = Instance.new("RemoteEvent")
+		dailySpinRewardGrantedRemote.Name = "DailySpinRewardGranted"
+		dailySpinRewardGrantedRemote.Parent = events
+	end
 
 	remote.OnServerInvoke = function(player) return self:HandleSpin(player) end
 

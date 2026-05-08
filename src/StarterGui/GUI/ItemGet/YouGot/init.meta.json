@@ -1,0 +1,7 @@
+{
+  "className": "TextLabel",
+  "properties": {
+    "Text": "You got Reward"
+  },
+  "ignoreUnknownInstances": true
+}

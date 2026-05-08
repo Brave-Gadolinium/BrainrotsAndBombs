@@ -19,6 +19,10 @@ local TerrainGeneratorManager = require(ServerScriptService.Modules.TerrainGener
 
 type CandyReward = CandyEventConfiguration.CandyReward
 type CandyEventState = CandyEventConfiguration.CandyEventState
+type ClientRewardData = {
+	name: string?,
+	icon: string?,
+}
 
 local CandyEventService = {}
 
@@ -37,6 +41,7 @@ local candyEventRemotes: Folder
 local getStateRemote: RemoteFunction
 local spinRemote: RemoteFunction
 local stateUpdatedRemote: RemoteEvent
+local rewardGrantedRemote: RemoteEvent
 
 local finishEvent: BindableEvent
 local roundStartedEvent: BindableEvent
@@ -329,72 +334,124 @@ local function getUpgradeConfigById(upgradeId: string)
 	return nil
 end
 
-local function grantItemReward(player: Player, itemName: string): boolean
+local function formatDisplayChance(reward: CandyReward): string
+	local displayChance = tonumber(reward.DisplayChance) or 0
+	if displayChance <= 0 then
+		return ""
+	end
+
+	if math.floor(displayChance) == displayChance then
+		return string.format("%d%%", displayChance)
+	end
+
+	return string.format("%.1f%%", displayChance)
+end
+
+local function fireRewardGranted(player: Player, index: number, reward: CandyReward, clientRewardData: ClientRewardData?)
+	if not rewardGrantedRemote then
+		return
+	end
+
+	local rewardData = clientRewardData or {}
+	rewardGrantedRemote:FireClient(player, {
+		sourceFrame = "CandyWheel",
+		index = index,
+		reward = {
+			name = rewardData.name or reward.DisplayName,
+			icon = rewardData.icon or reward.Image or "",
+		},
+		chanceText = formatDisplayChance(reward),
+	})
+end
+
+local function grantItemReward(player: Player, itemName: string): (boolean, ClientRewardData?)
 	local itemData = ItemConfigurations.GetItemData(itemName)
 	if not itemData then
-		return false
+		return false, nil
 	end
 
 	local tool = ItemManager.GiveItemToPlayer(player, itemName, "Normal", itemData.Rarity, 1)
 	if not tool then
-		return false
+		return false, nil
 	end
 
 	local totalCollected = PlayerController:IncrementBrainrotsCollected(player, 1)
 	BadgeManager:EvaluateBrainrotMilestones(player, itemData.Rarity, totalCollected)
 	showNotification(player, "You got " .. (itemData.DisplayName or itemName) .. "!", "Success")
-	return true
+	return true, {
+		name = itemData.DisplayName or itemName,
+		icon = itemData.ImageId,
+	}
 end
 
-local function grantRandomRarityReward(player: Player, rarity: string): boolean
+local function grantRandomRarityReward(player: Player, rarity: string): (boolean, ClientRewardData?)
 	local itemNames = ItemConfigurations.GetItemsByRarity(rarity)
 	if #itemNames == 0 then
-		return false
+		return false, nil
 	end
 
 	local itemName = itemNames[RandomObject:NextInteger(1, #itemNames)]
 	return grantItemReward(player, itemName)
 end
 
-local function grantMoneyReward(player: Player, amount: number): boolean
+local function grantMoneyReward(player: Player, amount: number): (boolean, ClientRewardData?)
 	if amount <= 0 then
-		return false
+		return false, nil
 	end
 
 	PlayerController:AddMoney(player, amount)
 	showNotification(player, "You got $" .. NumberFormatter.Format(amount) .. "!", "Success")
-	return true
+	return true, {
+		name = "$" .. NumberFormatter.Format(amount) .. " Money",
+		icon = MONEY_IMAGE,
+	}
 end
 
-local function grantUpgradeReward(player: Player, upgradeId: string, amount: number): boolean
+local function grantUpgradeReward(player: Player, upgradeId: string, amount: number): (boolean, ClientRewardData?)
 	local config = getUpgradeConfigById(upgradeId)
 	if not config or type(config.StatId) ~= "string" or config.StatId == "" then
-		return false
+		return false, nil
 	end
 
 	PlayerController:AddUpgradeStat(player, config.StatId, amount)
 	showNotification(player, "You got " .. (config.DisplayName or "+1 upgrade") .. "!", "Success")
-	return true
+	return true, {
+		name = config.DisplayName or "+1 upgrade",
+		icon = config.ImageId,
+	}
 end
 
-local function applyReward(player: Player, reward: CandyReward): boolean
+local function applyReward(player: Player, reward: CandyReward): (boolean, ClientRewardData?)
+	local success = false
+	local clientRewardData: ClientRewardData? = nil
+
 	if reward.Type == "Item" and type(reward.ItemName) == "string" then
-		return grantItemReward(player, reward.ItemName)
+		success, clientRewardData = grantItemReward(player, reward.ItemName)
+	elseif reward.Type == "RandomItemByRarity" and type(reward.Rarity) == "string" then
+		success, clientRewardData = grantRandomRarityReward(player, reward.Rarity)
+	elseif reward.Type == "Money" and type(reward.Amount) == "number" then
+		success, clientRewardData = grantMoneyReward(player, reward.Amount)
+	elseif reward.Type == "UpgradeStat" and type(reward.UpgradeId) == "string" then
+		success, clientRewardData = grantUpgradeReward(player, reward.UpgradeId, math.max(1, math.floor(tonumber(reward.Amount) or 1)))
 	end
 
-	if reward.Type == "RandomItemByRarity" and type(reward.Rarity) == "string" then
-		return grantRandomRarityReward(player, reward.Rarity)
+	if not success then
+		return false, nil
 	end
 
-	if reward.Type == "Money" and type(reward.Amount) == "number" then
-		return grantMoneyReward(player, reward.Amount)
+	if not clientRewardData then
+		clientRewardData = {}
 	end
 
-	if reward.Type == "UpgradeStat" and type(reward.UpgradeId) == "string" then
-		return grantUpgradeReward(player, reward.UpgradeId, math.max(1, math.floor(tonumber(reward.Amount) or 1)))
+	if type(clientRewardData.name) ~= "string" or clientRewardData.name == "" then
+		clientRewardData.name = reward.DisplayName
 	end
 
-	return false
+	if type(clientRewardData.icon) ~= "string" or clientRewardData.icon == "" then
+		clientRewardData.icon = reward.Image
+	end
+
+	return true, clientRewardData
 end
 
 local function getPublicState(nowOverride: number?): CandyEventState
@@ -658,9 +715,13 @@ function CandyEventService:HandleSpin(player: Player)
 			return
 		end
 
-		if not applyReward(player, reward) then
+		local rewardGranted, clientRewardData = applyReward(player, reward)
+		if not rewardGranted then
 			warn("[CandyEventService] Failed to apply reward", reward.DisplayName)
+			return
 		end
+
+		fireRewardGranted(player, rewardIndex, reward, clientRewardData)
 	end)
 
 	return {
@@ -700,6 +761,7 @@ function CandyEventService:Init(controllers)
 	candyEventRemotes = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("CandyEvent")
 	getStateRemote = candyEventRemotes:WaitForChild("GetState") :: RemoteFunction
 	spinRemote = candyEventRemotes:WaitForChild("Spin") :: RemoteFunction
+	rewardGrantedRemote = candyEventRemotes:WaitForChild("RewardGranted") :: RemoteEvent
 	stateUpdatedRemote = candyEventRemotes:WaitForChild("StateUpdated") :: RemoteEvent
 
 	getStateRemote.OnServerInvoke = function(player)

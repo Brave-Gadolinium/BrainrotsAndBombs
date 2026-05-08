@@ -918,13 +918,14 @@ local function setMaskedGuiEnabled(instance: Instance, enabled: boolean)
 		return
 	end
 
-	local currentEnabled = (instance :: any).Enabled
+	local enabledInstance = instance :: any
+	local currentEnabled = enabledInstance.Enabled
 	if maskedGuiEnabled[instance] == nil or currentEnabled ~= enabled then
 		maskedGuiEnabled[instance] = currentEnabled
 	end
 
 	if currentEnabled ~= enabled then
-		(instance :: any).Enabled = enabled
+		enabledInstance.Enabled = enabled
 	end
 end
 
@@ -945,8 +946,9 @@ local function restoreMaskedGuiEnabled(instance: Instance)
 
 	maskedGuiEnabled[instance] = nil
 	if instance.Parent and isMaskableEnabledInstance(instance) then
-		if (instance :: any).Enabled ~= originalEnabled then
-			(instance :: any).Enabled = originalEnabled
+		local enabledInstance = instance :: any
+		if enabledInstance.Enabled ~= originalEnabled then
+			enabledInstance.Enabled = originalEnabled
 		end
 	end
 end
@@ -1197,8 +1199,9 @@ local function createTutorialGuiProxyButton(targetButton: GuiButton)
 	proxyButton.Active = isInteractiveProxy
 	proxyButton.Selectable = isInteractiveProxy
 	proxyButton.AutoButtonColor = false
+	local proxyButtonWithInteractable = proxyButton :: any
 	pcall(function()
-		(proxyButton :: any).Interactable = isInteractiveProxy
+		proxyButtonWithInteractable.Interactable = isInteractiveProxy
 	end)
 	proxyButton.Parent = tutorialGuiOverlay
 	tutorialGuiProxyButton = proxyButton

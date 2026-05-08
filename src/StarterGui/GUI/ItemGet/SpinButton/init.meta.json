@@ -1,0 +1,7 @@
+{
+  "className": "TextButton",
+  "properties": {
+    "Text": "Spin Again"
+  },
+  "ignoreUnknownInstances": true
+}

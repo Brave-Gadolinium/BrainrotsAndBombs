@@ -45,6 +45,7 @@ local EVENT_DESCRIPTORS: {RemoteDescriptor} = {
 	{Name = "RequestGroupReward", ClassName = "RemoteFunction"},
 	{Name = "RequestLimitedProductPrompt", ClassName = "RemoteFunction"},
 	{Name = "RequestSpin", ClassName = "RemoteFunction"},
+	{Name = "DailySpinRewardGranted", ClassName = "RemoteEvent"},
 	{Name = "GetIndexData", ClassName = "RemoteFunction"},
 }
 
@@ -100,6 +101,7 @@ local REMOTE_NAMESPACES: {NamespaceDescriptor} = {
 		Children = {
 			{Name = "GetState", ClassName = "RemoteFunction"},
 			{Name = "Spin", ClassName = "RemoteFunction"},
+			{Name = "RewardGranted", ClassName = "RemoteEvent"},
 			{Name = "StateUpdated", ClassName = "RemoteEvent"},
 		},
 	},

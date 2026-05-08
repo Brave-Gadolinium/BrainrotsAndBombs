@@ -1,0 +1,7 @@
+{
+  "className": "Frame",
+  "properties": {
+    "Visible": false
+  },
+  "ignoreUnknownInstances": true
+}
